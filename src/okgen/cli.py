@@ -14,7 +14,9 @@ from pathlib import Path
 
 from okgen.detect import detect_layout
 from okgen.layout.compiler import compile_dir
+from okgen.layout.registry import LayoutRegistry
 from okgen.layout.validate import validate_layout
+from okgen.okfile import parse_okfile
 
 # Base layout/sample data ships in the repo under data/OkFileDefinitions.
 # Override with the OKGEN_DATA_DIR env var to point elsewhere.
@@ -94,6 +96,34 @@ def _cmd_detect(args: argparse.Namespace) -> int:
     return 0 if not any_unmatched else 1
 
 
+def _cmd_parse(args: argparse.Namespace) -> int:
+    path = Path(args.file)
+    if not path.is_file():
+        print(f"error: file not found: {path}", file=sys.stderr)
+        return 2
+
+    registry = LayoutRegistry.from_dir(args.data_dir)
+    okf = parse_okfile(path, registry=registry)
+
+    print(f"{path.name}: layout={okf.layout.name}  records={len(okf.records)}")
+
+    # Byte-exact round-trip check.
+    roundtrip_ok = okf.to_bytes() == path.read_bytes()
+    print(f"round-trip: {'IDENTICAL' if roundtrip_ok else 'DIFFERS'}")
+
+    print("sections:")
+    for name, recs in okf.sections().items():
+        print(f"  {name:<14} {len(recs)} record(s)")
+
+    if args.show:
+        for name, recs in okf.sections().items():
+            print(f"\n[{name}] first record fields:")
+            for fname, val in recs[0].values().items():
+                print(f"    {fname:<22} = {val!r}")
+
+    return 0 if roundtrip_ok else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="okgen", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -109,6 +139,13 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("files", nargs="+", help="path(s) to .OK file(s)")
     d.add_argument("-v", "--verbose", action="store_true", help="show marker/header")
     d.set_defaults(func=_cmd_detect)
+
+    p = sub.add_parser("parse", help="Parse an OK file and verify byte-exact round-trip")
+    p.add_argument("file", help="path to a .OK file")
+    p.add_argument("--data-dir", default=DEFAULT_DATA_DIR,
+                   help=f"dir with *.xlsx layouts (default: {DEFAULT_DATA_DIR})")
+    p.add_argument("--show", action="store_true", help="print first record's fields per section")
+    p.set_defaults(func=_cmd_parse)
     return parser
 
 
