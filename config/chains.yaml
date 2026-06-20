@@ -1,0 +1,35 @@
+# Chain registry: maps the 2-char `chain` code (header position 1, size 2)
+# to a retail brand. Used for the file-tree icons and for showing the chain
+# as a name instead of a number. Edit freely.
+#
+#   code:  the 2-char value found in the OK header
+#   name:  brand name shown to the user
+#   short: short badge text used if no icon image is available
+#   color: badge color (hex) for the tree icon
+#   icon:  optional path (relative to the frontend assets) to a logo image
+chains:
+  "01":
+    name: TJMAXX
+    short: TJX
+    color: "#C8102E"
+    icon: null
+  "02":
+    name: Marshalls
+    short: MAR
+    color: "#0033A0"
+    icon: null
+  "03":
+    name: Homegoods
+    short: HG
+    color: "#00843D"
+    icon: null
+  "04":
+    name: Winners
+    short: WIN
+    color: "#5A2D81"
+    icon: null
+  "06":
+    name: HomeSense
+    short: HS
+    color: "#E87722"
+    icon: null

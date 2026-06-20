@@ -1,0 +1,44 @@
+# Display-label config: show coded field values as friendly strings.
+#
+# Each rule maps a field's raw codes to labels. A rule applies to a file when
+# its `match` criteria fit. Omit a criterion (or set it to "*") to match any
+# value. When several rules match the same field, the MOST SPECIFIC one wins
+# (the one matching the most of chain/layout/format).
+#
+# match keys:
+#   chain   2-char chain code ("01".."06"), or "*"  (any)
+#   layout  layout name (CartonLabel | DistLabels | Preticket | StyleHeader), or "*"
+#   format  the `format` field value (e.g. A, B, L, 1, 7), or "*"
+#   field   REQUIRED — the output_field_name this rule applies to
+#
+# values: { raw_code: "Label shown to user", ... }
+#
+# Notes:
+#   - The `chain` field itself is labeled from chains.yaml; you don't need a
+#     rule for it here (but one here would override).
+#   - In the editor, a field that has a values map is shown as a dropdown of
+#     these labels; saving writes the underlying code at the fixed position.
+rules:
+  # ---- generic (any chain/layout/format) ----
+  - match: {field: indicator}
+    values: {Y: "Yes", N: "No"}
+
+  - match: {field: psi}
+    values: {Y: "Yes", N: "No"}
+
+  - match: {field: prflag}
+    values: {Y: "Yes", N: "No"}
+
+  - match: {field: comp_up}
+    values: {Y: "Compare-at & Up", N: "Standard"}
+
+  # ---- examples of chain/layout/format-specific overrides ----
+  # Replace/extend these with your real format meanings.
+  - match: {layout: StyleHeader, field: format}
+    values:
+      A: "Format A"
+      B: "Format B"
+
+  - match: {chain: "03", layout: StyleHeader, format: A, field: format}
+    values:
+      A: "Regular Tag (Homegoods)"

@@ -1,0 +1,129 @@
+"""Tests for the backend service + FastAPI endpoints."""
+
+import os
+import shutil
+from pathlib import Path
+
+import pytest
+
+from okgen.api import service
+from okgen.config import Config
+from okgen.layout.registry import LayoutRegistry
+
+DATA_DIR = Path(
+    os.environ.get(
+        "OKGEN_DATA_DIR",
+        str(Path(__file__).resolve().parents[1] / "data" / "OkFileDefinitions"),
+    )
+)
+
+pytestmark = pytest.mark.skipif(
+    not DATA_DIR.is_dir(), reason=f"sample data dir not present: {DATA_DIR}"
+)
+
+
+@pytest.fixture(scope="module")
+def registry():
+    return LayoutRegistry.from_dir(DATA_DIR)
+
+
+@pytest.fixture(scope="module")
+def config():
+    return Config.load()
+
+
+def test_build_tree_only_ok_files(config):
+    tree = service.build_tree(DATA_DIR, config)
+    assert tree["type"] == "folder"
+    files = [c for c in tree["children"] if c["type"] == "file"]
+    assert files, "expected .OK files in tree"
+    assert all(f["name"].lower().endswith(".ok") for f in files)
+    # No .xlsx leaked into the tree.
+    assert not any(f["name"].lower().endswith(".xlsx") for f in files)
+    # StyleHeader file carries chain 03 -> Homegoods.
+    style = next(f for f in files if f["name"] == "StyleHeader.OK")
+    assert style["chain"] == "03"
+    assert style["chain_info"]["name"] == "Homegoods"
+    assert style["layout"] == "StyleHeader"
+
+
+def test_parse_file_view_shape(registry, config):
+    view = service.parse_file_view(DATA_DIR / "StyleHeader.OK", registry, config)
+    assert view["layout"] == "StyleHeader"
+    assert view["chain"] == "03"
+    names = [s["name"] for s in view["sections"]]
+    assert "Lane" in names and "Size" in names
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+    assert len(lane["records"]) == 10            # all lanes shown
+    assert "lane2" in lane["ignored_fields"]      # unsized fields ignored
+    # 'indicator' field carries dropdown options from display.yaml.
+    header = view["sections"][0]
+    ind = next(f for f in header["fields"] if f["name"] == "indicator")
+    assert ind["options"] == {"Y": "Yes", "N": "No"}
+
+
+def test_save_roundtrip_and_edit(tmp_path, registry, config):
+    src = DATA_DIR / "CartonLabel.OK"
+    work = tmp_path / "CartonLabel.OK"
+    shutil.copy2(src, work)
+    original = work.read_bytes()
+
+    # No-op save must be byte-identical.
+    res = service.apply_edits(work, [], registry, backup=False)
+    assert res["roundtrip_ok"]
+    assert work.read_bytes() == original
+
+    # Edit chain in the header (section 0, record 0).
+    res = service.apply_edits(
+        work,
+        [{"section_index": 0, "record_index": 0, "field": "chain", "value": "07"}],
+        registry,
+        backup=False,
+    )
+    assert res["edits_applied"] == 1
+    view = service.parse_file_view(work, registry, config)
+    assert view["sections"][0]["records"][0]["values"]["chain"] == "07"
+
+
+def test_save_rejects_too_wide_value(tmp_path, registry):
+    src = DATA_DIR / "CartonLabel.OK"
+    work = tmp_path / "CartonLabel.OK"
+    shutil.copy2(src, work)
+    with pytest.raises(service.EditError):
+        service.apply_edits(
+            work,
+            [{"section_index": 0, "record_index": 0, "field": "chain", "value": "123"}],
+            registry,
+            backup=False,
+        )
+
+
+def test_save_as_and_copy_delete(tmp_path, registry):
+    src = DATA_DIR / "DistLabels.OK"
+    work = tmp_path / "DistLabels.OK"
+    shutil.copy2(src, work)
+
+    # Save As to a new path.
+    other = tmp_path / "DistLabels_copy.OK"
+    service.apply_edits(work, [], registry, target_path=str(other), backup=False)
+    assert other.exists()
+
+    # Copy + delete file ops.
+    dst = tmp_path / "DistLabels_copy2.OK"
+    service.copy_file(work, dst)
+    assert dst.exists()
+    service.delete_file(dst)
+    assert not dst.exists()
+
+
+def test_fastapi_endpoints():
+    from fastapi.testclient import TestClient
+
+    from okgen.api.app import create_app
+
+    client = TestClient(create_app(data_dir=DATA_DIR))
+    assert client.get("/api/health").json()["ok"] is True
+    chains = client.get("/api/chains").json()
+    assert chains["03"]["name"] == "Homegoods"
+    parsed = client.get("/api/parse", params={"path": str(DATA_DIR / "StyleHeader.OK")}).json()
+    assert parsed["layout"] == "StyleHeader"

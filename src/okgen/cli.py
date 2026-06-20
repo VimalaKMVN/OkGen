@@ -162,7 +162,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=0,
                    help="max records shown per multi-record section (0 = all)")
     p.set_defaults(func=_cmd_parse)
+
+    s = sub.add_parser("serve", help="Run the editor backend (FastAPI)")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8000)
+    s.add_argument("--data-dir", default=DEFAULT_DATA_DIR)
+    s.add_argument("--config-dir", default=None)
+    s.set_defaults(func=_cmd_serve)
     return parser
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    import uvicorn
+
+    from okgen.api.app import create_app
+
+    app = create_app(data_dir=args.data_dir, config_dir=args.config_dir)
+    print(f"OkGen API on http://{args.host}:{args.port}  (docs at /docs)")
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
 
 
 def main(argv=None) -> int:

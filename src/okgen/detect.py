@@ -74,3 +74,13 @@ def detect_layout(path) -> DetectionResult:
     """Detect the layout for an OK file at ``path``."""
     header = read_header_line(Path(path))
     return detect_from_header(header)
+
+
+def read_chain(path) -> str:
+    """Return the 2-char chain code from an OK file header (cheap, no full parse).
+
+    The chain is at xlsx Position 1, size 2 — i.e. raw header chars 2..3,
+    right after the 1-char record marker.
+    """
+    header = read_header_line(Path(path))
+    return header[1:3]
