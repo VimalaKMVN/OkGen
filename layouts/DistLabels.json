@@ -1,0 +1,325 @@
+{
+  "name": "DistLabels",
+  "source_file": "TJXNA_DistLabelsLayout.xlsx",
+  "ticket_process": "Distribution Label",
+  "issues": [],
+  "sections": [
+    {
+      "name": "Header",
+      "tab": "Header",
+      "record_length": 80,
+      "sample_record": "017119938A  66725627200611211021000000000000002999#BLK INTUITION WOMENS SNELURS",
+      "issues": [],
+      "fields": [
+        {
+          "name": "chain",
+          "field_name": "chain",
+          "size": 2,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "01",
+          "field_id": "field123",
+          "issues": []
+        },
+        {
+          "name": "format",
+          "field_name": "format",
+          "size": 1,
+          "start": 3,
+          "field_type": "char",
+          "declared_position": 3,
+          "sample_value": "7",
+          "field_id": "field124",
+          "issues": []
+        },
+        {
+          "name": "keytrol",
+          "field_name": "keytrol",
+          "size": 6,
+          "start": 4,
+          "field_type": "char",
+          "declared_position": 4,
+          "sample_value": "119938",
+          "field_id": "field125",
+          "issues": []
+        },
+        {
+          "name": "hsuffix",
+          "field_name": "hsuffix",
+          "size": 3,
+          "start": 10,
+          "field_type": "char",
+          "declared_position": 10,
+          "sample_value": "A  ",
+          "field_id": "field126",
+          "issues": []
+        },
+        {
+          "name": "style",
+          "field_name": "style",
+          "size": 6,
+          "start": 13,
+          "field_type": "char",
+          "declared_position": 13,
+          "sample_value": "667256",
+          "field_id": "field127",
+          "issues": []
+        },
+        {
+          "name": "dept",
+          "field_name": "dept",
+          "size": 2,
+          "start": 19,
+          "field_type": "char",
+          "declared_position": 19,
+          "sample_value": "27",
+          "field_id": "field128",
+          "issues": []
+        },
+        {
+          "name": "date",
+          "field_name": "date",
+          "size": 8,
+          "start": 21,
+          "field_type": "char",
+          "declared_position": 21,
+          "sample_value": "20061121",
+          "field_id": "field129",
+          "issues": []
+        },
+        {
+          "name": "store_lines",
+          "field_name": "store_lines",
+          "size": 4,
+          "start": 29,
+          "field_type": "char",
+          "declared_position": 29,
+          "sample_value": "1021",
+          "field_id": "field130",
+          "issues": []
+        },
+        {
+          "name": "t_lines",
+          "field_name": "t_lines",
+          "size": 3,
+          "start": 33,
+          "field_type": "char",
+          "declared_position": 33,
+          "sample_value": "000",
+          "field_id": "field131",
+          "issues": []
+        },
+        {
+          "name": "housenum",
+          "field_name": "housenum",
+          "size": 9,
+          "start": 36,
+          "field_type": "char",
+          "declared_position": 36,
+          "sample_value": "000000000",
+          "field_id": "field132",
+          "issues": []
+        },
+        {
+          "name": "price",
+          "field_name": "price",
+          "size": 6,
+          "start": 45,
+          "field_type": "char",
+          "declared_position": 45,
+          "sample_value": "002999",
+          "field_id": "field133",
+          "issues": []
+        },
+        {
+          "name": "desc",
+          "field_name": "desc",
+          "size": 25,
+          "start": 51,
+          "field_type": "char",
+          "declared_position": 51,
+          "sample_value": "#BLK INTUITION WOMENS SNE",
+          "field_id": "field134",
+          "issues": []
+        },
+        {
+          "name": "area",
+          "field_name": "area",
+          "size": 5,
+          "start": 76,
+          "field_type": "char",
+          "declared_position": 76,
+          "sample_value": "LURS",
+          "field_id": "field135",
+          "issues": []
+        }
+      ]
+    },
+    {
+      "name": "Store",
+      "tab": "Store ",
+      "record_length": 32,
+      "sample_record": "0158N00000000012  00000000122280",
+      "issues": [],
+      "fields": [
+        {
+          "name": "store",
+          "field_name": "store",
+          "size": 4,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "0158",
+          "field_id": "field136",
+          "issues": []
+        },
+        {
+          "name": "prflag",
+          "field_name": "prflag",
+          "size": 1,
+          "start": 5,
+          "field_type": "char",
+          "declared_position": 5,
+          "sample_value": "N",
+          "field_id": "field137",
+          "issues": []
+        },
+        {
+          "name": "seq",
+          "field_name": "seq",
+          "size": 6,
+          "start": 6,
+          "field_type": "char",
+          "declared_position": 6,
+          "sample_value": "000000",
+          "field_id": "field138",
+          "issues": []
+        },
+        {
+          "name": "units",
+          "field_name": "units",
+          "size": 5,
+          "start": 12,
+          "field_type": "char",
+          "declared_position": 12,
+          "sample_value": "00012",
+          "field_id": "field139",
+          "issues": []
+        },
+        {
+          "name": "distr_type",
+          "field_name": "distr_type",
+          "size": 2,
+          "start": 17,
+          "field_type": "char",
+          "declared_position": 17,
+          "sample_value": "  ",
+          "field_id": "field140",
+          "issues": []
+        },
+        {
+          "name": "ad",
+          "field_name": "ad",
+          "size": 4,
+          "start": 19,
+          "field_type": "char",
+          "declared_position": 19,
+          "sample_value": "0000",
+          "field_id": "field141",
+          "issues": []
+        },
+        {
+          "name": "store_qty",
+          "field_name": "qty",
+          "size": 5,
+          "start": 23,
+          "field_type": "char",
+          "declared_position": 23,
+          "sample_value": "00001",
+          "field_id": "field142",
+          "issues": []
+        },
+        {
+          "name": "cartseq",
+          "field_name": "cartseq",
+          "size": 5,
+          "start": 28,
+          "field_type": "char",
+          "declared_position": 28,
+          "sample_value": "22280",
+          "field_id": "field143",
+          "issues": []
+        },
+        {
+          "name": "store_totqty",
+          "field_name": "tot_qty",
+          "size": null,
+          "start": 33,
+          "field_type": "char",
+          "declared_position": 33,
+          "sample_value": "#VALUE!",
+          "field_id": "field160",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "TSticker",
+      "tab": "TSticker",
+      "record_length": 14,
+      "sample_record": "00022001000001",
+      "issues": [],
+      "fields": [
+        {
+          "name": "packs",
+          "field_name": "packs",
+          "size": 5,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "00022",
+          "field_id": "field144",
+          "issues": []
+        },
+        {
+          "name": "pack_sz",
+          "field_name": "pack_sz",
+          "size": 4,
+          "start": 6,
+          "field_type": "char",
+          "declared_position": 6,
+          "sample_value": "0010",
+          "field_id": "field145",
+          "issues": []
+        },
+        {
+          "name": "tsticker_qty",
+          "field_name": "qty",
+          "size": 5,
+          "start": 10,
+          "field_type": "char",
+          "declared_position": 10,
+          "sample_value": "00001",
+          "field_id": "field146",
+          "issues": []
+        },
+        {
+          "name": "tsticker_totqty",
+          "field_name": "tot_qty",
+          "size": null,
+          "start": 15,
+          "field_type": "char",
+          "declared_position": 15,
+          "sample_value": "#VALUE!",
+          "field_id": "field161",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        }
+      ]
+    }
+  ]
+}

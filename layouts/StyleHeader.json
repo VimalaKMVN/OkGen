@@ -1,0 +1,570 @@
+{
+  "name": "StyleHeader",
+  "source_file": "TJXNA_StyleHeaderLayout.xlsx",
+  "ticket_process": "Style Header",
+  "issues": [],
+  "sections": [
+    {
+      "name": "Header",
+      "tab": "Header",
+      "record_length": 249,
+      "sample_record": "03NB509364AA 1T:2122496201009080751INITIAL   LUDBNGUM       A600718-8IN MULTI VOTIVE         3412331591741N                    002400N00079900000670000000000000910090100                                                                                \\",
+      "issues": [],
+      "fields": [
+        {
+          "name": "chain",
+          "field_name": "chain",
+          "size": 2,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "03",
+          "field_id": "field007",
+          "issues": []
+        },
+        {
+          "name": "indicator",
+          "field_name": "indicator",
+          "size": 1,
+          "start": 3,
+          "field_type": "char",
+          "declared_position": 3,
+          "sample_value": "N",
+          "field_id": "field008",
+          "issues": []
+        },
+        {
+          "name": "format",
+          "field_name": "format",
+          "size": 1,
+          "start": 4,
+          "field_type": "char",
+          "declared_position": 4,
+          "sample_value": "B",
+          "field_id": "field009",
+          "issues": []
+        },
+        {
+          "name": "keytrol",
+          "field_name": "keytrol",
+          "size": 6,
+          "start": 5,
+          "field_type": "char",
+          "declared_position": 5,
+          "sample_value": "509364",
+          "field_id": "field010",
+          "issues": []
+        },
+        {
+          "name": "suffix",
+          "field_name": "suffix",
+          "size": 3,
+          "start": 11,
+          "field_type": "char",
+          "declared_position": 11,
+          "sample_value": "AA ",
+          "field_id": "field011",
+          "issues": []
+        },
+        {
+          "name": "seq_code",
+          "field_name": "seq_code",
+          "size": 1,
+          "start": 14,
+          "field_type": "char",
+          "declared_position": 14,
+          "sample_value": "1",
+          "field_id": "field012",
+          "issues": []
+        },
+        {
+          "name": "pack_id",
+          "field_name": "pack_id",
+          "size": 9,
+          "start": 15,
+          "field_type": "char",
+          "declared_position": 15,
+          "sample_value": "T:2122496",
+          "field_id": "field013",
+          "issues": []
+        },
+        {
+          "name": "date",
+          "field_name": "date",
+          "size": 8,
+          "start": 24,
+          "field_type": "char",
+          "declared_position": 24,
+          "sample_value": "20100908",
+          "field_id": "field014",
+          "issues": []
+        },
+        {
+          "name": "time",
+          "field_name": "time",
+          "size": 4,
+          "start": 32,
+          "field_type": "char",
+          "declared_position": 32,
+          "sample_value": "0751",
+          "field_id": "field015",
+          "issues": []
+        },
+        {
+          "name": "version",
+          "field_name": "version",
+          "size": 10,
+          "start": 36,
+          "field_type": "char",
+          "declared_position": 36,
+          "sample_value": "INITIAL   ",
+          "field_id": "field016",
+          "issues": []
+        },
+        {
+          "name": "area",
+          "field_name": "area",
+          "size": 5,
+          "start": 46,
+          "field_type": "char",
+          "declared_position": 46,
+          "sample_value": "LUDBN",
+          "field_id": "field017",
+          "issues": []
+        },
+        {
+          "name": "instructions",
+          "field_name": "instructions",
+          "size": 10,
+          "start": 51,
+          "field_type": "char",
+          "declared_position": 51,
+          "sample_value": "GUM       ",
+          "field_id": "field018",
+          "issues": []
+        },
+        {
+          "name": "ven_style",
+          "field_name": "ven_style",
+          "size": 8,
+          "start": 61,
+          "field_type": "char",
+          "declared_position": 61,
+          "sample_value": "A600718-",
+          "field_id": "field019",
+          "issues": []
+        },
+        {
+          "name": "desc",
+          "field_name": "desc",
+          "size": 25,
+          "start": 69,
+          "field_type": "char",
+          "declared_position": 69,
+          "sample_value": "8IN MULTI VOTIVE         ",
+          "field_id": "field020",
+          "issues": []
+        },
+        {
+          "name": "dept",
+          "field_name": "dept",
+          "size": 2,
+          "start": 94,
+          "field_type": "char",
+          "declared_position": 94,
+          "sample_value": "34",
+          "field_id": "field021",
+          "issues": []
+        },
+        {
+          "name": "category",
+          "field_name": "category",
+          "size": 4,
+          "start": 96,
+          "field_type": "char",
+          "declared_position": 96,
+          "sample_value": "1233",
+          "field_id": "field022",
+          "issues": []
+        },
+        {
+          "name": "style",
+          "field_name": "style",
+          "size": 6,
+          "start": 100,
+          "field_type": "char",
+          "declared_position": 100,
+          "sample_value": "159174",
+          "field_id": "field023",
+          "issues": []
+        },
+        {
+          "name": "type",
+          "field_name": "type",
+          "size": 1,
+          "start": 106,
+          "field_type": "char",
+          "declared_position": 106,
+          "sample_value": "1",
+          "field_id": "field024",
+          "issues": []
+        },
+        {
+          "name": "psi",
+          "field_name": "psi",
+          "size": 1,
+          "start": 107,
+          "field_type": "char",
+          "declared_position": 107,
+          "sample_value": "N",
+          "field_id": "field025",
+          "issues": []
+        },
+        {
+          "name": "message1",
+          "field_name": "message1",
+          "size": 10,
+          "start": 108,
+          "field_type": "char",
+          "declared_position": 108,
+          "sample_value": "          ",
+          "field_id": "field026",
+          "issues": []
+        },
+        {
+          "name": "message2",
+          "field_name": "message2",
+          "size": 10,
+          "start": 118,
+          "field_type": "char",
+          "declared_position": 118,
+          "sample_value": "          ",
+          "field_id": "field027",
+          "issues": []
+        },
+        {
+          "name": "comp_price",
+          "field_name": "comp_price",
+          "size": 6,
+          "start": 128,
+          "field_type": "char",
+          "declared_position": 128,
+          "sample_value": "002400",
+          "field_id": "field028",
+          "issues": []
+        },
+        {
+          "name": "comp_up",
+          "field_name": "comp_up",
+          "size": 1,
+          "start": 134,
+          "field_type": "char",
+          "declared_position": 134,
+          "sample_value": "N",
+          "field_id": "field029",
+          "issues": []
+        },
+        {
+          "name": "ret_price",
+          "field_name": "ret_price",
+          "size": 6,
+          "start": 135,
+          "field_type": "char",
+          "declared_position": 135,
+          "sample_value": "000799",
+          "field_id": "field030",
+          "issues": []
+        },
+        {
+          "name": "tot_qty",
+          "field_name": "tot_qty",
+          "size": 7,
+          "start": 141,
+          "field_type": "char",
+          "declared_position": 141,
+          "sample_value": "0000067",
+          "field_id": "field031",
+          "issues": []
+        },
+        {
+          "name": "housenum",
+          "field_name": "housenum",
+          "size": 9,
+          "start": 148,
+          "field_type": "char",
+          "declared_position": 148,
+          "sample_value": "000000000",
+          "field_id": "field032",
+          "issues": []
+        },
+        {
+          "name": "pieces",
+          "field_name": "pieces",
+          "size": 3,
+          "start": 157,
+          "field_type": "char",
+          "declared_position": 157,
+          "sample_value": "000",
+          "field_id": "field033",
+          "issues": []
+        },
+        {
+          "name": "ladder_mmdd",
+          "field_name": "ladder_mmdd",
+          "size": 4,
+          "start": 160,
+          "field_type": "char",
+          "declared_position": 160,
+          "sample_value": "0910",
+          "field_id": "field034",
+          "issues": []
+        },
+        {
+          "name": "ladder",
+          "field_name": "ladder",
+          "size": 2,
+          "start": 164,
+          "field_type": "char",
+          "declared_position": 164,
+          "sample_value": "09",
+          "field_id": "field035",
+          "issues": []
+        },
+        {
+          "name": "lane_rec",
+          "field_name": "lane_rec",
+          "size": 2,
+          "start": 166,
+          "field_type": "char",
+          "declared_position": 166,
+          "sample_value": "01",
+          "field_id": "field036",
+          "issues": []
+        },
+        {
+          "name": "size_rec",
+          "field_name": "size_rec",
+          "size": 2,
+          "start": 168,
+          "field_type": "char",
+          "declared_position": 168,
+          "sample_value": "00",
+          "field_id": "field037",
+          "issues": []
+        },
+        {
+          "name": "item",
+          "field_name": "item",
+          "size": 20,
+          "start": 170,
+          "field_type": "char",
+          "declared_position": 170,
+          "sample_value": "                    ",
+          "field_id": "field180",
+          "issues": []
+        },
+        {
+          "name": "fact1",
+          "field_name": "fact1",
+          "size": 20,
+          "start": 190,
+          "field_type": "char",
+          "declared_position": 190,
+          "sample_value": "                    ",
+          "field_id": "field181",
+          "issues": []
+        },
+        {
+          "name": "fact2",
+          "field_name": "fact2",
+          "size": 20,
+          "start": 210,
+          "field_type": "char",
+          "declared_position": 210,
+          "sample_value": "                    ",
+          "field_id": "field182",
+          "issues": []
+        },
+        {
+          "name": "fact3",
+          "field_name": "fact3",
+          "size": 20,
+          "start": 230,
+          "field_type": "char",
+          "declared_position": 230,
+          "sample_value": "                    ",
+          "field_id": "field183",
+          "issues": []
+        }
+      ]
+    },
+    {
+      "name": "Lane",
+      "tab": "Lane",
+      "record_length": 8,
+      "sample_record": "RCV034  ",
+      "issues": [],
+      "fields": [
+        {
+          "name": "lane1",
+          "field_name": "lane1",
+          "size": 8,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "RCV034  ",
+          "field_id": "field038",
+          "issues": []
+        },
+        {
+          "name": "lane2",
+          "field_name": "lane2",
+          "size": null,
+          "start": 9,
+          "field_type": "char",
+          "declared_position": 9,
+          "sample_value": "#VALUE!",
+          "field_id": "field039",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        },
+        {
+          "name": "lane3",
+          "field_name": "lane3",
+          "size": null,
+          "start": null,
+          "field_type": "char",
+          "declared_position": null,
+          "sample_value": "#VALUE!",
+          "field_id": "field040",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        },
+        {
+          "name": "lane4",
+          "field_name": "lane4",
+          "size": null,
+          "start": null,
+          "field_type": "char",
+          "declared_position": null,
+          "sample_value": "#VALUE!",
+          "field_id": "field041",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        },
+        {
+          "name": "lane5",
+          "field_name": "lane5",
+          "size": null,
+          "start": null,
+          "field_type": "char",
+          "declared_position": null,
+          "sample_value": "#VALUE!",
+          "field_id": "field042",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        },
+        {
+          "name": "lane6",
+          "field_name": "lane6",
+          "size": null,
+          "start": null,
+          "field_type": "char",
+          "declared_position": null,
+          "sample_value": "#VALUE!",
+          "field_id": "field043",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        },
+        {
+          "name": "lane7",
+          "field_name": "lane7",
+          "size": null,
+          "start": null,
+          "field_type": "char",
+          "declared_position": null,
+          "sample_value": "#VALUE!",
+          "field_id": "field044",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        },
+        {
+          "name": "lane8",
+          "field_name": "lane8",
+          "size": null,
+          "start": null,
+          "field_type": "char",
+          "declared_position": null,
+          "sample_value": "#VALUE!",
+          "field_id": "field045",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        },
+        {
+          "name": "lane9",
+          "field_name": "lane9",
+          "size": null,
+          "start": null,
+          "field_type": "char",
+          "declared_position": null,
+          "sample_value": "#VALUE!",
+          "field_id": "field046",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        },
+        {
+          "name": "lane10",
+          "field_name": "lane10",
+          "size": null,
+          "start": null,
+          "field_type": "char",
+          "declared_position": null,
+          "sample_value": "#VALUE!",
+          "field_id": "field047",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Size",
+      "tab": "Size",
+      "record_length": 11,
+      "sample_record": " XS   00026",
+      "issues": [],
+      "fields": [
+        {
+          "name": "size",
+          "field_name": "size",
+          "size": 6,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": " XS   ",
+          "field_id": "field048",
+          "issues": []
+        },
+        {
+          "name": "qty",
+          "field_name": "qty",
+          "size": 5,
+          "start": 7,
+          "field_type": "char",
+          "declared_position": 7,
+          "sample_value": "00026",
+          "field_id": "field049",
+          "issues": []
+        }
+      ]
+    }
+  ]
+}

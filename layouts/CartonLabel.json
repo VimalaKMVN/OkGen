@@ -1,0 +1,413 @@
+{
+  "name": "CartonLabel",
+  "source_file": "TJXNA_CartonLabelLayout.xlsx",
+  "ticket_process": "Carton Label",
+  "issues": [],
+  "sections": [
+    {
+      "name": "Header",
+      "tab": "Header",
+      "record_length": 96,
+      "sample_record": "011C:56745002420110620000001201202807804056199402594000866N  0000C NC 000000    000000000      ",
+      "issues": [],
+      "fields": [
+        {
+          "name": "chain",
+          "field_name": "chain",
+          "size": 2,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "01",
+          "field_id": "field086",
+          "issues": []
+        },
+        {
+          "name": "format",
+          "field_name": "format",
+          "size": 1,
+          "start": 3,
+          "field_type": "char",
+          "declared_position": 3,
+          "sample_value": "1",
+          "field_id": "field087",
+          "issues": []
+        },
+        {
+          "name": "picklist_pre",
+          "field_name": "picklist_pre",
+          "size": 2,
+          "start": 4,
+          "field_type": "char",
+          "declared_position": 4,
+          "sample_value": "C:",
+          "field_id": "field088",
+          "issues": []
+        },
+        {
+          "name": "picklist_id",
+          "field_name": "picklist_id",
+          "size": 5,
+          "start": 6,
+          "field_type": "char",
+          "declared_position": 6,
+          "sample_value": "56745",
+          "field_id": "field089",
+          "issues": []
+        },
+        {
+          "name": "picklist_seq",
+          "field_name": "picklist_seq",
+          "size": 4,
+          "start": 11,
+          "field_type": "char",
+          "declared_position": 11,
+          "sample_value": "0024",
+          "field_id": "field090",
+          "issues": []
+        },
+        {
+          "name": "distro_date",
+          "field_name": "distro_date",
+          "size": 8,
+          "start": 15,
+          "field_type": "char",
+          "declared_position": 15,
+          "sample_value": "20110620",
+          "field_id": "field091",
+          "issues": []
+        },
+        {
+          "name": "num_packs",
+          "field_name": "num_packs",
+          "size": 7,
+          "start": 23,
+          "field_type": "char",
+          "declared_position": 23,
+          "sample_value": "0000012",
+          "field_id": "field092",
+          "issues": []
+        },
+        {
+          "name": "num_stores",
+          "field_name": "num_stores",
+          "size": 4,
+          "start": 30,
+          "field_type": "char",
+          "declared_position": 30,
+          "sample_value": "0120",
+          "field_id": "field093",
+          "issues": []
+        },
+        {
+          "name": "aisle",
+          "field_name": "aisle",
+          "size": 3,
+          "start": 34,
+          "field_type": "char",
+          "declared_position": 34,
+          "sample_value": "280",
+          "field_id": "field094",
+          "issues": []
+        },
+        {
+          "name": "slot",
+          "field_name": "slot",
+          "size": 3,
+          "start": 37,
+          "field_type": "char",
+          "declared_position": 37,
+          "sample_value": "780",
+          "field_id": "field095",
+          "issues": []
+        },
+        {
+          "name": "tier",
+          "field_name": "tier",
+          "size": 2,
+          "start": 40,
+          "field_type": "char",
+          "declared_position": 40,
+          "sample_value": "40",
+          "field_id": "field096",
+          "issues": []
+        },
+        {
+          "name": "locator",
+          "field_name": "locator",
+          "size": 7,
+          "start": 42,
+          "field_type": "char",
+          "declared_position": 42,
+          "sample_value": "5619940",
+          "field_id": "field097",
+          "issues": []
+        },
+        {
+          "name": "packsize",
+          "field_name": "packsize",
+          "size": 3,
+          "start": 49,
+          "field_type": "char",
+          "declared_position": 49,
+          "sample_value": "259",
+          "field_id": "field098",
+          "issues": []
+        },
+        {
+          "name": "dept",
+          "field_name": "dept",
+          "size": 2,
+          "start": 52,
+          "field_type": "char",
+          "declared_position": 52,
+          "sample_value": "40",
+          "field_id": "field099",
+          "issues": []
+        },
+        {
+          "name": "style",
+          "field_name": "style",
+          "size": 6,
+          "start": 54,
+          "field_type": "char",
+          "declared_position": 54,
+          "sample_value": "00866N",
+          "field_id": "field100",
+          "issues": []
+        },
+        {
+          "name": "markdown",
+          "field_name": "markdown",
+          "size": 1,
+          "start": 60,
+          "field_type": "char",
+          "declared_position": 60,
+          "sample_value": " ",
+          "field_id": "field101",
+          "issues": []
+        },
+        {
+          "name": "distro_type",
+          "field_name": "distro_type",
+          "size": 2,
+          "start": 61,
+          "field_type": "char",
+          "declared_position": 61,
+          "sample_value": " 0",
+          "field_id": "field102",
+          "issues": []
+        },
+        {
+          "name": "ad_date",
+          "field_name": "ad_date",
+          "size": 4,
+          "start": 63,
+          "field_type": "char",
+          "declared_position": 63,
+          "sample_value": "000C",
+          "field_id": "field103",
+          "issues": []
+        },
+        {
+          "name": "pack_type",
+          "field_name": "pack_type",
+          "size": 2,
+          "start": 67,
+          "field_type": "char",
+          "declared_position": 67,
+          "sample_value": " N",
+          "field_id": "field104",
+          "issues": []
+        },
+        {
+          "name": "nested",
+          "field_name": "nested",
+          "size": 1,
+          "start": 69,
+          "field_type": "char",
+          "declared_position": 69,
+          "sample_value": "C",
+          "field_id": "field105",
+          "issues": []
+        },
+        {
+          "name": "partial",
+          "field_name": "partial",
+          "size": 1,
+          "start": 70,
+          "field_type": "char",
+          "declared_position": 70,
+          "sample_value": " ",
+          "field_id": "field106",
+          "issues": []
+        },
+        {
+          "name": "suppress",
+          "field_name": "suppress",
+          "size": 1,
+          "start": 71,
+          "field_type": "char",
+          "declared_position": 71,
+          "sample_value": "0",
+          "field_id": "field107",
+          "issues": []
+        },
+        {
+          "name": "keytrol",
+          "field_name": "keytrol",
+          "size": 6,
+          "start": 72,
+          "field_type": "char",
+          "declared_position": 72,
+          "sample_value": "00000 ",
+          "field_id": "field108",
+          "issues": []
+        },
+        {
+          "name": "suffix",
+          "field_name": "suffix",
+          "size": 3,
+          "start": 78,
+          "field_type": "char",
+          "declared_position": 78,
+          "sample_value": "   ",
+          "field_id": "field109",
+          "issues": []
+        },
+        {
+          "name": "coord",
+          "field_name": "coord",
+          "size": 1,
+          "start": 81,
+          "field_type": "char",
+          "declared_position": 81,
+          "sample_value": "0",
+          "field_id": "field110",
+          "issues": []
+        },
+        {
+          "name": "house",
+          "field_name": "house",
+          "size": 9,
+          "start": 82,
+          "field_type": "char",
+          "declared_position": 82,
+          "sample_value": "00000000 ",
+          "field_id": "field111",
+          "issues": []
+        },
+        {
+          "name": "ret_price",
+          "field_name": "ret_price",
+          "size": 6,
+          "start": 91,
+          "field_type": "char",
+          "declared_position": 91,
+          "sample_value": "     ",
+          "field_id": "field112",
+          "issues": []
+        }
+      ]
+    },
+    {
+      "name": "store",
+      "tab": "Store",
+      "record_length": 26,
+      "sample_record": "0559N00000000001000000124N",
+      "issues": [],
+      "fields": [
+        {
+          "name": "store",
+          "field_name": "store",
+          "size": 4,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "0559",
+          "field_id": "field113",
+          "issues": []
+        },
+        {
+          "name": "prflag",
+          "field_name": "prflag",
+          "size": 1,
+          "start": 5,
+          "field_type": "char",
+          "declared_position": 5,
+          "sample_value": "N",
+          "field_id": "field114",
+          "issues": []
+        },
+        {
+          "name": "sequence",
+          "field_name": "sequence",
+          "size": 6,
+          "start": 6,
+          "field_type": "char",
+          "declared_position": 6,
+          "sample_value": "000000",
+          "field_id": "field115",
+          "issues": []
+        },
+        {
+          "name": "dnum_packs",
+          "field_name": "dnum_packs",
+          "size": 5,
+          "start": 12,
+          "field_type": "char",
+          "declared_position": 12,
+          "sample_value": "00001",
+          "field_id": "field116",
+          "issues": []
+        },
+        {
+          "name": "dad_date",
+          "field_name": "dad_date",
+          "size": 4,
+          "start": 17,
+          "field_type": "char",
+          "declared_position": 17,
+          "sample_value": "0000",
+          "field_id": "field117",
+          "issues": []
+        },
+        {
+          "name": "cart_seq",
+          "field_name": "cart_seq",
+          "size": 5,
+          "start": 21,
+          "field_type": "char",
+          "declared_position": 21,
+          "sample_value": "00124",
+          "field_id": "field118",
+          "issues": []
+        },
+        {
+          "name": "dsuppress",
+          "field_name": "dsuppress",
+          "size": 1,
+          "start": 26,
+          "field_type": "char",
+          "declared_position": 26,
+          "sample_value": "N",
+          "field_id": "field119",
+          "issues": []
+        },
+        {
+          "name": "tot_qty",
+          "field_name": "tot_qty",
+          "size": null,
+          "start": 27,
+          "field_type": "char",
+          "declared_position": 27,
+          "sample_value": "#VALUE!",
+          "field_id": "field165",
+          "issues": [
+            "missing/invalid field_size in spec"
+          ]
+        }
+      ]
+    }
+  ]
+}

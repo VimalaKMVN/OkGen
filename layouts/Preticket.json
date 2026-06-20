@@ -1,0 +1,433 @@
+{
+  "name": "Preticket",
+  "source_file": "TJXNA_PreticketLayout.xlsx",
+  "ticket_process": "Pre-Ticket",
+  "issues": [],
+  "sections": [
+    {
+      "name": "Header",
+      "tab": "Header",
+      "record_length": 51,
+      "sample_record": "02YL00882268 45201106061535010010010000220000000999",
+      "issues": [],
+      "fields": [
+        {
+          "name": "chain",
+          "field_name": "chain",
+          "size": 2,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "02",
+          "field_id": "field053",
+          "issues": []
+        },
+        {
+          "name": "indicator",
+          "field_name": "indicator",
+          "size": 1,
+          "start": 3,
+          "field_type": "char",
+          "declared_position": 3,
+          "sample_value": "Y",
+          "field_id": "field054",
+          "issues": []
+        },
+        {
+          "name": "format",
+          "field_name": "format",
+          "size": 1,
+          "start": 4,
+          "field_type": "char",
+          "declared_position": 4,
+          "sample_value": "L",
+          "field_id": "field055",
+          "issues": []
+        },
+        {
+          "name": "po",
+          "field_name": "po",
+          "size": 8,
+          "start": 5,
+          "field_type": "char",
+          "declared_position": 5,
+          "sample_value": "00882268",
+          "field_id": "field056",
+          "issues": []
+        },
+        {
+          "name": "add",
+          "field_name": "add",
+          "size": 1,
+          "start": 13,
+          "field_type": "char",
+          "declared_position": 13,
+          "sample_value": " ",
+          "field_id": "field057",
+          "issues": []
+        },
+        {
+          "name": "dept",
+          "field_name": "dept",
+          "size": 2,
+          "start": 14,
+          "field_type": "char",
+          "declared_position": 14,
+          "sample_value": "45",
+          "field_id": "field058",
+          "issues": []
+        },
+        {
+          "name": "date",
+          "field_name": "date",
+          "size": 8,
+          "start": 16,
+          "field_type": "char",
+          "declared_position": 16,
+          "sample_value": "20110606",
+          "field_id": "field059",
+          "issues": []
+        },
+        {
+          "name": "time",
+          "field_name": "time",
+          "size": 4,
+          "start": 24,
+          "field_type": "char",
+          "declared_position": 24,
+          "sample_value": "1535",
+          "field_id": "field060",
+          "issues": []
+        },
+        {
+          "name": "line_count",
+          "field_name": "line_count",
+          "size": 2,
+          "start": 28,
+          "field_type": "char",
+          "declared_position": 28,
+          "sample_value": "01",
+          "field_id": "field061",
+          "issues": []
+        },
+        {
+          "name": "block_num",
+          "field_name": "block_num",
+          "size": 3,
+          "start": 30,
+          "field_type": "char",
+          "declared_position": 30,
+          "sample_value": "001",
+          "field_id": "field062",
+          "issues": []
+        },
+        {
+          "name": "num_block",
+          "field_name": "num_block",
+          "size": 3,
+          "start": 33,
+          "field_type": "char",
+          "declared_position": 33,
+          "sample_value": "001",
+          "field_id": "field063",
+          "issues": []
+        },
+        {
+          "name": "tot_qty",
+          "field_name": "tot_qty",
+          "size": 7,
+          "start": 36,
+          "field_type": "char",
+          "declared_position": 36,
+          "sample_value": "0000220",
+          "field_id": "field064",
+          "issues": []
+        },
+        {
+          "name": "tot_ret",
+          "field_name": "tot_ret",
+          "size": 9,
+          "start": 43,
+          "field_type": "char",
+          "declared_position": 43,
+          "sample_value": "000000999",
+          "field_id": "field065",
+          "issues": []
+        }
+      ]
+    },
+    {
+      "name": "Lane",
+      "tab": "Detail",
+      "record_length": 186,
+      "sample_record": "00100142103239702      NXXXXXXXXXX          001800N00099900220007194339000454218                                                                                                          ",
+      "issues": [],
+      "fields": [
+        {
+          "name": "page",
+          "field_name": "page",
+          "size": 3,
+          "start": 1,
+          "field_type": "char",
+          "declared_position": 1,
+          "sample_value": "001",
+          "field_id": "field066",
+          "issues": []
+        },
+        {
+          "name": "line",
+          "field_name": "line",
+          "size": 3,
+          "start": 4,
+          "field_type": "char",
+          "declared_position": 4,
+          "sample_value": "001",
+          "field_id": "field067",
+          "issues": []
+        },
+        {
+          "name": "category",
+          "field_name": "category",
+          "size": 4,
+          "start": 7,
+          "field_type": "char",
+          "declared_position": 7,
+          "sample_value": "4210",
+          "field_id": "field068",
+          "issues": []
+        },
+        {
+          "name": "style",
+          "field_name": "style",
+          "size": 6,
+          "start": 11,
+          "field_type": "char",
+          "declared_position": 11,
+          "sample_value": "323970",
+          "field_id": "field069",
+          "issues": []
+        },
+        {
+          "name": "type",
+          "field_name": "type",
+          "size": 1,
+          "start": 17,
+          "field_type": "char",
+          "declared_position": 17,
+          "sample_value": "2",
+          "field_id": "field070",
+          "issues": []
+        },
+        {
+          "name": "size",
+          "field_name": "size",
+          "size": 6,
+          "start": 18,
+          "field_type": "char",
+          "declared_position": 18,
+          "sample_value": "      ",
+          "field_id": "field071",
+          "issues": []
+        },
+        {
+          "name": "psi",
+          "field_name": "psi",
+          "size": 1,
+          "start": 24,
+          "field_type": "char",
+          "declared_position": 24,
+          "sample_value": "N",
+          "field_id": "field072",
+          "issues": []
+        },
+        {
+          "name": "message1",
+          "field_name": "message1",
+          "size": 10,
+          "start": 25,
+          "field_type": "char",
+          "declared_position": 25,
+          "sample_value": "XXXXXXXXXX",
+          "field_id": "field073",
+          "issues": []
+        },
+        {
+          "name": "message2",
+          "field_name": "message2",
+          "size": 10,
+          "start": 35,
+          "field_type": "char",
+          "declared_position": 35,
+          "sample_value": "          ",
+          "field_id": "field074",
+          "issues": []
+        },
+        {
+          "name": "comp_price",
+          "field_name": "comp_price",
+          "size": 6,
+          "start": 45,
+          "field_type": "char",
+          "declared_position": 45,
+          "sample_value": "001800",
+          "field_id": "field075",
+          "issues": []
+        },
+        {
+          "name": "comp_up",
+          "field_name": "comp_up",
+          "size": 1,
+          "start": 51,
+          "field_type": "char",
+          "declared_position": 51,
+          "sample_value": "N",
+          "field_id": "field076",
+          "issues": []
+        },
+        {
+          "name": "ret_price",
+          "field_name": "ret_price",
+          "size": 6,
+          "start": 52,
+          "field_type": "char",
+          "declared_position": 52,
+          "sample_value": "000999",
+          "field_id": "field077",
+          "issues": []
+        },
+        {
+          "name": "qty",
+          "field_name": "qty",
+          "size": 5,
+          "start": 58,
+          "field_type": "char",
+          "declared_position": 58,
+          "sample_value": "00220",
+          "field_id": "field078",
+          "issues": []
+        },
+        {
+          "name": "housenum",
+          "field_name": "housenum",
+          "size": 9,
+          "start": 63,
+          "field_type": "char",
+          "declared_position": 63,
+          "sample_value": "007194339",
+          "field_id": "field079",
+          "issues": []
+        },
+        {
+          "name": "pieces",
+          "field_name": "pieces",
+          "size": 3,
+          "start": 72,
+          "field_type": "char",
+          "declared_position": 72,
+          "sample_value": "000",
+          "field_id": "field080",
+          "issues": []
+        },
+        {
+          "name": "ladder_mmdd",
+          "field_name": "ladder_mmdd",
+          "size": 4,
+          "start": 75,
+          "field_type": "char",
+          "declared_position": 75,
+          "sample_value": "4542",
+          "field_id": "field081",
+          "issues": []
+        },
+        {
+          "name": "ladder",
+          "field_name": "ladder",
+          "size": 2,
+          "start": 79,
+          "field_type": "char",
+          "declared_position": 79,
+          "sample_value": "18",
+          "field_id": "field082",
+          "issues": []
+        },
+        {
+          "name": "frdesc",
+          "field_name": "frdesc",
+          "size": 20,
+          "start": 81,
+          "field_type": "char",
+          "declared_position": 81,
+          "sample_value": "                    ",
+          "field_id": "field189",
+          "issues": []
+        },
+        {
+          "name": "engnoun",
+          "field_name": "engnoun",
+          "size": 3,
+          "start": 101,
+          "field_type": "char",
+          "declared_position": 101,
+          "sample_value": "   ",
+          "field_id": "field190",
+          "issues": []
+        },
+        {
+          "name": "frnoun",
+          "field_name": "frnoun",
+          "size": 3,
+          "start": 104,
+          "field_type": "char",
+          "declared_position": 104,
+          "sample_value": "   ",
+          "field_id": "field191",
+          "issues": []
+        },
+        {
+          "name": "item",
+          "field_name": "item",
+          "size": 20,
+          "start": 107,
+          "field_type": "char",
+          "declared_position": 107,
+          "sample_value": "                    ",
+          "field_id": "field170",
+          "issues": []
+        },
+        {
+          "name": "fact1",
+          "field_name": "fact1",
+          "size": 20,
+          "start": 127,
+          "field_type": "char",
+          "declared_position": 127,
+          "sample_value": "                    ",
+          "field_id": "field171",
+          "issues": []
+        },
+        {
+          "name": "fact2",
+          "field_name": "fact2",
+          "size": 20,
+          "start": 147,
+          "field_type": "char",
+          "declared_position": 147,
+          "sample_value": "                    ",
+          "field_id": "field172",
+          "issues": []
+        },
+        {
+          "name": "fact3",
+          "field_name": "fact3",
+          "size": 20,
+          "start": 167,
+          "field_type": "char",
+          "declared_position": 167,
+          "sample_value": "                    ",
+          "field_id": "field173",
+          "issues": []
+        }
+      ]
+    }
+  ]
+}
