@@ -1,0 +1,148 @@
+:root {
+  --bg: #1e1e1e;
+  --bg-alt: #252526;
+  --bg-pane: #1b1b1b;
+  --border: #3a3a3a;
+  --text: #d4d4d4;
+  --text-dim: #9b9b9b;
+  --accent: #0e639c;
+  --accent-hover: #1177bb;
+  --row-hover: #2a2d2e;
+  --selected: #094771;
+  --dirty: #d7ba7d;
+  --ok: #4ec9b0;
+  --err: #f48771;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-alt);
+  border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 700; letter-spacing: 0.5px; color: #fff; }
+.spacer { flex: 1; }
+.folder-input {
+  width: 380px;
+  padding: 5px 8px;
+  background: #3c3c3c;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 3px;
+}
+.file-title { color: var(--text-dim); margin-right: 8px; }
+.status { margin-left: 8px; min-width: 120px; }
+.status.ok { color: var(--ok); }
+.status.err { color: var(--err); }
+.status.dirty { color: var(--dirty); }
+
+.btn {
+  padding: 5px 10px;
+  background: #3a3d41;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { background: #45494e; }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+.layout { flex: 1; display: flex; min-height: 0; }
+.tree-pane {
+  width: 300px;
+  background: var(--bg-pane);
+  border-right: 1px solid var(--border);
+  overflow: auto;
+}
+.pane-title {
+  padding: 6px 12px;
+  text-transform: uppercase;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.6px;
+}
+.editor-pane { flex: 1; overflow: auto; padding: 14px 18px; }
+.empty { color: var(--text-dim); padding: 30px; text-align: center; }
+
+/* Tree */
+.tree ul { list-style: none; margin: 0; padding-left: 14px; }
+.tree > ul { padding-left: 4px; }
+.node { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 3px; cursor: pointer; white-space: nowrap; }
+.node:hover { background: var(--row-hover); }
+.node.selected { background: var(--selected); }
+.folder > .node::before { content: "▸"; color: var(--text-dim); display: inline-block; width: 10px; }
+.folder.open > .node::before { content: "▾"; }
+.chain-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #fff;
+}
+.file-name { overflow: hidden; text-overflow: ellipsis; }
+
+/* Editor */
+.section { margin-bottom: 22px; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }
+.section-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 12px; background: var(--bg-alt); border-bottom: 1px solid var(--border);
+}
+.section-head .title { font-weight: 700; }
+.section-head .meta { color: var(--text-dim); font-size: 11px; }
+.section-body { padding: 10px 12px; }
+
+/* Header form */
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 16px; }
+.field { display: flex; flex-direction: column; gap: 2px; }
+.field label { font-size: 11px; color: var(--text-dim); }
+.field .size-hint { color: var(--text-dim); font-size: 10px; }
+
+/* Repeating section table */
+.rec-table { overflow: auto; }
+table { border-collapse: collapse; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+th, td { border: 1px solid var(--border); padding: 2px 4px; text-align: left; }
+th { background: var(--bg-alt); color: var(--text-dim); font-weight: 600; position: sticky; top: 0; }
+td .rownum { color: var(--text-dim); }
+
+input.cell, select.cell, input.fval, select.fval {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: #2d2d2d;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 3px 5px;
+}
+input.cell { min-width: 60px; }
+input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
+.field-coded { color: var(--ok); }
+
+/* Context menu */
+.ctx-menu {
+  position: fixed; z-index: 50; background: var(--bg-alt);
+  border: 1px solid var(--border); border-radius: 4px; padding: 4px 0; min-width: 150px;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+}
+.ctx-menu.hidden { display: none; }
+.ctx-item { padding: 6px 14px; cursor: pointer; }
+.ctx-item:hover { background: var(--accent); color: #fff; }
+.ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }

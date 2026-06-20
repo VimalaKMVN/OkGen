@@ -116,14 +116,35 @@ def test_save_as_and_copy_delete(tmp_path, registry):
     assert not dst.exists()
 
 
-def test_fastapi_endpoints():
-    from fastapi.testclient import TestClient
+def test_flask_endpoints():
+    from okgen.web.app import create_app
 
-    from okgen.api.app import create_app
-
-    client = TestClient(create_app(data_dir=DATA_DIR))
-    assert client.get("/api/health").json()["ok"] is True
-    chains = client.get("/api/chains").json()
+    app = create_app(data_dir=DATA_DIR)
+    client = app.test_client()
+    assert client.get("/api/health").get_json()["ok"] is True
+    chains = client.get("/api/chains").get_json()
     assert chains["03"]["name"] == "Homegoods"
-    parsed = client.get("/api/parse", params={"path": str(DATA_DIR / "StyleHeader.OK")}).json()
+    parsed = client.get(
+        "/api/parse", query_string={"path": str(DATA_DIR / "StyleHeader.OK")}
+    ).get_json()
     assert parsed["layout"] == "StyleHeader"
+    # The HTML UI shell renders.
+    assert client.get("/").status_code == 200
+
+
+def test_flask_save_endpoint(tmp_path):
+    import shutil as _sh
+
+    from okgen.web.app import create_app
+
+    src = DATA_DIR / "CartonLabel.OK"
+    work = tmp_path / "CartonLabel.OK"
+    _sh.copy2(src, work)
+    client = create_app(data_dir=DATA_DIR).test_client()
+    res = client.post("/api/save", json={
+        "path": str(work),
+        "edits": [{"section_index": 0, "record_index": 0, "field": "chain", "value": "07"}],
+        "backup": False,
+    })
+    assert res.status_code == 200
+    assert res.get_json()["edits_applied"] == 1

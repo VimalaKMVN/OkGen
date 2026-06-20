@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OkGen Editor</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">OkGen</div>
+    <input id="folderPath" class="folder-input" type="text"
+           placeholder="Paste a folder path, then Open…" />
+    <button id="openBtn" class="btn">Open Folder</button>
+    <div class="spacer"></div>
+    <span id="fileTitle" class="file-title"></span>
+    <button id="saveBtn" class="btn btn-primary" disabled>Save</button>
+    <button id="saveAsBtn" class="btn" disabled>Save As…</button>
+    <span id="status" class="status"></span>
+  </header>
+
+  <main class="layout">
+    <aside id="treePane" class="tree-pane">
+      <div class="pane-title">Files</div>
+      <div id="tree" class="tree"></div>
+    </aside>
+    <section id="editorPane" class="editor-pane">
+      <div id="editorEmpty" class="empty">Open a folder and pick an .OK file to edit.</div>
+      <div id="editor" class="editor"></div>
+    </section>
+  </main>
+
+  <div id="ctxMenu" class="ctx-menu hidden"></div>
+
+  <script>
+    window.OKGEN_CHAINS = {{ chains | tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
