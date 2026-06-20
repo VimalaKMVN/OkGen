@@ -1,0 +1,7 @@
+# Fixed chain registry for tests (decoupled from the editable repo config).
+chains:
+  "01": {name: TJMAXX, short: TJX, color: "#C8102E"}
+  "02": {name: Marshalls, short: MAR, color: "#0033A0"}
+  "03": {name: Homegoods, short: HG, color: "#00843D"}
+  "04": {name: Winners, short: WIN, color: "#5A2D81"}
+  "06": {name: HomeSense, short: HS, color: "#E87722"}

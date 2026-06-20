@@ -117,6 +117,7 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
             "is_header": sec_index == 0,
             "record_length": sec.record_length if sec else None,
             "ignored_fields": sec.ignored_fields if sec else [],
+            "max_records": config.max_records(layout_name, sec_name),
             "fields": field_meta,
             "records": records_out,
         })
@@ -166,33 +167,7 @@ def apply_edits(
     """
     src = Path(path)
     okf = parse_okfile(src, registry=registry)
-    by_index = {r.index: r for r in okf.records}
-
-    errors: List[dict] = []
-    for e in edits:
-        rec = by_index.get(e["record_index"])
-        if rec is None:
-            errors.append({"edit": e, "error": "record_index out of range"})
-            continue
-        field = e["field"]
-        value = e["value"]
-        try:
-            f = rec._field(field)  # noqa: SLF001 — internal lookup
-        except KeyError as exc:
-            errors.append({"edit": e, "error": str(exc)})
-            continue
-        if f.size is not None and len(value) > f.size:
-            errors.append({
-                "edit": e,
-                "error": f"value '{value}' exceeds field '{field}' size {f.size}",
-            })
-
-    if errors:
-        raise EditError(str(errors))
-
-    # All valid — apply.
-    for e in edits:
-        by_index[e["record_index"]].set(e["field"], e["value"])
+    _apply_edits_to_okf(okf, edits)
 
     out = Path(target_path) if target_path else src
     if backup and out.exists() and target_path is None:
@@ -205,6 +180,153 @@ def apply_edits(
         "edits_applied": len(edits),
         "roundtrip_ok": okf.to_bytes() == out.read_bytes(),
     }
+
+
+def _apply_edits_to_okf(okf, edits: List[dict]) -> None:
+    """Validate field widths, then apply edits in place. Raises EditError."""
+    by_index = {r.index: r for r in okf.records}
+    errors: List[dict] = []
+    for e in edits:
+        rec = by_index.get(e["record_index"])
+        if rec is None:
+            errors.append({"edit": e, "error": "record_index out of range"})
+            continue
+        try:
+            f = rec._field(e["field"])  # noqa: SLF001 — internal lookup
+        except KeyError as exc:
+            errors.append({"edit": e, "error": str(exc)})
+            continue
+        if f.size is not None and len(e["value"]) > f.size:
+            errors.append({
+                "edit": e,
+                "error": f"value '{e['value']}' exceeds field '{e['field']}' size {f.size}",
+            })
+    if errors:
+        raise EditError(str(errors))
+    for e in edits:
+        by_index[e["record_index"]].set(e["field"], e["value"])
+
+
+# --------------------------------------------------------------------------- #
+# Add a record to a repeating section
+# --------------------------------------------------------------------------- #
+def add_record(
+    path,
+    section_index: int,
+    edits: List[dict],
+    registry: LayoutRegistry,
+    config: Config,
+    backup: bool = True,
+) -> dict:
+    """Apply pending edits, append a blank record to a section, and save.
+
+    Enforces the section's ``max_records`` limit. The new record clones the
+    structure (marker, terminator, padding, line ending) of an existing record
+    in the section and blanks its field spans, so the file stays well-formed.
+    """
+    from okgen.okfile import Record
+
+    src = Path(path)
+    okf = parse_okfile(src, registry=registry)
+    _apply_edits_to_okf(okf, edits)
+
+    grouped = list(okf.sections().items())
+    if section_index < 0 or section_index >= len(grouped):
+        raise EditError(f"section_index {section_index} out of range")
+    sec_name, recs = grouped[section_index]
+    if not recs or recs[0].section is None:
+        raise EditError(f"section '{sec_name}' has no template record to clone")
+
+    limit = config.max_records(okf.layout.name, sec_name)
+    if limit is not None and len(recs) >= limit:
+        raise EditError(f"section '{sec_name}' is at its limit of {limit} records")
+
+    template = recs[-1]
+    blank = Record(
+        raw=_blank_content(template),
+        offset=template.offset,
+        section=template.section,
+        index=template.index,  # placeholder; reassigned on reload
+    )
+    insert_at = okf.records.index(template) + 1
+    okf.records.insert(insert_at, blank)
+    _normalize_eols(okf)
+
+    out = src
+    if backup and out.exists():
+        shutil.copy2(out, out.with_suffix(out.suffix + ".bak"))
+    okf.save(out)
+
+    view = parse_file_view(out, registry, config)
+    view["added_section"] = sec_name
+    return view
+
+
+def _eol_of(okf) -> str:
+    """The per-line terminator that precedes the '\\n' separator ('\\r' or '')."""
+    return "\r" if any(r.raw.endswith("\r") for r in okf.records) else ""
+
+
+def _blank_content(record) -> str:
+    """Clone a record's structure but blank every field span (no trailing EOL)."""
+    content = record.raw.rstrip("\r")
+    chars = list(content)
+    if record.section:
+        for f in record.section.fields:
+            if f.start is None or f.size is None:
+                continue
+            start = record.offset + f.start - 1
+            for i in range(start, min(start + f.size, len(chars))):
+                chars[i] = " "
+    return "".join(chars)
+
+
+def _normalize_eols(okf) -> None:
+    """Re-apply consistent line endings after an insert.
+
+    Interior lines (and the last line when the file ends with a newline) carry
+    the EOL; an unterminated final line does not. Idempotent on well-formed
+    files, so it only changes bytes around an inserted record.
+    """
+    eol = _eol_of(okf)
+    n = len(okf.records)
+    for i, rec in enumerate(okf.records):
+        content = rec.raw.rstrip("\r")
+        is_last = i == n - 1
+        if is_last and not okf.trailing_newline:
+            rec.raw = content
+        else:
+            rec.raw = content + eol
+
+
+# --------------------------------------------------------------------------- #
+# Native folder picker (local app convenience)
+# --------------------------------------------------------------------------- #
+def browse_folder(initial: Optional[str] = None) -> dict:
+    """Open the OS folder-chooser on the local machine and return the choice.
+
+    Runs in a subprocess so Tk never touches the Flask server thread. Works on
+    Windows/macOS desktop sessions; returns {"path": None} if cancelled or if
+    no GUI is available.
+    """
+    import subprocess
+    import sys
+
+    script = (
+        "import tkinter as tk\n"
+        "from tkinter import filedialog\n"
+        "r = tk.Tk(); r.withdraw(); r.attributes('-topmost', True)\n"
+        "print(filedialog.askdirectory() or '')\n"
+    )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, timeout=300,
+        )
+        chosen = proc.stdout.strip()
+        return {"path": chosen or None}
+    except Exception as exc:  # pragma: no cover - depends on desktop session
+        return {"path": None, "error": str(exc)}
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,6 @@
+# Maximum number of records allowed per repeating section.
+# The "Add row" button in the editor is disabled once the limit is reached.
+# Omit a section for no limit. Keyed by layout name -> section name.
+max_records:
+  StyleHeader:
+    Lane: 10

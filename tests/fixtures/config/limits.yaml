@@ -1,0 +1,4 @@
+# Fixed record limits for tests.
+max_records:
+  StyleHeader:
+    Lane: 10

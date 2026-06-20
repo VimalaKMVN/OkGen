@@ -109,6 +109,7 @@ body {
 }
 .section-head .title { font-weight: 700; }
 .section-head .meta { color: var(--text-dim); font-size: 11px; }
+.section-head .add-btn { margin-left: auto; padding: 3px 10px; }
 .section-body { padding: 10px 12px; }
 
 /* Header form */

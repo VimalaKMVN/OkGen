@@ -6,10 +6,15 @@
 # (the one matching the most of chain/layout/format).
 #
 # match keys:
-#   chain   2-char chain code ("01".."06"), or "*"  (any)
-#   layout  layout name (CartonLabel | DistLabels | Preticket | StyleHeader), or "*"
-#   format  the `format` field value (e.g. A, B, L, 1, 7), or "*"
+#   chain   2-char chain code ("01".."06"), a LIST like ["03","04"], or "*"  (any)
+#   layout  layout name (CartonLabel | DistLabels | Preticket | StyleHeader),
+#           a LIST like [StyleHeader, Preticket], or "*"
+#   format  the `format` field value (e.g. A, B, L, 1, 7), a LIST, or "*"
 #   field   REQUIRED — the output_field_name this rule applies to
+#
+# Any of chain/layout/format may be a LIST to match several values at once
+# (OR). A list still counts as "specific" for tie-breaking, same as a single
+# value.
 #
 # values: { raw_code: "Label shown to user", ... }
 #
@@ -30,15 +35,81 @@ rules:
     values: {Y: "Yes", N: "No"}
 
   - match: {field: comp_up}
-    values: {Y: "Compare-at & Up", N: "Standard"}
+    values: {Y: "Yes", N: "No"}
 
   # ---- examples of chain/layout/format-specific overrides ----
-  # Replace/extend these with your real format meanings.
+  # Replace/extend these with your real meanings. Each block below shows a
+  # different matching pattern so you can copy whichever you need.
+
+  # (1) Per-LAYOUT only — same for every chain/format.
   - match: {layout: StyleHeader, field: format}
     values:
       A: "Format A"
       B: "Format B"
+      L: "Format L"
 
-  - match: {chain: "03", layout: StyleHeader, format: A, field: format}
+  - match: {layout: CartonLabel, field: format}
+    values:
+      "1": "Carton Format 1"
+      "2": "Carton Format 2"
+
+  - match: {layout: Preticket, field: format}
+    values:
+      L: "Label"
+      Y: "Yard"
+      N: "Non-Label"
+
+  - match: {layout: DistLabels, field: format}
+    values:
+      "7": "Distribution 7"
+      "9": "Distribution 9"
+
+  # (2) Per-CHAIN + layout — overrides the layout-only rule above for one chain.
+  - match: {chain: "03", layout: StyleHeader, field: format}
     values:
       A: "Regular Tag (Homegoods)"
+      B: "Sticker (Homegoods)"
+
+  - match: {chain: "01", layout: StyleHeader, field: format}
+    values:
+      A: "Regular Tag (TJMAXX)"
+
+  # (3) Most specific — chain + layout + FORMAT all pinned.
+  - match: {chain: "03", layout: StyleHeader, format: A, field: format}
+    values:
+      A: "Regular Tag — Compare-at & Up (Homegoods)"
+
+  # (4) Other coded fields (not just `format`).
+  - match: {field: type}
+    values:
+      "1": "Type 1"
+      "2": "Type 2"
+      "3": "Type 3"
+
+  - match: {layout: StyleHeader, field: indicator}
+    values:
+      N: "New"
+      R: "Reprint"
+      C: "Cancel"
+
+  # (5) A field in a repeating section (applies to every row of that section).
+  - match: {layout: DistLabels, field: prflag}
+    values:
+      Y: "Print"
+      N: "No Print"
+
+  # (6) Chain-specific label for a detail-section field.
+  - match: {chain: "02", layout: CartonLabel, field: prflag}
+    values:
+      Y: "Print (Marshalls)"
+      N: "Suppress (Marshalls)"
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  #     This applies to chain 03 OR 04, in StyleHeader OR Preticket.
+  - match:
+      chain: ["03", "04"]
+      layout: [StyleHeader, Preticket]
+      field: format
+    values:
+      A: "Format A (HG/Winners · Style or Preticket)"
+      B: "Format B (HG/Winners · Style or Preticket)"

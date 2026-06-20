@@ -1,0 +1,15 @@
+# Fixed display rules for tests. Stable on purpose so tests don't depend on
+# the editable repo config/display.yaml.
+rules:
+  - match: {field: indicator}
+    values: {Y: "Yes", N: "No"}
+
+  - match: {layout: StyleHeader, field: format}
+    values: {A: "Format A", B: "Format B"}
+
+  - match: {chain: "03", layout: StyleHeader, format: A, field: format}
+    values: {A: "Regular Tag (Homegoods)"}
+
+  # list-matching coverage
+  - match: {chain: ["03", "04"], layout: [StyleHeader, Preticket], field: type}
+    values: {"1": "Type One", "2": "Type Two"}

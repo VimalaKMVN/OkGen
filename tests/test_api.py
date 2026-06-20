@@ -27,9 +27,12 @@ def registry():
     return LayoutRegistry.from_dir(DATA_DIR)
 
 
+FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config"
+
+
 @pytest.fixture(scope="module")
 def config():
-    return Config.load()
+    return Config.load(FIXTURE_CONFIG)
 
 
 def test_build_tree_only_ok_files(config):
@@ -130,6 +133,46 @@ def test_flask_endpoints():
     assert parsed["layout"] == "StyleHeader"
     # The HTML UI shell renders.
     assert client.get("/").status_code == 200
+
+
+def test_max_records_in_view(registry, config):
+    view = service.parse_file_view(DATA_DIR / "StyleHeader.OK", registry, config)
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+    size = next(s for s in view["sections"] if s["name"] == "Size")
+    assert lane["max_records"] == 10        # configured limit
+    assert size["max_records"] is None      # no limit
+
+
+def test_add_record_to_unlimited_section(tmp_path, registry, config):
+    src = DATA_DIR / "StyleHeader.OK"
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(src, work)
+    before = service.parse_file_view(work, registry, config)
+    size_idx = next(s["index"] for s in before["sections"] if s["name"] == "Size")
+    n_before = len(next(s for s in before["sections"] if s["name"] == "Size")["records"])
+
+    view = service.add_record(work, size_idx, [], registry, config, backup=False)
+    size = next(s for s in view["sections"] if s["name"] == "Size")
+    assert len(size["records"]) == n_before + 1
+    assert view["roundtrip_ok"]                       # file still well-formed
+    # The appended record's fields are blank.
+    assert size["records"][-1]["values"]["size"].strip() == ""
+
+
+def test_add_record_respects_lane_limit(tmp_path, registry, config):
+    src = DATA_DIR / "StyleHeader.OK"        # already has 10 lanes (the limit)
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(src, work)
+    view = service.parse_file_view(work, registry, config)
+    lane_idx = next(s["index"] for s in view["sections"] if s["name"] == "Lane")
+    with pytest.raises(service.EditError):
+        service.add_record(work, lane_idx, [], registry, config, backup=False)
+
+
+def test_browse_folder_returns_path_key():
+    # No GUI in CI: must not raise, and always returns a dict with "path".
+    result = service.browse_folder()
+    assert "path" in result
 
 
 def test_flask_save_endpoint(tmp_path):

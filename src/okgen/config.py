@@ -33,16 +33,38 @@ class ChainInfo:
         }
 
 
-def _wild(value: Optional[str]) -> bool:
-    return value is None or value == "*"
+def _is_specific(criterion) -> bool:
+    """A match criterion is 'specific' unless it is missing or the '*' wildcard."""
+    return not (criterion is None or criterion == "*")
+
+
+def _crit_matches(criterion, value: Optional[str]) -> bool:
+    """True if a match criterion accepts ``value``.
+
+    A criterion may be:
+      * missing / None / "*"  -> matches anything
+      * a single value        -> exact match
+      * a list/tuple          -> matches if value is in the list (OR)
+    """
+    if not _is_specific(criterion):
+        return True
+    if isinstance(criterion, (list, tuple, set)):
+        return value in {str(c) for c in criterion}
+    return criterion == value
 
 
 class Config:
     """Chain registry plus display-label rules, with specificity resolution."""
 
-    def __init__(self, chains: Dict[str, ChainInfo], rules: List[dict]):
+    def __init__(
+        self,
+        chains: Dict[str, ChainInfo],
+        rules: List[dict],
+        limits: Optional[Dict[str, Dict[str, int]]] = None,
+    ):
         self._chains = chains
         self._rules = rules
+        self._limits = limits or {}
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -76,14 +98,14 @@ class Config:
             match = rule.get("match", {})
             if match.get("field") != field:
                 continue
-            if not _wild(match.get("chain")) and match["chain"] != chain:
+            if not _crit_matches(match.get("chain"), chain):
                 continue
-            if not _wild(match.get("layout")) and match["layout"] != layout:
+            if not _crit_matches(match.get("layout"), layout):
                 continue
-            if not _wild(match.get("format")) and match["format"] != fmt:
+            if not _crit_matches(match.get("format"), fmt):
                 continue
             score = sum(
-                1 for k in ("chain", "layout", "format") if not _wild(match.get(k))
+                1 for k in ("chain", "layout", "format") if _is_specific(match.get(k))
             )
             if score > best_score:
                 best_score = score
@@ -107,6 +129,13 @@ class Config:
         """Friendly label for a code, or the code itself if unmapped."""
         opts = self.options(field, chain=chain, layout=layout, fmt=fmt)
         return opts.get(code, code)
+
+    # ----- record limits -----
+    def max_records(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:
+        """Max records allowed for a section, or None for unlimited."""
+        if layout is None or section is None:
+            return None
+        return self._limits.get(layout, {}).get(section)
 
     # ----- loading -----
     @classmethod
@@ -133,4 +162,14 @@ class Config:
             data = yaml.safe_load(display_path.read_text(encoding="utf-8")) or {}
             rules = data.get("rules") or []
 
-        return cls(chains, rules)
+        limits: Dict[str, Dict[str, int]] = {}
+        limits_path = cdir / "limits.yaml"
+        if limits_path.is_file():
+            data = yaml.safe_load(limits_path.read_text(encoding="utf-8")) or {}
+            raw = data.get("max_records") or {}
+            limits = {
+                str(layout): {str(sec): int(n) for sec, n in (secs or {}).items()}
+                for layout, secs in raw.items()
+            }
+
+        return cls(chains, rules, limits)

@@ -36,9 +36,37 @@ function setStatus(msg, kind) {
   s.className = "status" + (kind ? " " + kind : "");
 }
 
+// ---- dirty state ----
+function isDirty() { return Object.keys(state.edits).length > 0; }
+function confirmDiscardIfDirty() {
+  return !isDirty() || confirm("You have unsaved changes. Discard them?");
+}
+function updateDirtyIndicator() {
+  const dirty = isDirty();
+  if (state.view) {
+    const v = state.view;
+    const tag = v.chain_info ? v.chain_info.name : v.chain;
+    $("#fileTitle").textContent = `${dirty ? "* " : ""}${v.name}  ·  ${v.layout}  ·  ${tag}`;
+    const selName = document.querySelector(".node.selected .file-name");
+    if (selName) selName.textContent = (dirty ? "* " : "") + v.name;
+  }
+}
+
+// ---- folder picker (native OS dialog) ----
+async function browseFolder() {
+  try {
+    const res = await postJSON("/api/browse-folder", {});
+    if (res.path) { $("#folderPath").value = res.path; openFolder(res.path); }
+    else setStatus("No folder selected");
+  } catch (e) {
+    setStatus("Native dialog unavailable — paste a path instead", "err");
+  }
+}
+
 // ---- tree ----
 async function openFolder(dir) {
   if (!dir) return;
+  if (!confirmDiscardIfDirty()) return;
   try {
     const tree = await getTree(dir);
     state.rootDir = dir;
@@ -87,6 +115,7 @@ function renderNode(node) {
 }
 
 function selectFile(path, rowEl) {
+  if (!confirmDiscardIfDirty()) return;
   document.querySelectorAll(".node.selected").forEach((n) => n.classList.remove("selected"));
   if (rowEl) rowEl.classList.add("selected");
   loadFile(path);
@@ -100,8 +129,8 @@ async function loadFile(path) {
     state.view = view;
     state.edits = {};
     renderEditor(view);
-    $("#fileTitle").textContent = `${view.name}  ·  ${view.layout}  ·  ${view.chain_info ? view.chain_info.name : view.chain}`;
     updateSaveButtons();
+    updateDirtyIndicator();
     setStatus(view.roundtrip_ok ? "Loaded (round-trip OK)" : "Loaded (round-trip DIFFERS!)",
               view.roundtrip_ok ? "ok" : "err");
   } catch (e) {
@@ -120,9 +149,22 @@ function renderSection(sec) {
   const wrap = el("div", "section");
   const head = el("div", "section-head");
   head.appendChild(el("span", "title", sec.name));
-  const meta = `${sec.records.length} record(s)` +
+  const count = sec.max_records != null
+    ? `${sec.records.length} / ${sec.max_records} record(s)`
+    : `${sec.records.length} record(s)`;
+  const meta = count +
     (sec.ignored_fields && sec.ignored_fields.length ? `  ·  ignored: ${sec.ignored_fields.join(", ")}` : "");
   head.appendChild(el("span", "meta", meta));
+
+  // Add-row button for repeating sections (not the single Header record).
+  if (!sec.is_header) {
+    const atLimit = sec.max_records != null && sec.records.length >= sec.max_records;
+    const addBtn = el("button", "btn add-btn", "＋ Add row");
+    addBtn.disabled = atLimit;
+    if (atLimit) addBtn.title = `Limit of ${sec.max_records} reached`;
+    addBtn.addEventListener("click", () => addRow(sec.index));
+    head.appendChild(addBtn);
+  }
   wrap.appendChild(head);
 
   const body = el("div", "section-body");
@@ -133,6 +175,25 @@ function renderSection(sec) {
   }
   wrap.appendChild(body);
   return wrap;
+}
+
+async function addRow(sectionIndex) {
+  if (!state.file) return;
+  try {
+    const view = await postJSON("/api/record/add", {
+      path: state.file,
+      section_index: sectionIndex,
+      edits: collectEdits(),
+    });
+    state.view = view;
+    state.edits = {};
+    renderEditor(view);
+    updateSaveButtons();
+    updateDirtyIndicator();
+    setStatus("Row added (saved)", "ok");
+  } catch (e) {
+    setStatus("Add failed: " + e.message, "err");
+  }
 }
 
 function editKey(s, r, f) { return `${s}|${r}|${f}`; }
@@ -219,6 +280,7 @@ function updateSaveButtons() {
   const dirty = Object.keys(state.edits).length;
   $("#saveBtn").disabled = !state.file || dirty === 0;
   $("#saveAsBtn").disabled = !state.file;
+  updateDirtyIndicator();
   if (dirty) setStatus(`${dirty} unsaved edit(s)`, "dirty");
 }
 
@@ -238,6 +300,7 @@ async function save(targetPath) {
       edits,
       target_path: targetPath || null,
     });
+    state.edits = {};  // persisted — clear so refresh isn't treated as dirty
     setStatus(`Saved ${res.edits_applied} edit(s)` + (res.roundtrip_ok ? "" : " (round-trip DIFFERS!)"),
               res.roundtrip_ok ? "ok" : "err");
     const openPath = targetPath || state.file;
@@ -307,13 +370,17 @@ async function renameFile(node) {
 
 // ---- wire up ----
 document.addEventListener("click", hideCtxMenu);
-$("#openBtn").addEventListener("click", () => openFolder($("#folderPath").value.trim()));
+$("#openBtn").addEventListener("click", browseFolder);
 $("#folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") openFolder(e.target.value.trim()); });
 $("#saveBtn").addEventListener("click", () => save(null));
 $("#saveAsBtn").addEventListener("click", () => {
   const dflt = state.file ? state.file.replace(/\.OK$/i, "_copy.OK") : "";
   const target = prompt("Save As (full path):", dflt);
   if (target) save(target);
+});
+
+window.addEventListener("beforeunload", (e) => {
+  if (isDirty()) { e.preventDefault(); e.returnValue = ""; }
 });
 
 const last = localStorage.getItem("okgen.dir");
