@@ -113,13 +113,27 @@ def _cmd_parse(args: argparse.Namespace) -> int:
 
     print("sections:")
     for name, recs in okf.sections().items():
-        print(f"  {name:<14} {len(recs)} record(s)")
+        sec = recs[0].section if recs and recs[0].section else None
+        ignored = f"  (ignored: {', '.join(sec.ignored_fields)})" if sec and sec.ignored_fields else ""
+        print(f"  {name:<14} {len(recs)} record(s){ignored}")
 
     if args.show:
+        limit = args.limit if args.limit and args.limit > 0 else None
         for name, recs in okf.sections().items():
-            print(f"\n[{name}] first record fields:")
-            for fname, val in recs[0].values().items():
-                print(f"    {fname:<22} = {val!r}")
+            shown = recs if limit is None else recs[:limit]
+            print(f"\n[{name}] {len(recs)} record(s):")
+            if len(recs) == 1:
+                # Single record (e.g. Header): one field per line.
+                for fname, val in recs[0].values().items():
+                    print(f"    {fname:<22} = {val!r}")
+            else:
+                # Repeating section: one compact line per record, all records.
+                field_names = [f.name for f in recs[0].section.fields] if recs[0].section else []
+                for r in shown:
+                    pairs = " | ".join(f"{fn}={r.get(fn)!r}" for fn in field_names)
+                    print(f"    #{r.index:<4} {pairs}")
+                if limit is not None and len(recs) > limit:
+                    print(f"    ... ({len(recs) - limit} more; use --limit 0 to show all)")
 
     return 0 if roundtrip_ok else 1
 
@@ -144,7 +158,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("file", help="path to a .OK file")
     p.add_argument("--data-dir", default=DEFAULT_DATA_DIR,
                    help=f"dir with *.xlsx layouts (default: {DEFAULT_DATA_DIR})")
-    p.add_argument("--show", action="store_true", help="print first record's fields per section")
+    p.add_argument("--show", action="store_true", help="print every record's fields per section")
+    p.add_argument("--limit", type=int, default=0,
+                   help="max records shown per multi-record section (0 = all)")
     p.set_defaults(func=_cmd_parse)
     return parser
 

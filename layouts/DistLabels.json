@@ -9,6 +9,7 @@
       "tab": "Header",
       "record_length": 80,
       "sample_record": "017119938A  66725627200611211021000000000000002999#BLK INTUITION WOMENS SNELURS",
+      "ignored_fields": [],
       "issues": [],
       "fields": [
         {
@@ -161,6 +162,9 @@
       "tab": "Store ",
       "record_length": 32,
       "sample_record": "0158N00000000012  00000000122280",
+      "ignored_fields": [
+        "store_totqty"
+      ],
       "issues": [],
       "fields": [
         {
@@ -250,19 +254,6 @@
           "sample_value": "22280",
           "field_id": "field143",
           "issues": []
-        },
-        {
-          "name": "store_totqty",
-          "field_name": "tot_qty",
-          "size": null,
-          "start": 33,
-          "field_type": "char",
-          "declared_position": 33,
-          "sample_value": "#VALUE!",
-          "field_id": "field160",
-          "issues": [
-            "missing/invalid field_size in spec"
-          ]
         }
       ]
     },
@@ -271,6 +262,9 @@
       "tab": "TSticker",
       "record_length": 14,
       "sample_record": "00022001000001",
+      "ignored_fields": [
+        "tsticker_totqty"
+      ],
       "issues": [],
       "fields": [
         {
@@ -305,19 +299,6 @@
           "sample_value": "00001",
           "field_id": "field146",
           "issues": []
-        },
-        {
-          "name": "tsticker_totqty",
-          "field_name": "tot_qty",
-          "size": null,
-          "start": 15,
-          "field_type": "char",
-          "declared_position": 15,
-          "sample_value": "#VALUE!",
-          "field_id": "field161",
-          "issues": [
-            "missing/invalid field_size in spec"
-          ]
         }
       ]
     }

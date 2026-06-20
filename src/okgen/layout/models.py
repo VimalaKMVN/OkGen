@@ -48,6 +48,7 @@ class Section:
     fields: List[Field] = field(default_factory=list)
     record_length: Optional[int] = None   # computed span of all fields
     sample_record: Optional[str] = None   # tab's row-1 sample (marker stripped)
+    ignored_fields: List[str] = field(default_factory=list)  # dropped unsized rows
     issues: List[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
@@ -56,6 +57,7 @@ class Section:
             "tab": self.tab,
             "record_length": self.record_length,
             "sample_record": self.sample_record,
+            "ignored_fields": self.ignored_fields,
             "issues": self.issues,
             "fields": [f.to_dict() for f in self.fields],
         }

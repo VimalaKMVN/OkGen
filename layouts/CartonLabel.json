@@ -9,6 +9,7 @@
       "tab": "Header",
       "record_length": 96,
       "sample_record": "011C:56745002420110620000001201202807804056199402594000866N  0000C NC 000000    000000000      ",
+      "ignored_fields": [],
       "issues": [],
       "fields": [
         {
@@ -315,6 +316,9 @@
       "tab": "Store",
       "record_length": 26,
       "sample_record": "0559N00000000001000000124N",
+      "ignored_fields": [
+        "tot_qty"
+      ],
       "issues": [],
       "fields": [
         {
@@ -393,19 +397,6 @@
           "sample_value": "N",
           "field_id": "field119",
           "issues": []
-        },
-        {
-          "name": "tot_qty",
-          "field_name": "tot_qty",
-          "size": null,
-          "start": 27,
-          "field_type": "char",
-          "declared_position": 27,
-          "sample_value": "#VALUE!",
-          "field_id": "field165",
-          "issues": [
-            "missing/invalid field_size in spec"
-          ]
         }
       ]
     }

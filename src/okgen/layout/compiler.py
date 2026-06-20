@@ -134,7 +134,15 @@ def _compile_section(tab_title: str, rows: List[List]) -> Optional[Section]:
             f.issues.append("missing/invalid field_size in spec")
         fields.append(f)
 
+    # Compute positions over the full field sequence first (so a sized field
+    # following an unsized one can still resync), then drop the unsized rows.
+    # Those are spec artifacts: repeating-record extras (lane2..lane10, where
+    # lane1's position/size applies to every lane record) and computed
+    # aggregates (*_totqty). They are recorded in `ignored_fields`.
     _recompute_positions(fields)
+    sized = [f for f in fields if f.size is not None]
+    ignored = [f.name for f in fields if f.size is None]
+
     # The sample record lives in column A somewhere above the header row
     # (often row 0, with blank spacer rows in between).
     sample_record = None
@@ -143,10 +151,11 @@ def _compile_section(tab_title: str, rows: List[List]) -> Optional[Section]:
             sample_record = str(prior[0])
             break
     section = Section(
-        name=section_name, tab=tab_title, fields=fields, sample_record=sample_record
+        name=section_name, tab=tab_title, fields=sized,
+        sample_record=sample_record, ignored_fields=ignored,
     )
     section.record_length = max(
-        (f.end for f in fields if f.end is not None), default=None
+        (f.end for f in sized if f.end is not None), default=None
     )
     _flag_section_issues(section)
     return section

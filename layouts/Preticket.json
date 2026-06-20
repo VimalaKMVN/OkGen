@@ -9,6 +9,7 @@
       "tab": "Header",
       "record_length": 51,
       "sample_record": "02YL00882268 45201106061535010010010000220000000999",
+      "ignored_fields": [],
       "issues": [],
       "fields": [
         {
@@ -161,6 +162,7 @@
       "tab": "Detail",
       "record_length": 186,
       "sample_record": "00100142103239702      NXXXXXXXXXX          001800N00099900220007194339000454218                                                                                                          ",
+      "ignored_fields": [],
       "issues": [],
       "fields": [
         {
