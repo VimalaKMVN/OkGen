@@ -10,7 +10,7 @@ from okgen.detect import detect_from_header, detect_layout
 DATA_DIR = Path(
     os.environ.get(
         "OKGEN_DATA_DIR",
-        "/Users/praveendx/repos/OkGenData/OkFileDefinitions",
+        str(Path(__file__).resolve().parents[1] / "data" / "OkFileDefinitions"),
     )
 )
 

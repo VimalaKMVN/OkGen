@@ -16,9 +16,12 @@ from okgen.detect import detect_layout
 from okgen.layout.compiler import compile_dir
 from okgen.layout.validate import validate_layout
 
+# Base layout/sample data ships in the repo under data/OkFileDefinitions.
+# Override with the OKGEN_DATA_DIR env var to point elsewhere.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_DIR = os.environ.get(
     "OKGEN_DATA_DIR",
-    "/Users/praveendx/repos/OkGenData/OkFileDefinitions",
+    str(_REPO_ROOT / "data" / "OkFileDefinitions"),
 )
 
 
