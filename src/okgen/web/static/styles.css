@@ -100,17 +100,32 @@ body {
 .tab.active { color: var(--text); border-bottom-color: var(--accent); }
 
 /* Raw verify view */
-.raw-banner { color: var(--text-dim); font-size: 11px; margin-bottom: 8px; }
+.raw-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+.raw-banner { color: var(--text-dim); font-size: 11px; flex: 1; }
 .raw-banner.warn { color: var(--dirty); }
+.raw-toggle {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--text-dim); font-size: 11px; cursor: pointer; user-select: none;
+  white-space: nowrap;
+}
 .raw-pre {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px; line-height: 1.4;
   background: var(--bg-pane); color: var(--text);
   border: 1px solid var(--border); border-radius: 4px;
   padding: 10px; overflow: auto; white-space: pre;
-  max-height: calc(100vh - 170px);
+  max-height: calc(100vh - 190px);
 }
-.raw-ruler { color: var(--text-dim); }
+/* Light vertical guides every 10 character columns, aligned to the ruler. */
+.raw-pre.grid {
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0, transparent calc(10ch - 1px),
+    rgba(120, 196, 224, 0.16) calc(10ch - 1px), rgba(120, 196, 224, 0.16) 10ch
+  );
+  background-origin: content-box;
+}
+.raw-ruler { color: #e0a44a; }   /* amber ruler, distinct from the data */
 
 /* Tree */
 .tree ul { list-style: none; margin: 0; padding-left: 14px; }

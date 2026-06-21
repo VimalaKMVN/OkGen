@@ -287,20 +287,36 @@ function positionRuler(width) {
 function renderRaw(view) {
   const host = $("#rawView");
   host.innerHTML = "";
-  const banner = el("div", "raw-banner");
-  host.appendChild(banner);
+
+  // Toolbar: status banner + a gridlines toggle (on by default, remembered).
+  const toolbar = el("div", "raw-toolbar");
+  toolbar.appendChild(el("div", "raw-banner"));
+  const gridOn = localStorage.getItem("okgen.rawGrid") !== "0";
+  const toggle = el("label", "raw-toggle");
+  const cb = el("input");
+  cb.type = "checkbox";
+  cb.checked = gridOn;
+  toggle.appendChild(cb);
+  toggle.appendChild(document.createTextNode(" gridlines"));
+  toolbar.appendChild(toggle);
+  host.appendChild(toolbar);
   updateRawBanner();
 
   const text = (view.raw_text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = text.split("\n");
   const maxLen = lines.reduce((m, l) => Math.max(m, l.length), 0);
 
-  const pre = el("pre", "raw-pre");
+  const pre = el("pre", "raw-pre" + (gridOn ? " grid" : ""));
   // Position ruler so the user can verify character columns.
   const ruler = el("span", "raw-ruler", positionRuler(maxLen) + "\n");
   pre.appendChild(ruler);
   pre.appendChild(document.createTextNode(text));
   host.appendChild(pre);
+
+  cb.addEventListener("change", () => {
+    pre.classList.toggle("grid", cb.checked);
+    localStorage.setItem("okgen.rawGrid", cb.checked ? "1" : "0");
+  });
 }
 
 function updateRawBanner() {
