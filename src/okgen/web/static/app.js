@@ -121,6 +121,19 @@ function selectFile(path, rowEl) {
   loadFile(path);
 }
 
+// Update a file's chain badge in the tree in place (e.g. after the chain is
+// edited and saved) without rebuilding the whole tree.
+function updateTreeBadge(path, chainInfo, chain) {
+  document.querySelectorAll(".node").forEach((n) => {
+    if (n.dataset.path !== path) return;
+    const badge = n.querySelector(".chain-badge");
+    if (!badge) return;
+    badge.textContent = (chainInfo && chainInfo.short) || chain || "?";
+    badge.style.background = (chainInfo && chainInfo.color) || "#666";
+    badge.title = (chainInfo && chainInfo.name) || ("chain " + (chain || "?"));
+  });
+}
+
 // ---- editor ----
 async function loadFile(path) {
   try {
@@ -131,6 +144,7 @@ async function loadFile(path) {
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
+    updateTreeBadge(path, view.chain_info, view.chain);  // reflect chain edits in the tree
     setStatus(view.roundtrip_ok ? "Loaded (round-trip OK)" : "Loaded (round-trip DIFFERS!)",
               view.roundtrip_ok ? "ok" : "err");
   } catch (e) {
