@@ -31,7 +31,7 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     @app.get("/")
     def index():
         chains = {code: info.to_dict() for code, info in config.chains().items()}
-        return render_template("index.html", chains=chains)
+        return render_template("index.html", chains=chains, field_colors=config.field_colors())
 
     # ----- JSON API -----
     @app.get("/api/health")

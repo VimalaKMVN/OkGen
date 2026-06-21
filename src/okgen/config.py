@@ -62,11 +62,13 @@ class Config:
         rules: List[dict],
         limits: Optional[Dict[str, Dict[str, int]]] = None,
         unique_fields: Optional[Dict[str, str]] = None,
+        field_colors: Optional[Dict[str, str]] = None,
     ):
         self._chains = chains
         self._rules = rules
         self._limits = limits or {}
         self._unique_fields = unique_fields or {}
+        self._field_colors = field_colors or {}
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -132,6 +134,10 @@ class Config:
         opts = self.options(field, chain=chain, layout=layout, fmt=fmt)
         return opts.get(code, code)
 
+    # ----- field label colors -----
+    def field_colors(self) -> Dict[str, str]:
+        return dict(self._field_colors)
+
     # ----- unique key field -----
     def unique_field(self, layout: Optional[str]) -> Optional[str]:
         """Field that must be unique within a folder for this layout, or None."""
@@ -187,4 +193,10 @@ class Config:
             data = yaml.safe_load(keys_path.read_text(encoding="utf-8")) or {}
             unique_fields = {str(k): str(v) for k, v in (data.get("unique_fields") or {}).items()}
 
-        return cls(chains, rules, limits, unique_fields)
+        field_colors: Dict[str, str] = {}
+        fc_path = cdir / "field_colors.yaml"
+        if fc_path.is_file():
+            data = yaml.safe_load(fc_path.read_text(encoding="utf-8")) or {}
+            field_colors = {str(k): str(v) for k, v in (data.get("field_colors") or {}).items()}
+
+        return cls(chains, rules, limits, unique_fields, field_colors)

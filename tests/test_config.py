@@ -58,6 +58,12 @@ def test_unmapped_field_returns_empty_options(cfg):
     assert cfg.options("keytrol") == {}
 
 
+def test_field_colors(cfg):
+    colors = cfg.field_colors()
+    assert colors["chain"] == "#f06a6a"
+    assert colors["format"] == "#5aa9ff"
+
+
 def test_list_matching(cfg):
     # Rule matches chain 03 OR 04, layout StyleHeader OR Preticket.
     assert cfg.label("type", "1", chain="04", layout="Preticket") == "Type One"

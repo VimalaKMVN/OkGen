@@ -200,9 +200,7 @@ body {
 .field label { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 4px; }
 .field .size-hint { color: var(--text-dim); font-size: 10px; }
 
-/* Consistent label colors so a field type is recognizable at a glance. */
-.lbl-chain { color: #f06a6a !important; font-weight: 700; }    /* chain  = red */
-.lbl-format { color: #5aa9ff !important; font-weight: 700; }   /* format = blue */
+/* Field label colors are applied inline from config/field_colors.yaml. */
 
 /* Highlight the layout's unique key field in the editor. */
 .field-key {

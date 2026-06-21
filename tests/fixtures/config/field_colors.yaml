@@ -1,0 +1,4 @@
+# Fixed field label colors for tests.
+field_colors:
+  chain: "#f06a6a"
+  format: "#5aa9ff"

@@ -1,0 +1,5 @@
+# Color the editor field labels so a field type is recognizable at a glance.
+# Map an output_field_name to a hex color. Add any fields you like. Editable.
+field_colors:
+  chain: "#f06a6a"     # red
+  format: "#5aa9ff"    # blue
