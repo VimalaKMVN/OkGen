@@ -7,6 +7,10 @@ correct for you, so you never have to count characters by hand.
 
 Runs entirely on your own machine. Your files never leave your computer.
 
+> **You received this as a ZIP file** (e.g. `OkGen.zip`). Everything you need is
+> inside it — there is nothing to download from any website except Python (once).
+> Just follow **Quick start** below.
+
 ---
 
 ## What you need (one time)
@@ -26,17 +30,25 @@ of small Python packages).
 
 ## Quick start (recommended)
 
-1. **Unzip** the OkGen folder anywhere (e.g. your Desktop).
-2. Double-click the launcher:
+1. **Unzip** the file you were given (e.g. `OkGen.zip`) anywhere — your Desktop is
+   fine. It unzips into a folder (its name may include a version, e.g.
+   `OkGen-0.1`). Open that folder.
+2. Double-click the launcher inside it:
    - **Windows:** `run.bat`
    - **macOS / Linux:** `run.sh` (or run `./run.sh` in a terminal)
-3. The first run sets everything up automatically, then your browser opens to
+3. The first run sets everything up automatically (this step needs internet once,
+   to fetch a few small Python packages), then your browser opens to
    **http://127.0.0.1:8000**. (If it doesn't open, paste that address into your
    browser.)
 4. To stop the app, close the terminal window (or press **Ctrl + C** in it).
 
 The launcher creates a private environment inside the folder the first time and
-reuses it afterwards, so later launches are fast.
+reuses it afterwards, so later launches are fast and work offline.
+
+> **Windows SmartScreen note:** the first time you run `run.bat`, Windows may show
+> a "Windows protected your PC" prompt because the file came from the internet.
+> Click **More info → Run anyway**. (It's a plain text script — you can open it in
+> Notepad to see exactly what it does.)
 
 ---
 
