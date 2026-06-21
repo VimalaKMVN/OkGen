@@ -171,6 +171,17 @@ body {
   color: #fff;
 }
 .file-name { overflow: hidden; text-overflow: ellipsis; }
+.dup-warn { margin-left: 5px; color: #e0b000; cursor: help; flex: 0 0 auto; }
+
+/* Bulk Edit button draws attention while files are multi-selected */
+#bulkBtn:not(.hidden) {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+  animation: bulkPulse 1.5s ease-in-out infinite;
+}
+@keyframes bulkPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(17, 119, 187, 0.55); }
+  60% { box-shadow: 0 0 0 6px rgba(17, 119, 187, 0); }
+}
 
 /* Editor */
 .section { margin-bottom: 22px; border: 1px solid var(--border); border-radius: 5px; overflow: hidden; }

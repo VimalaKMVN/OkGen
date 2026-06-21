@@ -61,10 +61,12 @@ class Config:
         chains: Dict[str, ChainInfo],
         rules: List[dict],
         limits: Optional[Dict[str, Dict[str, int]]] = None,
+        unique_fields: Optional[Dict[str, str]] = None,
     ):
         self._chains = chains
         self._rules = rules
         self._limits = limits or {}
+        self._unique_fields = unique_fields or {}
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -130,6 +132,13 @@ class Config:
         opts = self.options(field, chain=chain, layout=layout, fmt=fmt)
         return opts.get(code, code)
 
+    # ----- unique key field -----
+    def unique_field(self, layout: Optional[str]) -> Optional[str]:
+        """Field that must be unique within a folder for this layout, or None."""
+        if layout is None:
+            return None
+        return self._unique_fields.get(layout)
+
     # ----- record limits -----
     def max_records(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:
         """Max records allowed for a section, or None for unlimited."""
@@ -172,4 +181,10 @@ class Config:
                 for layout, secs in raw.items()
             }
 
-        return cls(chains, rules, limits)
+        unique_fields: Dict[str, str] = {}
+        keys_path = cdir / "keys.yaml"
+        if keys_path.is_file():
+            data = yaml.safe_load(keys_path.read_text(encoding="utf-8")) or {}
+            unique_fields = {str(k): str(v) for k, v in (data.get("unique_fields") or {}).items()}
+
+        return cls(chains, rules, limits, unique_fields)

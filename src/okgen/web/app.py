@@ -46,7 +46,7 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def tree():
         directory = request.args.get("dir", "")
         try:
-            return jsonify(service.build_tree(directory, config))
+            return jsonify(service.build_tree(directory, config, registry))
         except NotADirectoryError as exc:
             return _err(str(exc), 400)
 
@@ -135,9 +135,23 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def file_copy_batch():
         body = request.get_json(force=True, silent=True) or {}
         try:
-            return jsonify(service.copy_files(body.get("srcs", []), body.get("dst_dir")))
+            return jsonify(service.copy_files(
+                body.get("srcs", []), body.get("dst_dir"), registry, config))
         except service.EditError as exc:
             return _err(str(exc), 422)
+
+    @app.post("/api/unique/folder")
+    def unique_folder():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.make_unique_in_folder(body.get("path"), registry, config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
+    @app.post("/api/unique/bulk")
+    def unique_bulk():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.make_unique_files(body.get("paths", []), registry, config))
 
     @app.post("/api/file/rename")
     def file_rename():

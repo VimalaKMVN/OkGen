@@ -151,6 +151,11 @@ function renderFileNode(node) {
   badge.title = info.name || ("chain " + (node.chain || "?"));
   row.appendChild(badge);
   row.appendChild(el("span", "file-name", node.name));
+  if (node.duplicate) {
+    const warn = el("span", "dup-warn", "⚠");
+    warn.title = `duplicate ${node.key_field || "key"}: ${node.key_value}`;
+    row.appendChild(warn);
+  }
   row.addEventListener("click", (e) => onFileClick(e, node, row));
   row.addEventListener("contextmenu", (e) => showCtxMenu(e, node, row));
   li.appendChild(row);
@@ -730,6 +735,7 @@ function showCtxMenu(e, node, row) {
   if (count <= 1) add("Open", () => loadFile(node.path));
   add(count > 1 ? `Copy ${count} files` : "Copy", () => copySelection());
   add("Paste here", () => pasteInto(folderOf(node.path)), !state.clipboard.length);
+  add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   menu.appendChild(el("div", "ctx-sep"));
   add("Rename…", () => renameFile(node), count > 1);
   add("Delete", () => deleteFile(node), count > 1);
@@ -767,10 +773,31 @@ function showFolderCtxMenu(e, node) {
     add("Delete folder", () => deleteFolder(node));
   }
   menu.appendChild(el("div", "ctx-sep"));
+  add("Make keys unique", () => makeUniqueFolder(node.path));
   add("Refresh", () => refreshFolder(node.path));
   menu.style.left = e.clientX + "px";
   menu.style.top = e.clientY + "px";
   menu.classList.remove("hidden");
+}
+
+async function makeUniqueFolder(path) {
+  try {
+    const res = await postJSON("/api/unique/folder", { path });
+    await refreshFolder(path);
+    const n = (res.rekeyed || []).filter((r) => r.to).length;
+    setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
+  } catch (e) { setStatus("Make unique failed: " + e.message, "err"); }
+}
+
+async function makeUniqueSelection() {
+  const paths = [...state.selection];
+  if (!paths.length) return;
+  try {
+    const res = await postJSON("/api/unique/bulk", { paths });
+    new Set(paths.map(folderOf)).forEach((f) => refreshFolder(f));
+    const n = (res.folders || []).reduce((a, f) => a + (f.rekeyed || []).filter((r) => r.to).length, 0);
+    setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
+  } catch (e) { setStatus("Make unique failed: " + e.message, "err"); }
 }
 
 async function createFolder(parentPath) {
@@ -850,9 +877,11 @@ async function pasteInto(folder) {
   try {
     const res = await postJSON("/api/file/copy-batch", { srcs: state.clipboard, dst_dir: folder });
     await refreshFolder(folder);
-    const c = res.copied.length, r = (res.renamed || []).length, er = res.errors.length;
+    const c = res.copied.length, r = (res.renamed || []).length;
+    const rk = (res.rekeyed || []).filter((x) => x.to).length, er = res.errors.length;
     const msg = `Pasted ${c} item(s)` +
       (r ? `, ${r} renamed to avoid overwrite` : "") +
+      (rk ? `, ${rk} re-keyed for uniqueness` : "") +
       (er ? `, ${er} failed` : "");
     setStatus(msg, er ? "err" : "ok");
   } catch (e) { setStatus("Paste failed: " + e.message, "err"); }

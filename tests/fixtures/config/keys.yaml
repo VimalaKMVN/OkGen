@@ -1,0 +1,6 @@
+# Fixed unique-key fields for tests.
+unique_fields:
+  CartonLabel: picklist_id
+  DistLabels: keytrol
+  Preticket: po
+  StyleHeader: keytrol

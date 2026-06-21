@@ -1,0 +1,9 @@
+# The field that must be UNIQUE within a folder among files of each layout.
+# Values are treated as zero-padded numbers. Editable.
+#
+#   layout name -> field name (output_field_name)
+unique_fields:
+  CartonLabel: picklist_id
+  DistLabels: keytrol
+  Preticket: po
+  StyleHeader: keytrol

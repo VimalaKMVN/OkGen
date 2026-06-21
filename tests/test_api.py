@@ -50,6 +50,51 @@ def test_build_tree_only_ok_files(config):
     assert style["layout"] == "StyleHeader"
 
 
+def test_duplicate_key_flag(tmp_path, registry, config):
+    # Two StyleHeader files share keytrol -> both flagged duplicate.
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", tmp_path / "a.OK")
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", tmp_path / "b.OK")
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", tmp_path / "c.OK")  # different layout, no clash
+    tree = service.build_tree(tmp_path, config, registry)
+    by = {c["name"]: c for c in tree["children"]}
+    assert by["a.OK"]["key_field"] == "keytrol"
+    assert by["a.OK"]["duplicate"] and by["b.OK"]["duplicate"]
+    assert by["c.OK"]["duplicate"] is False
+
+
+def test_paste_auto_uniquifies_key(tmp_path, registry, config):
+    src = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", src)
+    dst = tmp_path / "dst"; dst.mkdir()
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", dst / "existing.OK")  # already has keytrol 550000
+
+    res = service.copy_files([str(src)], dst, registry, config)
+    assert res["rekeyed"], "pasted file colliding on keytrol should be re-keyed"
+    # The destination now has two distinct keytrol values.
+    tree = service.build_tree(dst, config, registry)
+    keys = sorted(c["key_value"] for c in tree["children"] if c["type"] == "file")
+    assert len(set(keys)) == 2
+    assert not any(c.get("duplicate") for c in tree["children"] if c["type"] == "file")
+
+
+def test_make_unique_in_folder(tmp_path, registry, config):
+    for n in ("a.OK", "b.OK", "c.OK"):
+        shutil.copy2(DATA_DIR / "StyleHeader.OK", tmp_path / n)  # all keytrol 550000
+    res = service.make_unique_in_folder(tmp_path, registry, config, backup=False)
+    assert len(res["rekeyed"]) == 2          # first kept, two re-keyed
+    tree = service.build_tree(tmp_path, config, registry)
+    keys = [c["key_value"] for c in tree["children"] if c["type"] == "file"]
+    assert len(set(keys)) == 3               # all unique now
+    assert not any(c.get("duplicate") for c in tree["children"] if c["type"] == "file")
+
+
+def test_bulk_excludes_key_field(registry, config):
+    scope = service.bulk_scope([str(DATA_DIR / "StyleHeader.OK")], registry, config)
+    names = [f["name"] for f in scope["header_fields"]["StyleHeader"]]
+    assert "keytrol" not in names            # key field hidden from bulk set-value
+    assert "indicator" in names
+
+
 def test_build_tree_is_one_level_lazy(tmp_path, config):
     # Nested structure: root/sub/Style.OK, plus a file at root.
     (tmp_path / "sub").mkdir()

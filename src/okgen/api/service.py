@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from okgen.config import Config
-from okgen.detect import detect_layout, read_chain
+from okgen.detect import detect_from_header, detect_layout, read_chain, read_header_line
 from okgen.layout.registry import LayoutRegistry
 from okgen.okfile import ENCODING, OkFile, parse_okfile
 
@@ -25,13 +25,13 @@ def is_ok_file(path: Path) -> bool:
 # --------------------------------------------------------------------------- #
 # File tree
 # --------------------------------------------------------------------------- #
-def build_tree(root, config: Config) -> dict:
+def build_tree(root, config: Config, registry=None) -> dict:
     """List ONE level of a folder (lazy tree): immediate subfolders + .OK files.
 
     Subfolders are returned unexpanded (``children: None``) so the UI can fetch
-    them on demand when the user expands them — this keeps opening deep/large
-    structures fast. Only ``.OK`` files are listed (other files are hidden);
-    each file node carries its chain + chain info (for the icon) and layout.
+    them on demand. Only ``.OK`` files are listed; each file node carries its
+    chain (for the icon), layout, key field/value, and a ``duplicate`` flag set
+    when another same-layout file in this folder shares its key value.
     """
     root = Path(root)
     if not root.is_dir():
@@ -51,8 +51,9 @@ def build_tree(root, config: Config) -> dict:
                 "children": None,   # not loaded yet (lazy)
             })
         elif is_ok_file(entry):
-            children.append(_file_node(entry, config))
+            children.append(_file_node(entry, config, registry))
 
+    _flag_duplicate_keys(children)
     return {
         "type": "folder",
         "name": root.name or str(root),
@@ -61,12 +62,47 @@ def build_tree(root, config: Config) -> dict:
     }
 
 
-def _file_node(path: Path, config: Config) -> dict:
+def _flag_duplicate_keys(children: List[dict]) -> None:
+    """Mark files whose (layout, key_value) repeats within this folder."""
+    counts: Dict[tuple, int] = {}
+    for c in children:
+        if c.get("type") == "file" and c.get("layout") and c.get("key_value") is not None:
+            k = (c["layout"], c["key_value"])
+            counts[k] = counts.get(k, 0) + 1
+    for c in children:
+        if c.get("type") == "file" and c.get("layout") and c.get("key_value") is not None:
+            c["duplicate"] = counts[(c["layout"], c["key_value"])] > 1
+
+
+def _header_field(layout, name):
+    """Header-section Field object by name, or None."""
+    if layout is None or not layout.sections or not name:
+        return None
+    return next((f for f in layout.sections[0].fields if f.name == name), None)
+
+
+def _key_from_header(header: str, layout, field) -> Optional[str]:
+    """Slice a header field value from the raw header line (marker offset 1)."""
+    if field is None or field.start is None or field.size is None:
+        return None
+    start = 1 + field.start - 1
+    return header[start:start + field.size]
+
+
+def _file_node(path: Path, config: Config, registry=None) -> dict:
     chain = ""
     layout = None
+    key_field = None
+    key_value = None
     try:
-        chain = read_chain(path)
-        layout = detect_layout(path).layout
+        header = read_header_line(path)
+        chain = header[1:3]
+        layout = detect_from_header(header).layout
+        if layout and registry is not None:
+            key_field = config.unique_field(layout)
+            if key_field:
+                f = _header_field(registry.get(layout), key_field)
+                key_value = _key_from_header(header, registry.get(layout), f)
     except Exception:
         pass
     info = config.chain(chain)
@@ -77,6 +113,9 @@ def _file_node(path: Path, config: Config) -> dict:
         "chain": chain,
         "chain_info": info.to_dict() if info else None,
         "layout": layout,
+        "key_field": key_field,
+        "key_value": key_value,
+        "duplicate": False,
     }
 
 
@@ -413,17 +452,20 @@ def _unique_path(dst_dir: Path, name: str) -> Path:
     return candidate
 
 
-def copy_files(srcs, dst_dir) -> dict:
+def copy_files(srcs, dst_dir, registry=None, config=None) -> dict:
     """Paste .OK files and/or whole folders into a folder.
 
     Files are copied; folders are copied recursively with all their contents.
     Never overwrites: if a name already exists, the copy is auto-renamed with a
-    ' (N)' suffix (Downloads-style). Returns per-item outcomes.
+    ' (N)' suffix (Downloads-style). When registry+config are given, any pasted
+    .OK file whose unique key collides in the destination is re-keyed to the
+    next free value. Returns per-item outcomes plus ``rekeyed``.
     """
     dd = Path(dst_dir)
     if not dd.is_dir():
         raise EditError(f"not a folder: {dd}")
     copied, renamed, errors = [], [], []
+    new_ok_files: List[Path] = []
     for src in srcs or []:
         sp = Path(src)
         is_dir = sp.is_dir()
@@ -442,22 +484,156 @@ def copy_files(srcs, dst_dir) -> dict:
                 shutil.copytree(sp, target)
             else:
                 shutil.copy2(sp, target)
+                new_ok_files.append(target)
             copied.append(str(target))
         except OSError as exc:
             errors.append({"src": str(src), "error": str(exc)})
-    return {"copied": copied, "renamed": renamed, "errors": errors}
+
+    rekeyed = []
+    if registry is not None and config is not None and new_ok_files:
+        rekeyed = _uniquify_new_files(dd, new_ok_files, registry, config)
+    return {"copied": copied, "renamed": renamed, "rekeyed": rekeyed, "errors": errors}
+
+
+# --------------------------------------------------------------------------- #
+# Unique key field
+# --------------------------------------------------------------------------- #
+def _read_key_int(path: Path, registry, config):
+    """(layout, key_field, int_value | None) for a file's unique key."""
+    try:
+        header = read_header_line(path)
+        layout = detect_from_header(header).layout
+    except Exception:
+        return (None, None, None)
+    if not layout:
+        return (None, None, None)
+    kf = config.unique_field(layout)
+    if not kf:
+        return (layout, None, None)
+    f = _header_field(registry.get(layout), kf)
+    raw = _key_from_header(header, registry.get(layout), f)
+    try:
+        return (layout, kf, int(raw))
+    except (TypeError, ValueError):
+        return (layout, kf, None)
+
+
+def _set_key(path: Path, registry, key_field: str, new_int: int, size: int, backup: bool):
+    """Write a new zero-padded key value into a file's header (byte-exact)."""
+    new_str = str(new_int).zfill(size)
+    if len(new_str) > size:
+        raise EditError(f"no available key for {path.name} (width {size} overflow)")
+    okf = parse_okfile(path, registry=registry)
+    if backup and path.exists():
+        shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
+    okf.records[0].set(key_field, new_str)
+    okf.save(path)
+    return new_str
+
+
+def _folder_key_state(folder: Path, registry, config, exclude: set):
+    """Per-layout (used-int-set, max-int) from a folder's OK files, minus excludes."""
+    used: Dict[str, set] = {}
+    maxv: Dict[str, int] = {}
+    for entry in folder.iterdir():
+        if not is_ok_file(entry) or entry.resolve() in exclude:
+            continue
+        layout, kf, val = _read_key_int(entry, registry, config)
+        if layout and kf and val is not None:
+            used.setdefault(layout, set()).add(val)
+            maxv[layout] = max(maxv.get(layout, -1), val)
+    return used, maxv
+
+
+def _uniquify_new_files(folder: Path, new_files: List[Path], registry, config) -> List[dict]:
+    """Re-key pasted files that collide with existing/earlier keys (max+1)."""
+    used, maxv = _folder_key_state(folder, registry, config, {p.resolve() for p in new_files})
+    rekeyed = []
+    for p in new_files:
+        layout, kf, val = _read_key_int(p, registry, config)
+        if not (layout and kf):
+            continue
+        u = used.setdefault(layout, set())
+        if val is not None and val not in u:
+            u.add(val)
+            maxv[layout] = max(maxv.get(layout, -1), val)
+            continue
+        f = _header_field(registry.get(layout), kf)
+        new_int = maxv.get(layout, -1) + 1
+        try:
+            new_str = _set_key(p, registry, kf, new_int, f.size, backup=False)
+        except (EditError, Exception) as exc:  # noqa: BLE001
+            rekeyed.append({"file": p.name, "error": str(exc)})
+            continue
+        u.add(new_int)
+        maxv[layout] = new_int
+        rekeyed.append({"file": p.name, "field": kf,
+                        "from": (str(val) if val is not None else None), "to": new_str})
+    return rekeyed
+
+
+def make_unique_in_folder(folder, registry, config, backup=True) -> dict:
+    """Fix duplicate keys in a folder (keep first occurrence, re-key the rest)."""
+    folder = Path(folder)
+    if not folder.is_dir():
+        raise EditError(f"not a folder: {folder}")
+    files = sorted([p for p in folder.iterdir() if is_ok_file(p)], key=lambda p: p.name.lower())
+    used: Dict[str, set] = {}
+    maxv: Dict[str, int] = {}
+    rekeyed = []
+    for p in files:
+        layout, kf, val = _read_key_int(p, registry, config)
+        if not (layout and kf):
+            continue
+        u = used.setdefault(layout, set())
+        if val is not None and val not in u:
+            u.add(val)
+            maxv[layout] = max(maxv.get(layout, -1), val)
+            continue
+        f = _header_field(registry.get(layout), kf)
+        new_int = maxv.get(layout, -1) + 1
+        try:
+            new_str = _set_key(p, registry, kf, new_int, f.size, backup=backup)
+        except (EditError, Exception) as exc:  # noqa: BLE001
+            rekeyed.append({"file": p.name, "error": str(exc)})
+            continue
+        u.add(new_int)
+        maxv[layout] = new_int
+        rekeyed.append({"file": p.name, "field": kf,
+                        "from": (str(val) if val is not None else None), "to": new_str})
+    return {"folder": str(folder), "rekeyed": rekeyed}
+
+
+def make_unique_files(paths, registry, config, backup=True) -> dict:
+    """Run Make Unique on every folder that contains a selected file."""
+    folders = []
+    seen = set()
+    for p in paths or []:
+        parent = Path(p).parent
+        key = str(parent.resolve())
+        if key not in seen:
+            seen.add(key)
+            folders.append(parent)
+    results = [make_unique_in_folder(f, registry, config, backup=backup) for f in folders]
+    return {"folders": results}
 
 
 # --------------------------------------------------------------------------- #
 # Bulk edit (B1: Header fields, one layout, set value)
 # --------------------------------------------------------------------------- #
 def _header_fields_for_layout(layout, config: Config) -> List[dict]:
-    """Header-section field metadata for a layout, for the bulk-edit dropdowns."""
+    """Header-section field metadata for a layout, for the bulk-edit dropdowns.
+
+    Excludes the layout's unique key field — bulk set-value would make every
+    file's key identical, which violates uniqueness (use Make Unique instead).
+    """
     if not layout.sections:
         return []
-    header = layout.sections[0]
+    key = config.unique_field(layout.name)
     out = []
-    for f in header.fields:
+    for f in layout.sections[0].fields:
+        if f.name == key:
+            continue
         opts = config.options(f.name, layout=layout.name)
         out.append({
             "name": f.name, "size": f.size, "type": f.field_type,
