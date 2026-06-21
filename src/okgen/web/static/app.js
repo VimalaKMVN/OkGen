@@ -773,7 +773,8 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   menu.appendChild(el("div", "ctx-sep"));
   add("Rename…", () => renameFile(node), count > 1);
-  add("Delete", () => deleteFile(node), count > 1);
+  add(count > 1 ? `Delete ${count} files` : "Delete",
+      () => (count > 1 ? deleteSelection() : deleteFile(node)));
   menu.style.left = e.clientX + "px";
   menu.style.top = e.clientY + "px";
   menu.classList.remove("hidden");
@@ -890,13 +891,7 @@ async function deleteFolder(node) {
   try {
     await postJSON("/api/folder/delete", { path: node.path });
     // If the open file lived inside this folder, clear the editor.
-    if (state.file && state.file.startsWith(node.path)) {
-      state.file = null; state.view = null;
-      $("#editor").innerHTML = ""; $("#rawView").innerHTML = "";
-      $("#editorTabs").classList.add("hidden");
-      $("#editorEmpty").style.display = "";
-      updateSaveButtons();
-    }
+    if (state.file && state.file.startsWith(node.path)) clearEditor();
     await refreshFolder(folderOf(node.path));
     setStatus("Deleted folder " + node.name, "ok");
   } catch (e) { setStatus("Delete failed: " + e.message, "err"); }
@@ -950,20 +945,46 @@ async function pasteInto(folder) {
   }
 }
 
+function clearEditor() {
+  state.file = null; state.view = null;
+  $("#editor").innerHTML = ""; $("#rawView").innerHTML = "";
+  $("#editorTabs").classList.add("hidden");
+  $("#editorEmpty").style.display = "";
+  updateSaveButtons();
+}
+
 async function deleteFile(node) {
   if (!confirm("Delete " + node.name + "? This cannot be undone.")) return;
+  if (!beginBusy("Deleting…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
     await postJSON("/api/file/delete", { path: node.path });
-    if (state.file === node.path) {
-      state.file = null; state.view = null;
-      $("#editor").innerHTML = ""; $("#rawView").innerHTML = "";
-      $("#editorTabs").classList.add("hidden");
-      $("#editorEmpty").style.display = "";
-      updateSaveButtons();
-    }
+    if (state.file === node.path) clearEditor();
     await refreshFolder(folderOf(node.path));
     setStatus("Deleted " + node.name, "ok");
-  } catch (e) { setStatus("Delete failed: " + e.message, "err"); }
+  } catch (e) {
+    setStatus("Delete failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
+}
+
+async function deleteSelection() {
+  const paths = [...state.selection];
+  if (!paths.length) return;
+  if (!confirm(`Delete ${paths.length} selected file(s)? This cannot be undone.`)) return;
+  if (!beginBusy("Deleting…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+  try {
+    const res = await postJSON("/api/file/delete-batch", { paths });
+    if (state.file && paths.includes(state.file)) clearEditor();
+    new Set(paths.map(folderOf)).forEach((f) => refreshFolder(f));
+    setSelection([]);
+    const d = res.deleted.length, er = res.errors.length;
+    setStatus(`Deleted ${d} file(s)` + (er ? `, ${er} failed` : ""), er ? "err" : "ok");
+  } catch (e) {
+    setStatus("Delete failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
 }
 
 async function renameFile(node) {

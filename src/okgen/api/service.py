@@ -455,6 +455,22 @@ def delete_file(path) -> dict:
     return {"deleted": str(p)}
 
 
+def delete_files(paths) -> dict:
+    """Delete several .OK files; report per-file outcomes."""
+    deleted, errors = [], []
+    for path in paths or []:
+        p = Path(path)
+        if not is_ok_file(p):
+            errors.append({"path": str(path), "error": "not an .OK file"})
+            continue
+        try:
+            p.unlink()
+            deleted.append(str(p))
+        except OSError as exc:
+            errors.append({"path": str(path), "error": str(exc)})
+    return {"deleted": deleted, "errors": errors}
+
+
 def copy_file(src, dst) -> dict:
     s, d = Path(src), Path(dst)
     if not is_ok_file(s):

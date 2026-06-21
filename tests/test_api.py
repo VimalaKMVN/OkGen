@@ -278,6 +278,17 @@ def test_paste_folder_into_itself_rejected(tmp_path):
     assert res["errors"] and "itself" in res["errors"][0]["error"]
 
 
+def test_delete_files_batch(tmp_path):
+    a = tmp_path / "a.OK"; b = tmp_path / "b.OK"; c = tmp_path / "c.OK"
+    for f in (a, b, c):
+        shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    res = service.delete_files([str(a), str(b), str(tmp_path / "missing.OK")])
+    assert len(res["deleted"]) == 2
+    assert len(res["errors"]) == 1          # missing file reported, not raised
+    assert not a.exists() and not b.exists()
+    assert c.exists()                       # untouched
+
+
 def test_save_as_and_copy_delete(tmp_path, registry):
     src = DATA_DIR / "DistLabels.OK"
     work = tmp_path / "DistLabels.OK"

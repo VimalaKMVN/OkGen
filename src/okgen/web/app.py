@@ -123,6 +123,11 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except service.EditError as exc:
             return _err(str(exc), 422)
 
+    @app.post("/api/file/delete-batch")
+    def file_delete_batch():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.delete_files(body.get("paths", [])))
+
     @app.post("/api/file/copy")
     def file_copy():
         body = request.get_json(force=True, silent=True) or {}
