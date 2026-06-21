@@ -383,22 +383,45 @@ def browse_folder(initial: Optional[str] = None) -> dict:
                 capture_output=True, text=True, timeout=600,
             )
         elif system == "Windows":
+            import base64
+
             start = (initial or "").replace("'", "''")
-            # Give the dialog a hidden top-most owner window so it appears in
-            # front of the browser instead of behind it.
-            ps = (
-                "Add-Type -AssemblyName System.Windows.Forms;"
-                "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
-                "$d.Description = 'Select the folder with your OK files';"
-                + (f"$d.SelectedPath = '{start}';" if start else "")
-                + "$o = New-Object System.Windows.Forms.Form;"
-                "$o.TopMost = $true; $o.ShowInTaskbar = $false; $o.Opacity = 0;"
-                "$null = $o.Show(); $o.Activate();"
-                "$r = $d.ShowDialog($o); $o.Close();"
-                "if ($r -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }"
-            )
+            set_start = f"$d.SelectedPath = '{start}';" if start else ""
+            # A real top-most owner window + the Alt-key trick releases Windows'
+            # foreground lock so the dialog reliably appears IN FRONT of Edge
+            # (a background process otherwise can't take foreground).
+            ps = f'''
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class Fg {{
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+}}
+"@
+$o = New-Object System.Windows.Forms.Form
+$o.TopMost = $true
+$o.ShowInTaskbar = $false
+$o.FormBorderStyle = 'None'
+$o.Width = 1; $o.Height = 1
+$o.StartPosition = 'Manual'
+$o.Left = -32000; $o.Top = -32000
+$o.Show()
+[Fg]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
+[Fg]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+[Fg]::SetForegroundWindow($o.Handle) | Out-Null
+$o.Activate()
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = 'Select the folder with your OK files'
+{set_start}
+$r = $d.ShowDialog($o)
+$o.Close()
+if ($r -eq [System.Windows.Forms.DialogResult]::OK) {{ [Console]::Out.Write($d.SelectedPath) }}
+'''
+            enc = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
             proc = subprocess.run(
-                ["powershell", "-NoProfile", "-STA", "-Command", ps],
+                ["powershell", "-NoProfile", "-STA", "-EncodedCommand", enc],
                 capture_output=True, text=True, timeout=600,
             )
         else:
