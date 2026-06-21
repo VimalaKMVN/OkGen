@@ -140,7 +140,14 @@ and you can match several chains/layouts at once with a list, e.g.
 - The layout definitions (the `.xlsx` files in `data/OkFileDefinitions`) ship with
   the app; you normally don't touch them.
 - Bundled packages live in `vendor\wheels` (Python 3.9–3.13, 64-bit Windows).
-- For the technical design, see **IMPLEMENTATION_PLAN.md**.
+
+### Project documentation
+- **IMPLEMENTATION_PLAN.md** — technical design, data model, module map.
+- **ARCHITECTURE.md** — architecture diagrams (rendered on GitHub).
+- **DEVELOPMENT_PROCESS.md** — how this app was built with Claude Code (a
+  repeatable procedure).
+- **docs/SESSION_TRANSCRIPT.md** — the full development session, readable
+  (raw machine log: `docs/session/session.jsonl`).
 
 ---
 
