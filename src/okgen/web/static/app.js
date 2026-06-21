@@ -140,9 +140,66 @@ async function loadFile(path) {
 
 function renderEditor(view) {
   $("#editorEmpty").style.display = "none";
+  $("#editorTabs").classList.remove("hidden");
   const host = $("#editor");
   host.innerHTML = "";
   view.sections.forEach((sec) => host.appendChild(renderSection(sec)));
+  renderRaw(view);
+  switchTab("rendered");   // always land on the edit view when (re)loading
+}
+
+// ---- Raw verify tab ----
+function positionRuler(width) {
+  width = Math.min(Math.max(width, 10), 400);
+  let tens = "";
+  for (let m = 10; m <= width; m += 10) {
+    const s = String(m);
+    tens = tens.padEnd(m - s.length, " ") + s;
+  }
+  tens = tens.padEnd(width, " ");
+  let ones = "";
+  for (let i = 1; i <= width; i++) ones += String(i % 10);
+  return tens + "\n" + ones;
+}
+
+function renderRaw(view) {
+  const host = $("#rawView");
+  host.innerHTML = "";
+  const banner = el("div", "raw-banner");
+  host.appendChild(banner);
+  updateRawBanner();
+
+  const text = (view.raw_text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lines = text.split("\n");
+  const maxLen = lines.reduce((m, l) => Math.max(m, l.length), 0);
+
+  const pre = el("pre", "raw-pre");
+  // Position ruler so the user can verify character columns.
+  const ruler = el("span", "raw-ruler", positionRuler(maxLen) + "\n");
+  pre.appendChild(ruler);
+  pre.appendChild(document.createTextNode(text));
+  host.appendChild(pre);
+}
+
+function updateRawBanner() {
+  const banner = $("#rawView .raw-banner");
+  if (!banner) return;
+  if (isDirty()) {
+    banner.textContent = "⚠ Showing the last saved file — you have unsaved edits. Save to refresh this view.";
+    banner.className = "raw-banner warn";
+  } else {
+    banner.textContent = "Read-only view of the file on disk (use the ruler to verify character positions).";
+    banner.className = "raw-banner";
+  }
+}
+
+function switchTab(which) {
+  const rendered = which !== "raw";
+  $("#editor").classList.toggle("hidden", !rendered);
+  $("#rawView").classList.toggle("hidden", rendered);
+  $("#tabRendered").classList.toggle("active", rendered);
+  $("#tabRaw").classList.toggle("active", !rendered);
+  if (!rendered) updateRawBanner();   // refresh banner when entering Raw
 }
 
 function renderSection(sec) {
@@ -308,6 +365,7 @@ function updateSaveButtons() {
   $("#saveBtn").disabled = !state.file || dirty === 0;
   $("#saveAsBtn").disabled = !state.file;
   updateDirtyIndicator();
+  updateRawBanner();
   if (dirty) setStatus(`${dirty} unsaved edit(s)`, "dirty");
 }
 
@@ -378,7 +436,13 @@ async function deleteFile(node) {
   if (!confirm("Delete " + node.name + "? This cannot be undone.")) return;
   try {
     await postJSON("/api/file/delete", { path: node.path });
-    if (state.file === node.path) { state.file = null; $("#editor").innerHTML = ""; $("#editorEmpty").style.display = ""; updateSaveButtons(); }
+    if (state.file === node.path) {
+      state.file = null; state.view = null;
+      $("#editor").innerHTML = ""; $("#rawView").innerHTML = "";
+      $("#editorTabs").classList.add("hidden");
+      $("#editorEmpty").style.display = "";
+      updateSaveButtons();
+    }
     await openFolder(state.rootDir);
     setStatus("Deleted " + node.name, "ok");
   } catch (e) { setStatus("Delete failed: " + e.message, "err"); }
@@ -397,6 +461,9 @@ async function renameFile(node) {
 
 // ---- wire up ----
 document.addEventListener("click", hideCtxMenu);
+// Tab switching is a pure view toggle — it must NOT trigger the unsaved guard.
+$("#tabRendered").addEventListener("click", () => switchTab("rendered"));
+$("#tabRaw").addEventListener("click", () => switchTab("raw"));
 $("#openBtn").addEventListener("click", browseFolder);
 $("#folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") openFolder(e.target.value.trim()); });
 $("#saveBtn").addEventListener("click", () => save(null));

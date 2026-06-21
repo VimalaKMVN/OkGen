@@ -79,6 +79,31 @@ body {
 .editor-pane { flex: 1; overflow: auto; padding: 14px 18px; }
 .empty { color: var(--text-dim); padding: 30px; text-align: center; }
 
+.hidden { display: none !important; }
+
+/* Tabs */
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.tab {
+  background: transparent; color: var(--text-dim);
+  border: none; border-bottom: 2px solid transparent;
+  padding: 7px 16px; cursor: pointer; font-size: 13px;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* Raw verify view */
+.raw-banner { color: var(--text-dim); font-size: 11px; margin-bottom: 8px; }
+.raw-banner.warn { color: var(--dirty); }
+.raw-pre {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 1.4;
+  background: var(--bg-pane); color: var(--text);
+  border: 1px solid var(--border); border-radius: 4px;
+  padding: 10px; overflow: auto; white-space: pre;
+  max-height: calc(100vh - 170px);
+}
+.raw-ruler { color: var(--text-dim); }
+
 /* Tree */
 .tree ul { list-style: none; margin: 0; padding-left: 14px; }
 .tree > ul { padding-left: 4px; }

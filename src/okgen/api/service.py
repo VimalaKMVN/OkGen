@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 from okgen.config import Config
 from okgen.detect import detect_layout, read_chain
 from okgen.layout.registry import LayoutRegistry
-from okgen.okfile import OkFile, parse_okfile
+from okgen.okfile import ENCODING, OkFile, parse_okfile
 
 OK_SUFFIX = ".ok"  # compared case-insensitively
 
@@ -131,6 +131,7 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
         "format": fmt,
         "chain_info": chain_info.to_dict() if chain_info else None,
         "roundtrip_ok": roundtrip_ok,
+        "raw_text": path.read_bytes().decode(ENCODING),  # for the Raw verify tab
         "sections": sections_out,
     }
 

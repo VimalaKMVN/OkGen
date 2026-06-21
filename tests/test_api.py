@@ -135,6 +135,12 @@ def test_flask_endpoints():
     assert client.get("/").status_code == 200
 
 
+def test_parse_view_includes_raw_text(registry, config):
+    path = DATA_DIR / "StyleHeader.OK"
+    view = service.parse_file_view(path, registry, config)
+    assert view["raw_text"] == path.read_bytes().decode("latin-1")
+
+
 def test_max_records_in_view(registry, config):
     view = service.parse_file_view(DATA_DIR / "StyleHeader.OK", registry, config)
     lane = next(s for s in view["sections"] if s["name"] == "Lane")

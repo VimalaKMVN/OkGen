@@ -26,7 +26,12 @@
     </aside>
     <section id="editorPane" class="editor-pane">
       <div id="editorEmpty" class="empty">Open a folder and pick an .OK file to edit.</div>
+      <div id="editorTabs" class="tabs hidden">
+        <button id="tabRendered" class="tab active" type="button">Rendered (edit)</button>
+        <button id="tabRaw" class="tab" type="button">Raw file (verify)</button>
+      </div>
       <div id="editor" class="editor"></div>
+      <div id="rawView" class="raw-view hidden"></div>
     </section>
   </main>
 
