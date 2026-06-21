@@ -334,6 +334,8 @@ function renderBulkPanel(scope) {
 
   previewBtn.addEventListener("click", async () => {
     const f = selField(); if (!f) return;
+    if (!beginBusy("Previewing…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+    previewBtn.disabled = true;
     previewBox.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Previewing…</div>";
     resultsBox.innerHTML = "";
     try {
@@ -342,12 +344,18 @@ function renderBulkPanel(scope) {
       });
       renderBulkTable(previewBox, res.results, false);
       applyBtn.disabled = !res.results.some((r) => r.status === "change");
-    } catch (e) { previewBox.innerHTML = ""; setStatus("Preview failed: " + e.message, "err"); }
+    } catch (e) {
+      previewBox.innerHTML = ""; setStatus("Preview failed: " + e.message, "err");
+    } finally {
+      state.busy = false; previewBtn.disabled = false;
+    }
   });
 
   applyBtn.addEventListener("click", async () => {
     const f = selField(); if (!f) return;
     if (!confirm(`Apply "${f.name} = ${valueCtrl().value}" to the ${selectedLayout} files?\nA .bak backup is made for each changed file.`)) return;
+    if (!beginBusy("Applying…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+    applyBtn.disabled = true; previewBtn.disabled = true;
     resultsBox.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Applying…</div>";
     try {
       const res = await postJSON("/api/bulk/apply", {
@@ -357,8 +365,12 @@ function renderBulkPanel(scope) {
       const folders = new Set(res.results.filter((r) => r.status === "changed").map((r) => folderOf(r.path)));
       folders.forEach((fp) => refreshFolder(fp));
       setStatus(`Bulk applied: ${res.results.filter((r) => r.status === "changed").length} changed`, "ok");
-      applyBtn.disabled = true;
-    } catch (e) { resultsBox.innerHTML = ""; setStatus("Apply failed: " + e.message, "err"); }
+    } catch (e) {
+      resultsBox.innerHTML = ""; setStatus("Apply failed: " + e.message, "err");
+    } finally {
+      state.busy = false; previewBtn.disabled = false;
+      // leave Apply disabled until the next Preview confirms pending changes
+    }
   });
 
   rebuildFieldAndValue();
@@ -920,6 +932,7 @@ async function refreshFolder(path) {
 
 async function pasteInto(folder) {
   if (!state.clipboard.length) { setStatus("Clipboard empty", "err"); return; }
+  if (!beginBusy("Pasting…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
     const res = await postJSON("/api/file/copy-batch", { srcs: state.clipboard, dst_dir: folder });
     await refreshFolder(folder);
@@ -930,7 +943,11 @@ async function pasteInto(folder) {
       (rk ? `, ${rk} re-keyed for uniqueness` : "") +
       (er ? `, ${er} failed` : "");
     setStatus(msg, er ? "err" : "ok");
-  } catch (e) { setStatus("Paste failed: " + e.message, "err"); }
+  } catch (e) {
+    setStatus("Paste failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
 }
 
 async function deleteFile(node) {
