@@ -41,43 +41,6 @@ rules:
   # Replace/extend these with your real meanings. Each block below shows a
   # different matching pattern so you can copy whichever you need.
 
-  # (1) Per-LAYOUT only — same for every chain/format.
-  - match: {layout: StyleHeader, field: format}
-    values:
-      A: "Format A"
-      B: "Format B"
-      L: "Format L"
-
-  - match: {layout: CartonLabel, field: format}
-    values:
-      "1": "Carton Format 1"
-      "2": "Carton Format 2"
-
-  - match: {layout: Preticket, field: format}
-    values:
-      L: "Label"
-      Y: "Yard"
-      N: "Non-Label"
-
-  - match: {layout: DistLabels, field: format}
-    values:
-      "7": "Distribution 7"
-      "9": "Distribution 9"
-
-  # (2) Per-CHAIN + layout — overrides the layout-only rule above for one chain.
-  - match: {chain: "03", layout: StyleHeader, field: format}
-    values:
-      A: "Regular Tag (Homegoods)"
-      B: "Sticker (Homegoods)"
-
-  - match: {chain: "01", layout: StyleHeader, field: format}
-    values:
-      A: "Regular Tag (TJMAXX)"
-
-  # (3) Most specific — chain + layout + FORMAT all pinned.
-  - match: {chain: "03", layout: StyleHeader, format: A, field: format}
-    values:
-      A: "Regular Tag — Compare-at & Up (Homegoods)"
 
   # (4) Other coded fields (not just `format`).
   - match: {field: type}
@@ -88,28 +51,171 @@ rules:
 
   - match: {layout: StyleHeader, field: indicator}
     values:
-      N: "New"
-      R: "Reprint"
-      C: "Cancel"
+      N: "StyleHeader"
+      Y: "Preticket"
 
-  # (5) A field in a repeating section (applies to every row of that section).
-  - match: {layout: DistLabels, field: prflag}
-    values:
-      Y: "Print"
-      N: "No Print"
-
-  # (6) Chain-specific label for a detail-section field.
-  - match: {chain: "02", layout: CartonLabel, field: prflag}
-    values:
-      Y: "Print (Marshalls)"
-      N: "Suppress (Marshalls)"
 
   # (7) LISTS — one rule covering several chains AND several layouts at once.
-  #     This applies to chain 03 OR 04, in StyleHeader OR Preticket.
+  # TJMAXX formats
   - match:
-      chain: ["03", "04"]
+      chain: ["01"]
       layout: [StyleHeader, Preticket]
       field: format
     values:
-      A: "Format A (HG/Winners · Style or Preticket)"
-      B: "Format B (HG/Winners · Style or Preticket)"
+      A: "Purple Tag"
+      B: "Regular Gum Label"
+      C: "Coordinate Tag"
+      D: "Coordinate Gum Label"
+      F: "Shoe Gum Label"
+      G: "Giftware Gum Label"
+      H: "Piggy Back Gum Label"
+      I: "Q-Line Large Gum Label"
+      J: "Rat Tail Gum Label"
+      K: "Two Part Tag"
+      M: "EAS Tag"
+      N: "Large Dura Tag"
+      O: "Small Tag"
+      P: "Mini Gum"
+      S: "Dumbbell Gum Label"
+      T: "Q-line Small Gum Label"
+      U: "Trophy Tag"
+      Y: "Small DuraTag"
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # Marshalls formats
+  - match:
+      chain: ["02"]
+      layout: [StyleHeader, Preticket]
+      field: format
+    values:
+      A: "Purple Tag"
+      B: "Regular Gum Label"
+      C: "Coordinate Tag"
+      D: "Pink Coordinate Gum"
+      E: "Shoe Tag"
+      F: "Shoe Gum Label"
+      G: "Giftware Gum Label"
+      H: "Piggy Back Gum Label"
+      I: "Mini Gum"
+      J: "Rat Tail Gum Label"
+      K: "Two Part Tag"
+      L: "Q-line Large Gum Label"
+      M: "EAS Tag"
+      N: "Large Dura Tag"
+      O: "Small Tag"
+      P: "Small Gum Label"
+      S: "Dumbbell Gum Label"
+      T: "Q-line Small Gum Label"
+      U: "Trophy Tag"
+      Y: "Small DuraTag"
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # Homegoods formats
+  - match:
+      chain: ["03"]
+      layout: [StyleHeader, Preticket]
+      field: format
+    values:
+      A: "Regular Tag"
+      B: "Regular Gum Label"
+      D: "Mini Gum"
+      H: "Rem Piggy Back Gum Label"
+      J: "Rat Tail Gum Label"
+      N: "Dura Tag"
+      R: "Permanent Gum Label"
+      S: "Lead Content Label"
+      U: "Trophy Tag"
+      V: "Rug Tag"
+      W: "LeadDuraTG"
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # Winners and HomeSense formats
+  - match:
+      chain: ["04", "06"]
+      layout: [StyleHeader, Preticket]
+      field: format
+    values:
+      A: "Coordinate Gum Label"
+      B: "Blue Gum"
+      C: "Coordinate Hard"
+      D: "Double Gum"
+      E: "Permanent Gum"
+      F: "Tough Tag"
+      G: "Coordinate Double Gum"
+      H: "Irregular Hard"
+      I: "Irregular Gum"
+      J: "Rat Tail Label"
+      L: "Regular Gum"
+      M: "Small Hard"
+      P: "Pink Tough Rag"
+      R: "Generic Rattail"
+      S: "Small Gum"
+      T: "Regular Hard"
+      U: "USA Hard"
+      V: "USA Gum"
+      Y: "Trophy Tag"
+      Z: "Fact Tag"
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # TJMAXX formats
+  - match:
+      chain: ["01", "02"]
+      layout: [CartonLabel]
+      field: format
+    values:
+      1: "Carton Label"
+      2: "Carton Ad Label"
+      3: "Carton Coordinate"
+      4: "Master Pack Label"
+      5: "Master Pack Ad Label"
+      6: "Master Pack Coordinate"
+
+
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # TJMAXX formats
+  - match:
+      chain: ["01", "02"]
+      layout: [DistLabels]
+      field: format
+    values:
+      7: "Distribution Label"
+      9: "Coordinate Dist. Label"
+
+
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # Homegoods formats
+  - match:
+      chain: ["03"]
+      layout: [CartonLabel]
+      field: format
+    values:
+      1: "Carton Label"
+      2: "AD Carton Label"
+      4: "Masterpack Label"
+      5: "AD Masterpack Label"
+
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # Homegoods Winners HomeSense formats
+  - match:
+      chain: ["03", "04", "06"]
+      layout: [DistLabels]
+      field: format
+    values:
+      7: "Distribution Label"
+
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # Winers Homesense formats
+  - match:
+      chain: ["04", "06"]
+      layout: [CartonLabel]
+      field: format
+    values:
+      1: "Carton Label"
+      2: "AD Carton Label"
+      3: "Coordinate Carton Label"
+      4: "Masterpack Label"
+      5: "AD Masterpack Label"
