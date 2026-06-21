@@ -199,6 +199,170 @@ function updateSelectionUI() {
   const n = sel.size;
   const c = $("#selCount");
   if (c) c.textContent = n > 1 ? ` · ${n} selected` : "";
+  const btn = $("#bulkBtn");
+  if (btn) { btn.classList.toggle("hidden", n < 2); btn.textContent = `Bulk Edit (${n})`; }
+}
+
+// ---- bulk edit (B1: Header field, one layout, set value) ----
+async function enterBulkMode() {
+  if (state.selection.size < 2) return;
+  if (!confirmDiscardIfDirty()) return;
+  state.file = null; state.view = null; state.edits = {};
+  $("#editorTabs").classList.add("hidden");
+  $("#editor").classList.add("hidden");
+  $("#rawView").classList.add("hidden");
+  $("#editorEmpty").style.display = "none";
+  $("#fileTitle").textContent = "";
+  updateSaveButtons();
+
+  const panel = $("#bulkPanel");
+  panel.classList.remove("hidden");
+  panel.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Loading selection…</div>";
+  try {
+    const scope = await postJSON("/api/bulk/scope", { paths: [...state.selection] });
+    renderBulkPanel(scope);
+  } catch (e) {
+    panel.innerHTML = "";
+    setStatus("Bulk scope failed: " + e.message, "err");
+  }
+}
+
+function exitBulkMode() {
+  $("#bulkPanel").classList.add("hidden");
+  $("#bulkPanel").innerHTML = "";
+  $("#editor").classList.remove("hidden");
+  $("#editorEmpty").style.display = "";
+}
+
+function renderBulkPanel(scope) {
+  const panel = $("#bulkPanel");
+  panel.innerHTML = "";
+  const layoutNames = Object.keys(scope.layouts);
+
+  const head = el("div", "bulk-head");
+  head.appendChild(el("h3", null, `Bulk Edit — ${scope.files.length} file(s) selected`));
+  const close = el("button", "btn", "✕ Close");
+  close.addEventListener("click", exitBulkMode);
+  head.appendChild(close);
+  panel.appendChild(head);
+
+  if (!layoutNames.length) {
+    panel.appendChild(el("div", "bulk-note", "No recognizable OK layouts in the selection."));
+    return;
+  }
+
+  let selectedLayout = layoutNames[0];
+  const scopeBox = el("div", "bulk-scope");
+  scopeBox.appendChild(el("span", "bulk-label", "Layout:"));
+  layoutNames.forEach((name) => {
+    const lbl = el("label", "bulk-radio");
+    const rb = el("input"); rb.type = "radio"; rb.name = "bulkLayout";
+    if (name === selectedLayout) rb.checked = true;
+    rb.addEventListener("change", () => { selectedLayout = name; rebuildFieldAndValue(); });
+    lbl.appendChild(rb);
+    lbl.appendChild(document.createTextNode(` ${name} (${scope.layouts[name]})`));
+    scopeBox.appendChild(lbl);
+  });
+  scopeBox.appendChild(el("span", "bulk-section", "·  Section: Header"));
+  panel.appendChild(scopeBox);
+
+  const editRow = el("div", "bulk-edit-row");
+  const fieldSel = el("select", "bulk-field");
+  const valueHolder = el("span", "bulk-value-holder");
+  editRow.appendChild(el("span", "bulk-label", "Field:"));
+  editRow.appendChild(fieldSel);
+  editRow.appendChild(el("span", "bulk-label", "Set value:"));
+  editRow.appendChild(valueHolder);
+  panel.appendChild(editRow);
+
+  const actions = el("div", "bulk-actions");
+  const previewBtn = el("button", "btn", "Preview");
+  const applyBtn = el("button", "btn btn-primary", "Apply");
+  applyBtn.disabled = true;
+  actions.appendChild(previewBtn); actions.appendChild(applyBtn);
+  panel.appendChild(actions);
+
+  const previewBox = el("div", "bulk-preview");
+  const resultsBox = el("div", "bulk-results");
+  panel.appendChild(previewBox); panel.appendChild(resultsBox);
+
+  const fieldsFor = () => scope.header_fields[selectedLayout] || [];
+  const selField = () => fieldsFor().find((f) => f.name === fieldSel.value);
+  const valueCtrl = () => valueHolder.querySelector(".bulk-value");
+  const reset = () => { applyBtn.disabled = true; previewBox.innerHTML = ""; resultsBox.innerHTML = ""; };
+
+  function rebuildValue() {
+    valueHolder.innerHTML = "";
+    const f = selField(); if (!f) return;
+    let ctrl;
+    if (f.options) {
+      ctrl = el("select", "bulk-value");
+      Object.keys(f.options).forEach((code) => ctrl.appendChild(new Option(`${f.options[code]} (${code})`, code)));
+    } else {
+      ctrl = el("input", "bulk-value"); ctrl.type = "text";
+      if (f.size != null) ctrl.maxLength = f.size;
+    }
+    valueHolder.appendChild(ctrl);
+  }
+  function rebuildFieldAndValue() {
+    fieldSel.innerHTML = "";
+    fieldsFor().forEach((f) => fieldSel.appendChild(new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
+    rebuildValue(); reset();
+  }
+  fieldSel.addEventListener("change", () => { rebuildValue(); reset(); });
+
+  previewBtn.addEventListener("click", async () => {
+    const f = selField(); if (!f) return;
+    previewBox.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Previewing…</div>";
+    resultsBox.innerHTML = "";
+    try {
+      const res = await postJSON("/api/bulk/preview", {
+        paths: scope.files.map((x) => x.path), layout: selectedLayout, field: f.name, value: valueCtrl().value,
+      });
+      renderBulkTable(previewBox, res.results, false);
+      applyBtn.disabled = !res.results.some((r) => r.status === "change");
+    } catch (e) { previewBox.innerHTML = ""; setStatus("Preview failed: " + e.message, "err"); }
+  });
+
+  applyBtn.addEventListener("click", async () => {
+    const f = selField(); if (!f) return;
+    if (!confirm(`Apply "${f.name} = ${valueCtrl().value}" to the ${selectedLayout} files?\nA .bak backup is made for each changed file.`)) return;
+    resultsBox.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Applying…</div>";
+    try {
+      const res = await postJSON("/api/bulk/apply", {
+        paths: scope.files.map((x) => x.path), layout: selectedLayout, field: f.name, value: valueCtrl().value,
+      });
+      renderBulkTable(resultsBox, res.results, true);
+      const folders = new Set(res.results.filter((r) => r.status === "changed").map((r) => folderOf(r.path)));
+      folders.forEach((fp) => refreshFolder(fp));
+      setStatus(`Bulk applied: ${res.results.filter((r) => r.status === "changed").length} changed`, "ok");
+      applyBtn.disabled = true;
+    } catch (e) { resultsBox.innerHTML = ""; setStatus("Apply failed: " + e.message, "err"); }
+  });
+
+  rebuildFieldAndValue();
+}
+
+function renderBulkTable(host, results, applied) {
+  host.innerHTML = "";
+  const counts = {};
+  results.forEach((r) => { counts[r.status] = (counts[r.status] || 0) + 1; });
+  const summary = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join("  ·  ");
+  host.appendChild(el("div", "bulk-summary", (applied ? "Results:  " : "Preview:  ") + summary));
+  const table = el("table", "bulk-table");
+  const thead = el("thead"); const htr = el("tr");
+  ["File", "Current", "→ New", "Status"].forEach((h) => htr.appendChild(el("th", null, h)));
+  thead.appendChild(htr); table.appendChild(thead);
+  const tbody = el("tbody");
+  results.forEach((r) => {
+    const tr = el("tr", "st-" + r.status);
+    tr.appendChild(el("td", null, r.name));
+    tr.appendChild(el("td", "mono", r.current != null ? JSON.stringify(r.current) : ""));
+    tr.appendChild(el("td", "mono", r.new != null ? JSON.stringify(r.new) : ""));
+    tr.appendChild(el("td", null, r.status + (r.error ? `: ${r.error}` : "")));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody); host.appendChild(table);
 }
 
 async function toggleFolder(li, node, childUl) {
@@ -727,6 +891,7 @@ document.addEventListener("click", hideCtxMenu);
 $("#tabRendered").addEventListener("click", () => switchTab("rendered"));
 $("#tabRaw").addEventListener("click", () => switchTab("raw"));
 $("#openBtn").addEventListener("click", browseFolder);
+$("#bulkBtn").addEventListener("click", enterBulkMode);
 $("#folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") openFolder(e.target.value.trim()); });
 $("#saveBtn").addEventListener("click", () => save(null));
 $("#saveAsBtn").addEventListener("click", () => {

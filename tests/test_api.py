@@ -156,6 +156,40 @@ def test_copy_files_multiple_collisions(tmp_path):
     ]
 
 
+def test_bulk_scope_and_preview_and_apply(tmp_path, registry, config):
+    # Two StyleHeader copies + one CartonLabel (different layout).
+    sh1 = tmp_path / "a.OK"; sh2 = tmp_path / "b.OK"; cl = tmp_path / "c.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", sh1)
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", sh2)
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", cl)
+    paths = [str(sh1), str(sh2), str(cl)]
+
+    scope = service.bulk_scope(paths, registry, config)
+    assert scope["layouts"] == {"StyleHeader": 2, "CartonLabel": 1}
+    assert any(f["name"] == "indicator" for f in scope["header_fields"]["StyleHeader"])
+
+    # Preview setting indicator -> 'Y' on StyleHeader (sample value is 'N').
+    pv = service.bulk_preview(paths, "StyleHeader", "indicator", "Y", registry, config)
+    by = {r["name"]: r for r in pv["results"]}
+    assert by["a.OK"]["status"] == "change" and by["a.OK"]["new"] == "Y"
+    assert by["c.OK"]["status"] == "skipped"          # other layout
+    assert sh1.read_bytes() == DATA_DIR.joinpath("StyleHeader.OK").read_bytes()  # preview wrote nothing
+
+    # Apply.
+    ap = service.bulk_apply(paths, "StyleHeader", "indicator", "Y", registry, config, backup=False)
+    changed = [r for r in ap["results"] if r["status"] == "changed"]
+    assert len(changed) == 2
+    assert service.parse_file_view(sh1, registry, config)["sections"][0]["records"][0]["values"]["indicator"] == "Y"
+    assert cl.read_bytes() == DATA_DIR.joinpath("CartonLabel.OK").read_bytes()  # untouched
+
+
+def test_bulk_preview_rejects_too_wide(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    pv = service.bulk_preview([str(f)], "StyleHeader", "indicator", "TOOLONG", registry, config)
+    assert pv["results"][0]["status"] == "too_wide"
+
+
 def test_folder_create_rename_delete(tmp_path):
     res = service.create_folder(tmp_path, "NewFolder")
     folder = tmp_path / "NewFolder"

@@ -147,6 +147,26 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except service.EditError as exc:
             return _err(str(exc), 422)
 
+    @app.post("/api/bulk/scope")
+    def bulk_scope():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_scope(body.get("paths", []), registry, config))
+
+    @app.post("/api/bulk/preview")
+    def bulk_preview():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_preview(
+            body.get("paths", []), body.get("layout"),
+            body.get("field"), body.get("value", ""), registry, config))
+
+    @app.post("/api/bulk/apply")
+    def bulk_apply():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_apply(
+            body.get("paths", []), body.get("layout"),
+            body.get("field"), body.get("value", ""), registry, config,
+            backup=body.get("backup", True)))
+
     @app.post("/api/folder/create")
     def folder_create():
         body = request.get_json(force=True, silent=True) or {}

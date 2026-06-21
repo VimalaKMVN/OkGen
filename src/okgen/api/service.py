@@ -449,6 +449,103 @@ def copy_files(srcs, dst_dir) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# Bulk edit (B1: Header fields, one layout, set value)
+# --------------------------------------------------------------------------- #
+def _header_fields_for_layout(layout, config: Config) -> List[dict]:
+    """Header-section field metadata for a layout, for the bulk-edit dropdowns."""
+    if not layout.sections:
+        return []
+    header = layout.sections[0]
+    out = []
+    for f in header.fields:
+        opts = config.options(f.name, layout=layout.name)
+        out.append({
+            "name": f.name, "size": f.size, "type": f.field_type,
+            "options": opts or None,
+        })
+    return out
+
+
+def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
+    """Summarize a selection for bulk edit: per-file layout + header fields."""
+    files, layouts = [], {}
+    for p in paths or []:
+        sp = Path(p)
+        layout = chain = None
+        try:
+            layout = detect_layout(sp).layout
+            chain = read_chain(sp)
+        except Exception:
+            pass
+        files.append({"path": str(sp), "name": sp.name, "layout": layout, "chain": chain})
+        if layout:
+            layouts[layout] = layouts.get(layout, 0) + 1
+    header_fields = {}
+    for name in layouts:
+        lay = registry.get(name)
+        if lay:
+            header_fields[name] = _header_fields_for_layout(lay, config)
+    return {"files": files, "layouts": layouts, "header_fields": header_fields}
+
+
+def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry):
+    """Evaluate the header-field set for one file (no write). Returns a result
+    dict; on a real change it also carries the in-memory OkFile under 'okf'."""
+    name = sp.name
+    try:
+        if detect_layout(sp).layout != layout_name:
+            return {"name": name, "status": "skipped"}
+        okf = parse_okfile(sp, registry=registry)
+    except Exception as exc:
+        return {"name": name, "status": "error", "error": str(exc)}
+    if not okf.records:
+        return {"name": name, "status": "error", "error": "no records"}
+    header = okf.records[0]
+    try:
+        f = header._field(field)  # noqa: SLF001
+    except KeyError:
+        return {"name": name, "status": "missing"}
+    current = header.get(field)
+    if f.size is not None and len(value) > f.size:
+        return {"name": name, "status": "too_wide", "current": current, "new": value}
+    header.set(field, value)
+    new = header.get(field)
+    if new == current:
+        return {"name": name, "status": "unchanged", "current": current, "new": new}
+    return {"name": name, "status": "change", "current": current, "new": new, "okf": okf}
+
+
+def bulk_preview(paths, layout_name, field, value, registry, config) -> dict:
+    results = []
+    for p in paths or []:
+        r = _bulk_eval(Path(p), layout_name, field, value, registry)
+        r.pop("okf", None)
+        r["path"] = str(p)
+        results.append(r)
+    return {"results": results}
+
+
+def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) -> dict:
+    results = []
+    for p in paths or []:
+        sp = Path(p)
+        r = _bulk_eval(sp, layout_name, field, value, registry)
+        okf = r.pop("okf", None)
+        r["path"] = str(p)
+        if r["status"] == "change" and okf is not None:
+            try:
+                if backup and sp.exists():
+                    shutil.copy2(sp, sp.with_suffix(sp.suffix + ".bak"))
+                okf.save(sp)
+                r["status"] = "changed"
+            except OSError as exc:
+                r["status"] = "error"
+                r["error"] = str(exc)
+        results.append(r)
+    return {"results": results}
+
+
+# --------------------------------------------------------------------------- #
 # Folder operations
 # --------------------------------------------------------------------------- #
 _BAD_NAME_CHARS = set('\\/:*?"<>|')
