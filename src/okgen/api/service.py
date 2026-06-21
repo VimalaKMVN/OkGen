@@ -414,11 +414,11 @@ def _unique_path(dst_dir: Path, name: str) -> Path:
 
 
 def copy_files(srcs, dst_dir) -> dict:
-    """Copy several .OK files into a folder.
+    """Paste .OK files and/or whole folders into a folder.
 
+    Files are copied; folders are copied recursively with all their contents.
     Never overwrites: if a name already exists, the copy is auto-renamed with a
-    ' (N)' suffix (Downloads-style). Returns per-file outcomes; non-.OK sources
-    are reported as errors.
+    ' (N)' suffix (Downloads-style). Returns per-item outcomes.
     """
     dd = Path(dst_dir)
     if not dd.is_dir():
@@ -426,19 +426,64 @@ def copy_files(srcs, dst_dir) -> dict:
     copied, renamed, errors = [], [], []
     for src in srcs or []:
         sp = Path(src)
-        if not is_ok_file(sp):
-            errors.append({"src": str(src), "error": "not an .OK file"})
+        is_dir = sp.is_dir()
+        if not is_dir and not is_ok_file(sp):
+            errors.append({"src": str(src), "error": "not an .OK file or folder"})
+            continue
+        if is_dir and (dd == sp or sp in dd.parents):
+            errors.append({"src": str(src), "error": "cannot paste a folder into itself"})
             continue
         target = dd / sp.name
         if target.exists():
             target = _unique_path(dd, sp.name)
             renamed.append({"from": sp.name, "to": target.name})
         try:
-            shutil.copy2(sp, target)
+            if is_dir:
+                shutil.copytree(sp, target)
+            else:
+                shutil.copy2(sp, target)
             copied.append(str(target))
         except OSError as exc:
             errors.append({"src": str(src), "error": str(exc)})
     return {"copied": copied, "renamed": renamed, "errors": errors}
+
+
+# --------------------------------------------------------------------------- #
+# Folder operations
+# --------------------------------------------------------------------------- #
+_BAD_NAME_CHARS = set('\\/:*?"<>|')
+
+
+def create_folder(parent, name) -> dict:
+    pp = Path(parent)
+    if not pp.is_dir():
+        raise EditError(f"not a folder: {pp}")
+    name = (name or "").strip()
+    if not name or any(c in _BAD_NAME_CHARS for c in name):
+        raise EditError("invalid folder name")
+    target = pp / name
+    if target.exists():
+        raise EditError(f"already exists: {target}")
+    target.mkdir()
+    return {"created": str(target)}
+
+
+def rename_folder(src, dst) -> dict:
+    s, d = Path(src), Path(dst)
+    if not s.is_dir():
+        raise EditError(f"not a folder: {s}")
+    if d.exists():
+        raise EditError(f"destination exists: {d}")
+    s.rename(d)
+    return {"renamed": str(s), "to": str(d)}
+
+
+def delete_folder(path) -> dict:
+    p = Path(path)
+    if not p.is_dir():
+        raise EditError(f"not a folder: {p}")
+    shutil.rmtree(p)
+    return {"deleted": str(p)}
 
 
 def rename_file(src, dst) -> dict:

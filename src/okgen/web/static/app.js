@@ -569,6 +569,7 @@ function folderOf(p) { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\"
 
 function showFolderCtxMenu(e, node) {
   e.preventDefault();
+  const isRoot = node.path === state.rootDir;
   const menu = $("#ctxMenu");
   menu.innerHTML = "";
   const add = (label, fn, disabled) => {
@@ -577,14 +578,65 @@ function showFolderCtxMenu(e, node) {
     else item.addEventListener("click", () => { hideCtxMenu(); fn(); });
     menu.appendChild(item);
   };
+  add("New folder…", () => createFolder(node.path));
   const n = state.clipboard.length;
-  add(n ? `Paste ${n} file(s) here` : "Paste here (nothing copied)",
+  add(n ? `Paste ${n} item(s) here` : "Paste here (nothing copied)",
       () => pasteInto(node.path), !n);
+  if (!isRoot) {
+    menu.appendChild(el("div", "ctx-sep"));
+    add("Copy folder", () => copyFolder(node));
+    add("Rename folder…", () => renameFolder(node));
+    add("Delete folder", () => deleteFolder(node));
+  }
   menu.appendChild(el("div", "ctx-sep"));
   add("Refresh", () => refreshFolder(node.path));
   menu.style.left = e.clientX + "px";
   menu.style.top = e.clientY + "px";
   menu.classList.remove("hidden");
+}
+
+async function createFolder(parentPath) {
+  const name = prompt("New folder name:");
+  if (!name) return;
+  try {
+    await postJSON("/api/folder/create", { parent: parentPath, name });
+    await refreshFolder(parentPath);
+    setStatus("Created folder " + name, "ok");
+  } catch (e) { setStatus("Create failed: " + e.message, "err"); }
+}
+
+function copyFolder(node) {
+  state.clipboard = [node.path];
+  setSelection([]);                       // folder copy isn't a file multi-select
+  setStatus("Copied folder: " + node.name, "ok");
+}
+
+async function renameFolder(node) {
+  const name = prompt("Rename folder to:", node.name);
+  if (!name || name === node.name) return;
+  const sep = node.path.includes("\\") ? "\\" : "/";
+  try {
+    await postJSON("/api/folder/rename", { src: node.path, dst: folderOf(node.path) + sep + name });
+    await refreshFolder(folderOf(node.path));
+    setStatus("Renamed folder to " + name, "ok");
+  } catch (e) { setStatus("Rename failed: " + e.message, "err"); }
+}
+
+async function deleteFolder(node) {
+  if (!confirm("Delete folder \"" + node.name + "\" and ALL its contents?\nThis cannot be undone.")) return;
+  try {
+    await postJSON("/api/folder/delete", { path: node.path });
+    // If the open file lived inside this folder, clear the editor.
+    if (state.file && state.file.startsWith(node.path)) {
+      state.file = null; state.view = null;
+      $("#editor").innerHTML = ""; $("#rawView").innerHTML = "";
+      $("#editorTabs").classList.add("hidden");
+      $("#editorEmpty").style.display = "";
+      updateSaveButtons();
+    }
+    await refreshFolder(folderOf(node.path));
+    setStatus("Deleted folder " + node.name, "ok");
+  } catch (e) { setStatus("Delete failed: " + e.message, "err"); }
 }
 
 // Reload one folder's children in place (after a paste/delete/rename), without
@@ -621,7 +673,7 @@ async function pasteInto(folder) {
     const res = await postJSON("/api/file/copy-batch", { srcs: state.clipboard, dst_dir: folder });
     await refreshFolder(folder);
     const c = res.copied.length, r = (res.renamed || []).length, er = res.errors.length;
-    const msg = `Pasted ${c} file(s)` +
+    const msg = `Pasted ${c} item(s)` +
       (r ? `, ${r} renamed to avoid overwrite` : "") +
       (er ? `, ${er} failed` : "");
     setStatus(msg, er ? "err" : "ok");

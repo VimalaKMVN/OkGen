@@ -156,6 +156,49 @@ def test_copy_files_multiple_collisions(tmp_path):
     ]
 
 
+def test_folder_create_rename_delete(tmp_path):
+    res = service.create_folder(tmp_path, "NewFolder")
+    folder = tmp_path / "NewFolder"
+    assert folder.is_dir() and res["created"] == str(folder)
+
+    service.rename_folder(folder, tmp_path / "Renamed")
+    assert (tmp_path / "Renamed").is_dir()
+    assert not folder.exists()
+
+    service.delete_folder(tmp_path / "Renamed")
+    assert not (tmp_path / "Renamed").exists()
+
+
+def test_create_folder_rejects_bad_name(tmp_path):
+    with pytest.raises(service.EditError):
+        service.create_folder(tmp_path, "bad/name")
+
+
+def test_paste_whole_folder_recursive(tmp_path):
+    # A source folder with a nested file, pasted into a destination.
+    src = tmp_path / "Group A"
+    (src / "inner").mkdir(parents=True)
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", src / "inner" / "StyleHeader.OK")
+    dst = tmp_path / "dst"
+    dst.mkdir()
+
+    res = service.copy_files([str(src)], dst)
+    assert len(res["copied"]) == 1
+    assert (dst / "Group A" / "inner" / "StyleHeader.OK").exists()
+
+    # Pasting again auto-renames the folder (Downloads-style).
+    res2 = service.copy_files([str(src)], dst)
+    assert res2["renamed"][0]["to"] == "Group A (1)"
+    assert (dst / "Group A (1)" / "inner" / "StyleHeader.OK").exists()
+
+
+def test_paste_folder_into_itself_rejected(tmp_path):
+    src = tmp_path / "Group"
+    (src / "sub").mkdir(parents=True)
+    res = service.copy_files([str(src)], src / "sub")
+    assert res["errors"] and "itself" in res["errors"][0]["error"]
+
+
 def test_save_as_and_copy_delete(tmp_path, registry):
     src = DATA_DIR / "DistLabels.OK"
     work = tmp_path / "DistLabels.OK"

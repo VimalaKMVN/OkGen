@@ -147,4 +147,28 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except service.EditError as exc:
             return _err(str(exc), 422)
 
+    @app.post("/api/folder/create")
+    def folder_create():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.create_folder(body.get("parent"), body.get("name")))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
+    @app.post("/api/folder/rename")
+    def folder_rename():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.rename_folder(body.get("src"), body.get("dst")))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
+    @app.post("/api/folder/delete")
+    def folder_delete():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.delete_folder(body.get("path")))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     return app
