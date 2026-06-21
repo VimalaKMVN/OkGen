@@ -218,11 +218,11 @@ def add_record(
     config: Config,
     backup: bool = True,
 ) -> dict:
-    """Apply pending edits, append a blank record to a section, and save.
+    """Apply pending edits, append a copy of the section's last record, and save.
 
-    Enforces the section's ``max_records`` limit. The new record clones the
-    structure (marker, terminator, padding, line ending) of an existing record
-    in the section and blanks its field spans, so the file stays well-formed.
+    The new record duplicates the last existing record of the section (its
+    field values included) — users typically copy a row and tweak a few fields.
+    Enforces the section's ``max_records`` limit and keeps the file well-formed.
     """
     from okgen.okfile import Record
 
@@ -235,50 +235,67 @@ def add_record(
         raise EditError(f"section_index {section_index} out of range")
     sec_name, recs = grouped[section_index]
     if not recs or recs[0].section is None:
-        raise EditError(f"section '{sec_name}' has no template record to clone")
+        raise EditError(f"section '{sec_name}' has no record to copy")
 
     limit = config.max_records(okf.layout.name, sec_name)
     if limit is not None and len(recs) >= limit:
         raise EditError(f"section '{sec_name}' is at its limit of {limit} records")
 
     template = recs[-1]
-    blank = Record(
-        raw=_blank_content(template),
+    clone = Record(
+        raw=template.raw.rstrip("\r"),       # copy values; EOL fixed up below
         offset=template.offset,
         section=template.section,
-        index=template.index,  # placeholder; reassigned on reload
+        index=template.index,                # placeholder; reassigned on reload
     )
     insert_at = okf.records.index(template) + 1
-    okf.records.insert(insert_at, blank)
+    okf.records.insert(insert_at, clone)
     _normalize_eols(okf)
 
-    out = src
+    _backup_and_save(okf, src, backup)
+    view = parse_file_view(src, registry, config)
+    view["added_section"] = sec_name
+    return view
+
+
+def delete_record(
+    path,
+    record_index: int,
+    edits: List[dict],
+    registry: LayoutRegistry,
+    config: Config,
+    backup: bool = True,
+) -> dict:
+    """Apply pending edits, delete one record by its line index, and save.
+
+    The header record (index 0) cannot be deleted.
+    """
+    src = Path(path)
+    okf = parse_okfile(src, registry=registry)
+    _apply_edits_to_okf(okf, edits)
+
+    target = next((r for r in okf.records if r.index == record_index), None)
+    if target is None:
+        raise EditError(f"record_index {record_index} not found")
+    if target.index == 0:
+        raise EditError("the header record cannot be deleted")
+
+    okf.records.remove(target)
+    _normalize_eols(okf)
+
+    _backup_and_save(okf, src, backup)
+    return parse_file_view(src, registry, config)
+
+
+def _backup_and_save(okf, out: Path, backup: bool) -> None:
     if backup and out.exists():
         shutil.copy2(out, out.with_suffix(out.suffix + ".bak"))
     okf.save(out)
-
-    view = parse_file_view(out, registry, config)
-    view["added_section"] = sec_name
-    return view
 
 
 def _eol_of(okf) -> str:
     """The per-line terminator that precedes the '\\n' separator ('\\r' or '')."""
     return "\r" if any(r.raw.endswith("\r") for r in okf.records) else ""
-
-
-def _blank_content(record) -> str:
-    """Clone a record's structure but blank every field span (no trailing EOL)."""
-    content = record.raw.rstrip("\r")
-    chars = list(content)
-    if record.section:
-        for f in record.section.fields:
-            if f.start is None or f.size is None:
-                continue
-            start = record.offset + f.start - 1
-            for i in range(start, min(start + f.size, len(chars))):
-                chars[i] = " "
-    return "".join(chars)
 
 
 def _normalize_eols(okf) -> None:
@@ -303,28 +320,50 @@ def _normalize_eols(okf) -> None:
 # Native folder picker (local app convenience)
 # --------------------------------------------------------------------------- #
 def browse_folder(initial: Optional[str] = None) -> dict:
-    """Open the OS folder-chooser on the local machine and return the choice.
+    """Open the OS-native folder chooser and return the selected path.
 
-    Runs in a subprocess so Tk never touches the Flask server thread. Works on
-    Windows/macOS desktop sessions; returns {"path": None} if cancelled or if
-    no GUI is available.
+    Uses each platform's own dialog (no embedded Python GUI, which can crash):
+      * macOS   -> AppleScript ``choose folder`` via ``osascript``
+      * Windows -> .NET ``FolderBrowserDialog`` via PowerShell
+      * Linux   -> ``zenity --file-selection --directory``
+
+    Returns {"path": None} when cancelled or when no GUI dialog is available.
     """
+    import platform
     import subprocess
-    import sys
 
-    script = (
-        "import tkinter as tk\n"
-        "from tkinter import filedialog\n"
-        "r = tk.Tk(); r.withdraw(); r.attributes('-topmost', True)\n"
-        "print(filedialog.askdirectory() or '')\n"
-    )
+    system = platform.system()
     try:
-        proc = subprocess.run(
-            [sys.executable, "-c", script],
-            capture_output=True, text=True, timeout=300,
-        )
-        chosen = proc.stdout.strip()
+        if system == "Darwin":
+            prompt = "Select the folder with your OK files"
+            script = f'POSIX path of (choose folder with prompt "{prompt}")'
+            proc = subprocess.run(
+                ["osascript", "-e", script],
+                capture_output=True, text=True, timeout=600,
+            )
+        elif system == "Windows":
+            start = (initial or "").replace("'", "''")
+            ps = (
+                "Add-Type -AssemblyName System.Windows.Forms;"
+                "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
+                + (f"$d.SelectedPath = '{start}';" if start else "")
+                + "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK)"
+                "{ Write-Output $d.SelectedPath }"
+            )
+            proc = subprocess.run(
+                ["powershell", "-NoProfile", "-STA", "-Command", ps],
+                capture_output=True, text=True, timeout=600,
+            )
+        else:
+            proc = subprocess.run(
+                ["zenity", "--file-selection", "--directory",
+                 "--title=Select the folder with your OK files"],
+                capture_output=True, text=True, timeout=600,
+            )
+        chosen = (proc.stdout or "").strip()
         return {"path": chosen or None}
+    except FileNotFoundError:
+        return {"path": None, "error": "no native folder dialog available on this system"}
     except Exception as exc:  # pragma: no cover - depends on desktop session
         return {"path": None, "error": str(exc)}
 

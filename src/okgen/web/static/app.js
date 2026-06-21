@@ -190,7 +190,7 @@ async function addRow(sectionIndex) {
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
-    setStatus("Row added (saved)", "ok");
+    setStatus("Row added — copied from last row (saved)", "ok");
   } catch (e) {
     setStatus("Add failed: " + e.message, "err");
   }
@@ -245,6 +245,7 @@ function renderTable(sec) {
   const htr = el("tr");
   htr.appendChild(el("th", null, "#"));
   sec.fields.forEach((f) => htr.appendChild(el("th", null, `${f.name} (${f.size != null ? f.size : "?"})`)));
+  htr.appendChild(el("th", null, ""));   // delete column
   thead.appendChild(htr);
   table.appendChild(thead);
   const tbody = el("tbody");
@@ -256,11 +257,37 @@ function renderTable(sec) {
       td.appendChild(makeControl(sec, rec, field));
       tr.appendChild(td);
     });
+    const delTd = el("td", "del-cell");
+    const delBtn = el("button", "row-del", "✕");
+    delBtn.title = "Delete this row";
+    delBtn.addEventListener("click", () => deleteRow(rec.index));
+    delTd.appendChild(delBtn);
+    tr.appendChild(delTd);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
   box.appendChild(table);
   return box;
+}
+
+async function deleteRow(recordIndex) {
+  if (!state.file) return;
+  if (!confirm("Delete this row?")) return;
+  try {
+    const view = await postJSON("/api/record/delete", {
+      path: state.file,
+      record_index: recordIndex,
+      edits: collectEdits(),
+    });
+    state.view = view;
+    state.edits = {};
+    renderEditor(view);
+    updateSaveButtons();
+    updateDirtyIndicator();
+    setStatus("Row deleted (saved)", "ok");
+  } catch (e) {
+    setStatus("Delete failed: " + e.message, "err");
+  }
 }
 
 function onEdit(e) {

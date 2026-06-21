@@ -137,6 +137,17 @@ input.cell { min-width: 60px; }
 input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .field-coded { color: var(--ok); }
 
+.del-cell { text-align: center; }
+.row-del {
+  background: transparent;
+  color: var(--err);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 1px 6px;
+}
+.row-del:hover { background: #5a2222; border-color: var(--err); }
+
 /* Context menu */
 .ctx-menu {
   position: fixed; z-index: 50; background: var(--bg-alt);

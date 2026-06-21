@@ -143,20 +143,45 @@ def test_max_records_in_view(registry, config):
     assert size["max_records"] is None      # no limit
 
 
-def test_add_record_to_unlimited_section(tmp_path, registry, config):
+def test_add_record_copies_last_row(tmp_path, registry, config):
     src = DATA_DIR / "StyleHeader.OK"
     work = tmp_path / "StyleHeader.OK"
     shutil.copy2(src, work)
     before = service.parse_file_view(work, registry, config)
-    size_idx = next(s["index"] for s in before["sections"] if s["name"] == "Size")
-    n_before = len(next(s for s in before["sections"] if s["name"] == "Size")["records"])
+    size_sec = next(s for s in before["sections"] if s["name"] == "Size")
+    size_idx = size_sec["index"]
+    n_before = len(size_sec["records"])
+    last_values = size_sec["records"][-1]["values"]
 
     view = service.add_record(work, size_idx, [], registry, config, backup=False)
     size = next(s for s in view["sections"] if s["name"] == "Size")
     assert len(size["records"]) == n_before + 1
     assert view["roundtrip_ok"]                       # file still well-formed
-    # The appended record's fields are blank.
-    assert size["records"][-1]["values"]["size"].strip() == ""
+    # The appended record is a copy of the previous last row.
+    assert size["records"][-1]["values"] == last_values
+
+
+def test_delete_record(tmp_path, registry, config):
+    src = DATA_DIR / "StyleHeader.OK"
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(src, work)
+    before = service.parse_file_view(work, registry, config)
+    lane = next(s for s in before["sections"] if s["name"] == "Lane")
+    n_before = len(lane["records"])
+    victim = lane["records"][0]["index"]
+
+    view = service.delete_record(work, victim, [], registry, config, backup=False)
+    lane_after = next(s for s in view["sections"] if s["name"] == "Lane")
+    assert len(lane_after["records"]) == n_before - 1
+    assert view["roundtrip_ok"]
+
+
+def test_delete_header_rejected(tmp_path, registry, config):
+    src = DATA_DIR / "CartonLabel.OK"
+    work = tmp_path / "CartonLabel.OK"
+    shutil.copy2(src, work)
+    with pytest.raises(service.EditError):
+        service.delete_record(work, 0, [], registry, config, backup=False)
 
 
 def test_add_record_respects_lane_limit(tmp_path, registry, config):
@@ -169,10 +194,19 @@ def test_add_record_respects_lane_limit(tmp_path, registry, config):
         service.add_record(work, lane_idx, [], registry, config, backup=False)
 
 
-def test_browse_folder_returns_path_key():
-    # No GUI in CI: must not raise, and always returns a dict with "path".
-    result = service.browse_folder()
-    assert "path" in result
+def test_browse_folder_parses_dialog_output(monkeypatch):
+    # Mock the native dialog so the test never opens a real GUI.
+    import subprocess
+
+    class FakeProc:
+        def __init__(self, out):
+            self.stdout = out
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeProc("/picked/folder\n"))
+    assert service.browse_folder()["path"] == "/picked/folder"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeProc(""))  # cancelled
+    assert service.browse_folder()["path"] is None
 
 
 def test_flask_save_endpoint(tmp_path):

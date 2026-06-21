@@ -93,6 +93,23 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except FileNotFoundError:
             return _err(f"not found: {body.get('path')}", 404)
 
+    @app.post("/api/record/delete")
+    def record_delete():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.delete_record(
+                body.get("path"),
+                int(body.get("record_index")),
+                body.get("edits", []),
+                registry,
+                config,
+                backup=body.get("backup", True),
+            ))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+        except FileNotFoundError:
+            return _err(f"not found: {body.get('path')}", 404)
+
     @app.post("/api/browse-folder")
     def browse_folder():
         body = request.get_json(force=True, silent=True) or {}
