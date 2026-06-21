@@ -121,6 +121,18 @@ body {
 .folder > .node::before { content: "▸"; color: var(--text-dim); display: inline-block; width: 10px; }
 .folder.open > .node::before { content: "▾"; }
 .folder:not(.open) > ul { display: none; }   /* collapse children when closed */
+.tree-loading, .tree-empty, .tree-error {
+  padding: 6px 12px; color: var(--text-dim); font-size: 12px; list-style: none;
+}
+.tree-error { color: var(--err); }
+.spinner {
+  display: inline-block; width: 11px; height: 11px;
+  border: 2px solid var(--text-dim); border-top-color: transparent;
+  border-radius: 50%; vertical-align: -1px;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
 .chain-badge {
   display: inline-flex;
   align-items: center;

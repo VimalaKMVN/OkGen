@@ -7,6 +7,8 @@ const state = {
   view: null,          // parsed view
   edits: {},           // key -> value
   clipboard: null,     // path copied for paste
+  treeToken: 0,        // increments per Open; guards against stale renders
+  treeAbort: null,     // AbortController for the in-flight root load
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -24,7 +26,8 @@ async function api(path, opts) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
-const getTree = (dir) => api(`/api/tree?dir=${encodeURIComponent(dir)}`);
+const getTree = (dir, signal) =>
+  api(`/api/tree?dir=${encodeURIComponent(dir)}`, signal ? { signal } : undefined);
 const getParse = (p) => api(`/api/parse?path=${encodeURIComponent(p)}`);
 const postJSON = (url, body) =>
   api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -63,18 +66,42 @@ async function browseFolder() {
   }
 }
 
-// ---- tree ----
+// ---- tree (lazy, one level at a time) ----
+function loadingLi(text) {
+  const li = el("li", "tree-loading");
+  li.appendChild(el("span", "spinner"));
+  li.appendChild(document.createTextNode(" " + (text || "Loading…")));
+  return li;
+}
+function emptyLi() { return el("li", "tree-empty", "(no .OK files)"); }
+
 async function openFolder(dir) {
   if (!dir) return;
   if (!confirmDiscardIfDirty()) return;
+
+  const token = ++state.treeToken;
+  if (state.treeAbort) state.treeAbort.abort();   // cancel any in-flight load
+  state.treeAbort = new AbortController();
+
+  const host = $("#tree");
+  host.innerHTML = "";
+  host.appendChild(loadingLi("Loading folder…"));
+  setStatus("Loading folder…", "dirty");
+  $("#openBtn").disabled = true;
+
   try {
-    const tree = await getTree(dir);
+    const tree = await getTree(dir, state.treeAbort.signal);
+    if (token !== state.treeToken) return;        // a newer Open superseded this
     state.rootDir = dir;
     localStorage.setItem("okgen.dir", dir);
     renderTree(tree);
     setStatus("Folder loaded", "ok");
   } catch (e) {
+    if (e.name === "AbortError" || token !== state.treeToken) return;  // ignore stale
+    host.innerHTML = "";
     setStatus("Open failed: " + e.message, "err");
+  } finally {
+    if (token === state.treeToken) $("#openBtn").disabled = false;
   }
 }
 
@@ -82,36 +109,66 @@ function renderTree(root) {
   const host = $("#tree");
   host.innerHTML = "";
   const ul = el("ul");
-  ul.appendChild(renderNode(root));
+  ul.appendChild(renderFolderNode(root, true));   // root: open, children preloaded
   host.appendChild(ul);
 }
 
 function renderNode(node) {
-  const li = el("li");
-  if (node.type === "folder") {
-    li.className = "folder open";
-    const row = el("div", "node");
-    row.appendChild(el("span", "file-name", node.name || node.path));
-    row.addEventListener("click", (e) => { e.stopPropagation(); li.classList.toggle("open"); });
-    li.appendChild(row);
-    const childUl = el("ul");
-    (node.children || []).forEach((c) => childUl.appendChild(renderNode(c)));
-    li.appendChild(childUl);
-  } else {
-    li.className = "file";
-    const row = el("div", "node");
-    row.dataset.path = node.path;
-    const info = node.chain_info || {};
-    const badge = el("span", "chain-badge", info.short || node.chain || "?");
-    badge.style.background = info.color || "#666";
-    badge.title = info.name || ("chain " + (node.chain || "?"));
-    row.appendChild(badge);
-    row.appendChild(el("span", "file-name", node.name));
-    row.addEventListener("click", () => selectFile(node.path, row));
-    row.addEventListener("contextmenu", (e) => showCtxMenu(e, node));
-    li.appendChild(row);
+  return node.type === "folder" ? renderFolderNode(node, false) : renderFileNode(node);
+}
+
+function renderFolderNode(node, openPreloaded) {
+  const li = el("li", "folder");
+  const row = el("div", "node");
+  row.appendChild(el("span", "file-name", node.name || node.path));
+  const childUl = el("ul");
+  li.appendChild(row);
+  li.appendChild(childUl);
+  row.addEventListener("click", (e) => { e.stopPropagation(); toggleFolder(li, node, childUl); });
+  if (openPreloaded) {
+    li.classList.add("open");
+    li.dataset.loaded = "1";
+    const kids = node.children || [];
+    if (!kids.length) childUl.appendChild(emptyLi());
+    else kids.forEach((c) => childUl.appendChild(renderNode(c)));
   }
   return li;
+}
+
+function renderFileNode(node) {
+  const li = el("li", "file");
+  const row = el("div", "node");
+  row.dataset.path = node.path;
+  const info = node.chain_info || {};
+  const badge = el("span", "chain-badge", info.short || node.chain || "?");
+  badge.style.background = info.color || "#666";
+  badge.title = info.name || ("chain " + (node.chain || "?"));
+  row.appendChild(badge);
+  row.appendChild(el("span", "file-name", node.name));
+  row.addEventListener("click", () => selectFile(node.path, row));
+  row.addEventListener("contextmenu", (e) => showCtxMenu(e, node));
+  li.appendChild(row);
+  return li;
+}
+
+async function toggleFolder(li, node, childUl) {
+  const willOpen = !li.classList.contains("open");
+  li.classList.toggle("open");
+  if (!willOpen || li.dataset.loaded) return;   // collapsing, or already loaded
+  li.dataset.loaded = "1";                        // mark now to avoid double-load
+  childUl.innerHTML = "";
+  childUl.appendChild(loadingLi());
+  try {
+    const data = await getTree(node.path);
+    childUl.innerHTML = "";
+    const kids = data.children || [];
+    if (!kids.length) childUl.appendChild(emptyLi());
+    else kids.forEach((c) => childUl.appendChild(renderNode(c)));
+  } catch (e) {
+    childUl.innerHTML = "";
+    childUl.appendChild(el("li", "tree-error", "failed to load"));
+    li.dataset.loaded = "";                        // allow a retry on next expand
+  }
 }
 
 function selectFile(path, rowEl) {

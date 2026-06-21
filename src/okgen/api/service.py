@@ -25,40 +25,40 @@ def is_ok_file(path: Path) -> bool:
 # --------------------------------------------------------------------------- #
 # File tree
 # --------------------------------------------------------------------------- #
-def build_tree(root, config: Config, max_depth: int = 12) -> dict:
-    """Folder tree containing ONLY .OK files (empty folders pruned).
+def build_tree(root, config: Config) -> dict:
+    """List ONE level of a folder (lazy tree): immediate subfolders + .OK files.
 
-    Each file node carries its chain code + chain info (for the icon) and the
-    detected layout. Folders with no .OK file anywhere beneath them are omitted.
+    Subfolders are returned unexpanded (``children: None``) so the UI can fetch
+    them on demand when the user expands them — this keeps opening deep/large
+    structures fast. Only ``.OK`` files are listed (other files are hidden);
+    each file node carries its chain + chain info (for the icon) and layout.
     """
     root = Path(root)
     if not root.is_dir():
         raise NotADirectoryError(f"not a folder: {root}")
 
-    def walk(d: Path, depth: int) -> Optional[dict]:
-        children: List[dict] = []
-        try:
-            entries = sorted(d.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
-        except PermissionError:
-            entries = []
-        for entry in entries:
-            if entry.is_dir():
-                if depth < max_depth:
-                    node = walk(entry, depth + 1)
-                    if node is not None:
-                        children.append(node)
-            elif is_ok_file(entry):
-                children.append(_file_node(entry, config))
-        if not children and depth > 0:
-            return None  # prune empty folder (but keep the root itself)
-        return {
-            "type": "folder",
-            "name": d.name or str(d),
-            "path": str(d),
-            "children": children,
-        }
+    children: List[dict] = []
+    try:
+        entries = sorted(root.iterdir(), key=lambda p: (p.is_file(), p.name.lower()))
+    except PermissionError:
+        entries = []
+    for entry in entries:
+        if entry.is_dir():
+            children.append({
+                "type": "folder",
+                "name": entry.name,
+                "path": str(entry),
+                "children": None,   # not loaded yet (lazy)
+            })
+        elif is_ok_file(entry):
+            children.append(_file_node(entry, config))
 
-    return walk(root, 0) or {"type": "folder", "name": root.name, "path": str(root), "children": []}
+    return {
+        "type": "folder",
+        "name": root.name or str(root),
+        "path": str(root),
+        "children": children,
+    }
 
 
 def _file_node(path: Path, config: Config) -> dict:

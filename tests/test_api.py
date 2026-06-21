@@ -50,6 +50,26 @@ def test_build_tree_only_ok_files(config):
     assert style["layout"] == "StyleHeader"
 
 
+def test_build_tree_is_one_level_lazy(tmp_path, config):
+    # Nested structure: root/sub/Style.OK, plus a file at root.
+    (tmp_path / "sub").mkdir()
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", tmp_path / "sub" / "StyleHeader.OK")
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", tmp_path / "CartonLabel.OK")
+
+    top = service.build_tree(tmp_path, config)
+    kinds = {c["name"]: c for c in top["children"]}
+    # Subfolder is present but NOT expanded (children is None).
+    assert kinds["sub"]["type"] == "folder"
+    assert kinds["sub"]["children"] is None
+    # Root-level .OK file is listed.
+    assert kinds["CartonLabel.OK"]["type"] == "file"
+
+    # Expanding the subfolder is a separate call that lists its level.
+    sub = service.build_tree(tmp_path / "sub", config)
+    names = [c["name"] for c in sub["children"]]
+    assert names == ["StyleHeader.OK"]
+
+
 def test_parse_file_view_shape(registry, config):
     view = service.parse_file_view(DATA_DIR / "StyleHeader.OK", registry, config)
     assert view["layout"] == "StyleHeader"
