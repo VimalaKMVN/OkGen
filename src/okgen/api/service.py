@@ -797,10 +797,22 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
 
         if t == "random":
             hi = 10 ** size - 1
+            rmin = op.get("min")
+            rmax = op.get("max")
+            lo = 0 if rmin in (None, "") else int(rmin)
+            high = hi if rmax in (None, "") else int(rmax)
+            if lo < 0:
+                lo = 0
+            if high > hi:
+                return {"name": name, "status": "too_wide",
+                        "detail": f"max {high} exceeds field width {size}"}
+            if lo > high:
+                return {"name": name, "status": "error", "error": "min is greater than max"}
             for r in recs:
-                r.set(field, str(random.randint(0, hi)).zfill(size))
+                r.set(field, str(random.randint(lo, high)).zfill(size))
+            rng = f" in [{lo}..{high}]" if (rmin not in (None, "") or rmax not in (None, "")) else ""
             return {"name": name, "status": "change",
-                    "detail": f"random {field} on {before} row(s)", "okf": okf}
+                    "detail": f"random {field}{rng} on {before} row(s)", "okf": okf}
 
         # unique: sequential from a start value, per file (each file restarts)
         start = int(op.get("start", 1))

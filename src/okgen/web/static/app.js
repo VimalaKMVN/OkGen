@@ -371,7 +371,13 @@ function renderBulkPanel(scope) {
         row2.appendChild(el("span", "bulk-section", "· each row gets the next number (per file)"));
         fieldSel.addEventListener("change", reset);
       } else {  // random
-        row2.appendChild(el("span", "bulk-section", "· each row gets a random number of the field width"));
+        const rmin = el("input", "bulk-value bulk-rmin"); rmin.type = "number"; rmin.min = "0"; rmin.placeholder = "min"; rmin.style.width = "90px";
+        const rmax = el("input", "bulk-value bulk-rmax"); rmax.type = "number"; rmax.min = "0"; rmax.placeholder = "max"; rmax.style.width = "90px";
+        row2.appendChild(el("span", "bulk-label", "Range:"));
+        row2.appendChild(rmin);
+        row2.appendChild(el("span", "bulk-section", "to"));
+        row2.appendChild(rmax);
+        row2.appendChild(el("span", "bulk-section", "· optional — blank = full field width"));
         fieldSel.addEventListener("change", reset);
       }
     } else {
@@ -409,7 +415,11 @@ function renderBulkPanel(scope) {
       return { type: "set", field: fieldSel.value, value: row2.querySelector(".bulk-value").value };
     }
     if (op === "random") {
-      return { type: "random", field: fieldSel.value };
+      const o = { type: "random", field: fieldSel.value };
+      const mn = row2.querySelector(".bulk-rmin").value, mx = row2.querySelector(".bulk-rmax").value;
+      if (mn !== "") o.min = Number(mn);
+      if (mx !== "") o.max = Number(mx);
+      return o;
     }
     if (op === "unique") {
       return { type: "unique", field: fieldSel.value, start: Number(row2.querySelector(".bulk-value").value || 0) };
@@ -419,7 +429,10 @@ function renderBulkPanel(scope) {
   function describe() {
     const sec = curSection().name, op = buildOp();
     if (op.type === "set") return `${sec}: set ${op.field} = "${op.value}"`;
-    if (op.type === "random") return `${sec}: set ${op.field} to a random value on every row`;
+    if (op.type === "random") {
+      const rng = (op.min != null || op.max != null) ? ` in [${op.min != null ? op.min : 0}..${op.max != null ? op.max : "max"}]` : "";
+      return `${sec}: set ${op.field} to a random value${rng} on every row`;
+    }
     if (op.type === "unique") return `${sec}: set ${op.field} to unique values from ${op.start}`;
     if (op.type === "add") return `${sec}: add ${op.count} row(s)`;
     return `${sec}: keep first ${op.count} row(s)`;

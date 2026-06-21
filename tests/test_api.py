@@ -305,6 +305,27 @@ def test_bulk_op_random_fits_width(tmp_path, registry, config):
         assert len(q) == 5 and q.isdigit()                 # width preserved, numeric
 
 
+def test_bulk_op_random_range(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    service.bulk_op_apply([str(f)], "StyleHeader", "Size",
+                          {"type": "random", "field": "qty", "min": 100, "max": 200},
+                          registry, config, backup=False)
+    view = service.parse_file_view(f, registry, config)
+    size = next(s for s in view["sections"] if s["name"] == "Size")
+    for r in size["records"]:
+        q = r["values"]["qty"]
+        assert len(q) == 5 and 100 <= int(q) <= 200          # within range, width preserved
+
+
+def test_bulk_op_random_range_overflow(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    pv = service.bulk_op_preview([str(f)], "StyleHeader", "Size",
+                                 {"type": "random", "field": "qty", "max": 999999}, registry, config)
+    assert pv["results"][0]["status"] == "too_wide"          # max exceeds width 5
+
+
 def test_bulk_op_scope_has_detail_sections(registry, config):
     scope = service.bulk_scope([str(DATA_DIR / "StyleHeader.OK")], registry, config)
     ds = {s["name"]: s for s in scope["detail_sections"]["StyleHeader"]}
