@@ -6,9 +6,11 @@ const state = {
   file: null,          // current file path
   view: null,          // parsed view
   edits: {},           // key -> value
-  clipboard: null,     // path copied for paste
+  clipboard: [],       // array of paths copied for paste
   treeToken: 0,        // increments per Open; guards against stale renders
   treeAbort: null,     // AbortController for the in-flight root load
+  selection: new Set(),// multi-selected file paths (for bulk copy / future bulk edit)
+  selAnchor: null,     // last plainly-clicked file, for Shift-range select
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -82,6 +84,7 @@ async function openFolder(dir) {
   const token = ++state.treeToken;
   if (state.treeAbort) state.treeAbort.abort();   // cancel any in-flight load
   state.treeAbort = new AbortController();
+  setSelection([]);                                // reset multi-select for a new folder
 
   const host = $("#tree");
   host.innerHTML = "";
@@ -111,6 +114,7 @@ function renderTree(root) {
   const ul = el("ul");
   ul.appendChild(renderFolderNode(root, true));   // root: open, children preloaded
   host.appendChild(ul);
+  updateSelectionUI();
 }
 
 function renderNode(node) {
@@ -120,11 +124,13 @@ function renderNode(node) {
 function renderFolderNode(node, openPreloaded) {
   const li = el("li", "folder");
   const row = el("div", "node");
+  row.dataset.path = node.path;
   row.appendChild(el("span", "file-name", node.name || node.path));
   const childUl = el("ul");
   li.appendChild(row);
   li.appendChild(childUl);
   row.addEventListener("click", (e) => { e.stopPropagation(); toggleFolder(li, node, childUl); });
+  row.addEventListener("contextmenu", (e) => showFolderCtxMenu(e, node));
   if (openPreloaded) {
     li.classList.add("open");
     li.dataset.loaded = "1";
@@ -145,10 +151,54 @@ function renderFileNode(node) {
   badge.title = info.name || ("chain " + (node.chain || "?"));
   row.appendChild(badge);
   row.appendChild(el("span", "file-name", node.name));
-  row.addEventListener("click", () => selectFile(node.path, row));
-  row.addEventListener("contextmenu", (e) => showCtxMenu(e, node));
+  row.addEventListener("click", (e) => onFileClick(e, node, row));
+  row.addEventListener("contextmenu", (e) => showCtxMenu(e, node, row));
   li.appendChild(row);
   return li;
+}
+
+// ---- multi-select ----
+function onFileClick(e, node, row) {
+  if (e.metaKey || e.ctrlKey) {            // toggle this file in the selection
+    e.preventDefault();
+    if (state.selection.has(node.path)) state.selection.delete(node.path);
+    else state.selection.add(node.path);
+    state.selAnchor = node.path;
+    updateSelectionUI();
+  } else if (e.shiftKey) {                  // range from anchor to here
+    e.preventDefault();
+    rangeSelect(node.path);
+  } else {                                  // plain click: open + single select
+    selectFile(node.path, row);            // (has the unsaved-changes guard)
+    setSelection([node.path]);
+    state.selAnchor = node.path;
+  }
+}
+
+function setSelection(paths) {
+  state.selection = new Set(paths);
+  updateSelectionUI();
+}
+
+function rangeSelect(path) {
+  const rows = [...document.querySelectorAll(".file > .node")];
+  const paths = rows.map((r) => r.dataset.path);
+  const a = paths.indexOf(state.selAnchor);
+  const b = paths.indexOf(path);
+  if (a === -1 || b === -1) { state.selection.add(path); updateSelectionUI(); return; }
+  const [lo, hi] = a < b ? [a, b] : [b, a];
+  for (let i = lo; i <= hi; i++) state.selection.add(paths[i]);
+  updateSelectionUI();
+}
+
+function updateSelectionUI() {
+  const sel = state.selection;
+  document.querySelectorAll(".file > .node").forEach((r) => {
+    r.classList.toggle("multi-selected", sel.has(r.dataset.path));
+  });
+  const n = sel.size;
+  const c = $("#selCount");
+  if (c) c.textContent = n > 1 ? ` · ${n} selected` : "";
 }
 
 async function toggleFolder(li, node, childUl) {
@@ -164,6 +214,7 @@ async function toggleFolder(li, node, childUl) {
     const kids = data.children || [];
     if (!kids.length) childUl.appendChild(emptyLi());
     else kids.forEach((c) => childUl.appendChild(renderNode(c)));
+    updateSelectionUI();
   } catch (e) {
     childUl.innerHTML = "";
     childUl.appendChild(el("li", "tree-error", "failed to load"));
@@ -460,7 +511,7 @@ async function save(targetPath) {
     setStatus(`Saved ${res.edits_applied} edit(s)` + (res.roundtrip_ok ? "" : " (round-trip DIFFERS!)"),
               res.roundtrip_ok ? "ok" : "err");
     const openPath = targetPath || state.file;
-    if (targetPath && state.rootDir) await openFolder(state.rootDir);
+    if (targetPath) await refreshFolder(folderOf(targetPath));
     await loadFile(openPath);
   } catch (e) {
     setStatus("Save failed: " + e.message, "err");
@@ -468,38 +519,96 @@ async function save(targetPath) {
 }
 
 // ---- context menu (file actions) ----
-function showCtxMenu(e, node) {
+function showCtxMenu(e, node, row) {
   e.preventDefault();
+  // Right-clicking a file that isn't in the selection makes it the selection.
+  if (!state.selection.has(node.path)) { setSelection([node.path]); state.selAnchor = node.path; }
+  const count = state.selection.size;
+
   const menu = $("#ctxMenu");
   menu.innerHTML = "";
-  const add = (label, fn) => {
+  const add = (label, fn, disabled) => {
     const item = el("div", "ctx-item", label);
-    item.addEventListener("click", () => { hideCtxMenu(); fn(); });
+    if (disabled) item.classList.add("disabled");
+    else item.addEventListener("click", () => { hideCtxMenu(); fn(); });
     menu.appendChild(item);
   };
-  add("Open", () => loadFile(node.path));
-  add("Copy", () => { state.clipboard = node.path; setStatus("Copied: " + node.name, "ok"); });
-  add("Paste here", () => pasteInto(folderOf(node.path)));
+  if (count <= 1) add("Open", () => loadFile(node.path));
+  add(count > 1 ? `Copy ${count} files` : "Copy", () => copySelection());
+  add("Paste here", () => pasteInto(folderOf(node.path)), !state.clipboard.length);
   menu.appendChild(el("div", "ctx-sep"));
-  add("Rename…", () => renameFile(node));
-  add("Delete", () => deleteFile(node));
+  add("Rename…", () => renameFile(node), count > 1);
+  add("Delete", () => deleteFile(node), count > 1);
   menu.style.left = e.clientX + "px";
   menu.style.top = e.clientY + "px";
   menu.classList.remove("hidden");
 }
+
+function copySelection() {
+  state.clipboard = [...state.selection];
+  setStatus(`Copied ${state.clipboard.length} file(s)`, "ok");
+}
 function hideCtxMenu() { $("#ctxMenu").classList.add("hidden"); }
 function folderOf(p) { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return p.slice(0, i); }
 
-async function pasteInto(folder) {
-  if (!state.clipboard) { setStatus("Clipboard empty", "err"); return; }
-  const base = state.clipboard.split(/[\\/]/).pop();
-  const name = prompt("New file name:", base.replace(/\.OK$/i, "_copy.OK"));
-  if (!name) return;
-  const sep = folder.includes("\\") ? "\\" : "/";
+function showFolderCtxMenu(e, node) {
+  e.preventDefault();
+  const menu = $("#ctxMenu");
+  menu.innerHTML = "";
+  const add = (label, fn, disabled) => {
+    const item = el("div", "ctx-item", label);
+    if (disabled) { item.classList.add("disabled"); }
+    else item.addEventListener("click", () => { hideCtxMenu(); fn(); });
+    menu.appendChild(item);
+  };
+  const n = state.clipboard.length;
+  add(n ? `Paste ${n} file(s) here` : "Paste here (nothing copied)",
+      () => pasteInto(node.path), !n);
+  menu.appendChild(el("div", "ctx-sep"));
+  add("Refresh", () => refreshFolder(node.path));
+  menu.style.left = e.clientX + "px";
+  menu.style.top = e.clientY + "px";
+  menu.classList.remove("hidden");
+}
+
+// Reload one folder's children in place (after a paste/delete/rename), without
+// rebuilding or collapsing the rest of the tree. No-op if the folder isn't
+// currently rendered.
+async function refreshFolder(path) {
+  let row = null;
+  document.querySelectorAll(".folder > .node").forEach((r) => {
+    if (r.dataset.path === path) row = r;
+  });
+  if (!row) return;
+  const li = row.parentElement;
+  const childUl = li.querySelector(":scope > ul");
+  li.classList.add("open");
+  li.dataset.loaded = "1";
+  childUl.innerHTML = "";
+  childUl.appendChild(loadingLi());
   try {
-    await postJSON("/api/file/copy", { src: state.clipboard, dst: folder + sep + name });
-    await openFolder(state.rootDir);
-    setStatus("Pasted " + name, "ok");
+    const data = await getTree(path);
+    childUl.innerHTML = "";
+    const kids = data.children || [];
+    if (!kids.length) childUl.appendChild(emptyLi());
+    else kids.forEach((c) => childUl.appendChild(renderNode(c)));
+    updateSelectionUI();
+  } catch (e) {
+    childUl.innerHTML = "";
+    childUl.appendChild(el("li", "tree-error", "failed to load"));
+  }
+}
+
+async function pasteInto(folder) {
+  if (!state.clipboard.length) { setStatus("Clipboard empty", "err"); return; }
+  try {
+    const res = await postJSON("/api/file/copy-batch", { srcs: state.clipboard, dst_dir: folder });
+    await refreshFolder(folder);
+    const c = res.copied.length, s = res.skipped.length, er = res.errors.length;
+    const msg = `Pasted ${c} file(s)` +
+      (s ? `, ${s} skipped (name exists)` : "") +
+      (er ? `, ${er} failed` : "");
+    setStatus(msg, (s || er) ? "dirty" : "ok");
   } catch (e) { setStatus("Paste failed: " + e.message, "err"); }
 }
 
@@ -514,7 +623,7 @@ async function deleteFile(node) {
       $("#editorEmpty").style.display = "";
       updateSaveButtons();
     }
-    await openFolder(state.rootDir);
+    await refreshFolder(folderOf(node.path));
     setStatus("Deleted " + node.name, "ok");
   } catch (e) { setStatus("Delete failed: " + e.message, "err"); }
 }
@@ -525,7 +634,7 @@ async function renameFile(node) {
   const sep = node.path.includes("\\") ? "\\" : "/";
   try {
     await postJSON("/api/file/rename", { src: node.path, dst: folderOf(node.path) + sep + name });
-    await openFolder(state.rootDir);
+    await refreshFolder(folderOf(node.path));
     setStatus("Renamed to " + name, "ok");
   } catch (e) { setStatus("Rename failed: " + e.message, "err"); }
 }

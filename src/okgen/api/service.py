@@ -397,6 +397,33 @@ def copy_file(src, dst) -> dict:
     return {"copied": str(s), "to": str(d)}
 
 
+def copy_files(srcs, dst_dir) -> dict:
+    """Copy several .OK files into a folder, keeping their names.
+
+    Returns per-file outcomes. Existing destinations are skipped (not
+    overwritten); non-.OK sources are reported as errors.
+    """
+    dd = Path(dst_dir)
+    if not dd.is_dir():
+        raise EditError(f"not a folder: {dd}")
+    copied, skipped, errors = [], [], []
+    for src in srcs or []:
+        sp = Path(src)
+        if not is_ok_file(sp):
+            errors.append({"src": str(src), "error": "not an .OK file"})
+            continue
+        dp = dd / sp.name
+        if dp.exists():
+            skipped.append(str(dp))
+            continue
+        try:
+            shutil.copy2(sp, dp)
+            copied.append(str(dp))
+        except OSError as exc:
+            errors.append({"src": str(src), "error": str(exc)})
+    return {"copied": copied, "skipped": skipped, "errors": errors}
+
+
 def rename_file(src, dst) -> dict:
     s, d = Path(src), Path(dst)
     if not is_ok_file(s):

@@ -131,6 +131,14 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except service.EditError as exc:
             return _err(str(exc), 422)
 
+    @app.post("/api/file/copy-batch")
+    def file_copy_batch():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.copy_files(body.get("srcs", []), body.get("dst_dir")))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     @app.post("/api/file/rename")
     def file_rename():
         body = request.get_json(force=True, silent=True) or {}

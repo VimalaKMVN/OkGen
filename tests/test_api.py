@@ -121,6 +121,23 @@ def test_save_rejects_too_wide_value(tmp_path, registry):
         )
 
 
+def test_copy_files_batch(tmp_path):
+    # Two source files + a destination folder; one name pre-exists to test skip.
+    (tmp_path / "src").mkdir()
+    (tmp_path / "dst").mkdir()
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", tmp_path / "src" / "StyleHeader.OK")
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", tmp_path / "src" / "CartonLabel.OK")
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", tmp_path / "dst" / "CartonLabel.OK")  # collision
+
+    res = service.copy_files(
+        [str(tmp_path / "src" / "StyleHeader.OK"), str(tmp_path / "src" / "CartonLabel.OK")],
+        tmp_path / "dst",
+    )
+    assert len(res["copied"]) == 1                         # StyleHeader copied
+    assert len(res["skipped"]) == 1                        # CartonLabel already there
+    assert (tmp_path / "dst" / "StyleHeader.OK").exists()
+
+
 def test_save_as_and_copy_delete(tmp_path, registry):
     src = DATA_DIR / "DistLabels.OK"
     work = tmp_path / "DistLabels.OK"
