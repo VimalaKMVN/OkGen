@@ -64,6 +64,7 @@ class Config:
         unique_fields: Optional[Dict[str, str]] = None,
         field_colors: Optional[Dict[str, str]] = None,
         section_counts: Optional[Dict[str, Dict[str, str]]] = None,
+        nicelabel_path: Optional[str] = None,
     ):
         self._chains = chains
         self._rules = rules
@@ -71,6 +72,7 @@ class Config:
         self._unique_fields = unique_fields or {}
         self._field_colors = field_colors or {}
         self._section_counts = section_counts or {}
+        self._nicelabel_path = nicelabel_path
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -139,6 +141,10 @@ class Config:
     # ----- field label colors -----
     def field_colors(self) -> Dict[str, str]:
         return dict(self._field_colors)
+
+    # ----- NiceLabel destination -----
+    def nicelabel_path(self) -> Optional[str]:
+        return self._nicelabel_path
 
     # ----- unique key field -----
     def unique_field(self, layout: Optional[str]) -> Optional[str]:
@@ -218,4 +224,11 @@ class Config:
                 for layout, secs in raw.items()
             }
 
-        return cls(chains, rules, limits, unique_fields, field_colors, section_counts)
+        nicelabel_path = None
+        nl_path = cdir / "nicelabel.yaml"
+        if nl_path.is_file():
+            data = yaml.safe_load(nl_path.read_text(encoding="utf-8")) or {}
+            nicelabel_path = data.get("nicelabel_path") or None
+
+        return cls(chains, rules, limits, unique_fields, field_colors,
+                   section_counts, nicelabel_path)

@@ -31,7 +31,9 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     @app.get("/")
     def index():
         chains = {code: info.to_dict() for code, info in config.chains().items()}
-        return render_template("index.html", chains=chains, field_colors=config.field_colors())
+        return render_template("index.html", chains=chains,
+                               field_colors=config.field_colors(),
+                               nicelabel_path=config.nicelabel_path() or "")
 
     # ----- JSON API -----
     @app.get("/api/health")
@@ -127,6 +129,14 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def file_delete_batch():
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(service.delete_files(body.get("paths", [])))
+
+    @app.post("/api/send")
+    def send():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.send_to_nicelabel(body.get("paths", []), config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
 
     @app.post("/api/file/copy")
     def file_copy():

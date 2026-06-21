@@ -870,6 +870,8 @@ function showCtxMenu(e, node, row) {
   add("Paste here", () => pasteInto(folderOf(node.path)), !state.clipboard.length);
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   menu.appendChild(el("div", "ctx-sep"));
+  add(count > 1 ? `Send ${count} files to NiceLabel` : "Send to NiceLabel", () => sendToNiceLabel());
+  menu.appendChild(el("div", "ctx-sep"));
   add("Rename…", () => renameFile(node), count > 1);
   add(count > 1 ? `Delete ${count} files` : "Delete",
       () => (count > 1 ? deleteSelection() : deleteFile(node)));
@@ -955,6 +957,67 @@ async function makeUniqueSelection() {
   } finally {
     state.busy = false;
   }
+}
+
+// ---- Send to NiceLabel ----
+const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function sendToNiceLabel() {
+  const paths = [...state.selection];
+  if (!paths.length) return;
+  const dest = window.OKGEN_NICELABEL || "the NiceLabel folder";
+  if (!confirm(`Send ${paths.length} file(s) to NiceLabel?\n\n${dest}`)) return;
+  if (!beginBusy("Sending to NiceLabel…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+
+  showCopyAnimation(paths.length, dest);
+  const minOnScreen = delay(2000);   // keep the animation up long enough to register
+  try {
+    const res = await postJSON("/api/send", { paths });
+    await minOnScreen;
+    finishCopyAnimation(res);
+    const s = res.sent.length, er = res.errors.length;
+    setStatus(`Sent ${s} file(s) to NiceLabel` + (er ? `, ${er} failed` : ""), er ? "err" : "ok");
+  } catch (e) {
+    await minOnScreen;
+    hideCopyAnimation();
+    setStatus("Send failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
+}
+
+function showCopyAnimation(n, dest) {
+  hideCopyAnimation();
+  const overlay = el("div", "send-overlay");
+  overlay.id = "sendOverlay";
+  overlay.innerHTML = `
+    <div class="send-card">
+      <div class="send-scene">
+        <span class="send-folder">📂</span>
+        <span class="send-papers">
+          <span class="send-paper"></span><span class="send-paper"></span><span class="send-paper"></span>
+        </span>
+        <span class="send-folder">🏷️</span>
+      </div>
+      <div class="send-title">Sending ${n} file(s) to NiceLabel…</div>
+      <div class="send-sub">${(dest || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function finishCopyAnimation(res) {
+  const overlay = $("#sendOverlay");
+  if (!overlay) return;
+  const s = res.sent.length, er = res.errors.length;
+  overlay.querySelector(".send-card").innerHTML = `
+    <div class="send-done">✓</div>
+    <div class="send-title">Sent ${s} file(s) to NiceLabel${er ? ` · ${er} failed` : ""}</div>`;
+  setTimeout(hideCopyAnimation, 1100);
+}
+
+function hideCopyAnimation() {
+  const overlay = $("#sendOverlay");
+  if (overlay) overlay.remove();
 }
 
 async function createFolder(parentPath) {

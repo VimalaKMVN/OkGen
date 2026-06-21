@@ -1,0 +1,4 @@
+# Folder NiceLabel watches for incoming OK files. "Send to NiceLabel" copies
+# the selected files here, overwriting any file of the same name. Edit to match
+# your setup. (Windows paths: use double backslashes or forward slashes.)
+nicelabel_path: "D:\\NiceLabel\\TJX GTA\\Automation\\Incoming"

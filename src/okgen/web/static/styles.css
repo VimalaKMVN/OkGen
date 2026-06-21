@@ -270,6 +270,41 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .bulk-table tr.st-too_wide td, .bulk-table tr.st-error td { color: var(--err); }
 .bulk-table tr.st-skipped td, .bulk-table tr.st-unchanged td, .bulk-table tr.st-missing td { color: var(--text-dim); }
 
+/* Send-to-NiceLabel copy animation overlay */
+.send-overlay {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+}
+.send-card {
+  background: var(--bg-alt); border: 1px solid var(--border);
+  border-radius: 8px; padding: 22px 30px; min-width: 360px; text-align: center;
+  box-shadow: 0 12px 44px rgba(0, 0, 0, 0.6);
+}
+.send-scene {
+  position: relative; height: 64px; margin: 4px 18px 14px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.send-folder { font-size: 36px; line-height: 1; }
+.send-papers { position: absolute; left: 50px; right: 50px; top: 0; bottom: 0; }
+.send-paper {
+  position: absolute; top: 22px; left: 0; width: 15px; height: 19px;
+  background: #eef1f4; border: 1px solid #9aa3ad; border-radius: 2px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  animation: sendFly 1.05s linear infinite;
+}
+.send-paper:nth-child(2) { animation-delay: 0.35s; }
+.send-paper:nth-child(3) { animation-delay: 0.70s; }
+@keyframes sendFly {
+  0%   { left: 0;    opacity: 0; transform: translateY(0) scale(0.8); }
+  15%  { opacity: 1; }
+  85%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; transform: translateY(-7px) scale(1); }
+}
+.send-title { font-size: 14px; color: var(--text); }
+.send-sub { font-size: 11px; color: var(--text-dim); margin-top: 7px; word-break: break-all; }
+.send-done { color: var(--ok); font-size: 34px; line-height: 1; margin-bottom: 8px; }
+
 /* Context menu */
 .ctx-menu {
   position: fixed; z-index: 50; background: var(--bg-alt);

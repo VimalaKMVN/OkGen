@@ -384,6 +384,33 @@ def test_paste_folder_into_itself_rejected(tmp_path):
     assert res["errors"] and "itself" in res["errors"][0]["error"]
 
 
+def test_send_to_nicelabel(tmp_path):
+    from okgen.config import Config
+    dest = tmp_path / "incoming"; dest.mkdir()
+    a = tmp_path / "a.OK"; b = tmp_path / "b.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", a)
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", b)
+    cfg = Config.load(FIXTURE_CONFIG)
+    cfg._nicelabel_path = str(dest)
+
+    res = service.send_to_nicelabel([str(a), str(b)], cfg)
+    assert sorted(res["sent"]) == ["a.OK", "b.OK"]
+    assert (dest / "a.OK").exists() and (dest / "b.OK").exists()
+
+    # Sending again overwrites (no error, no rename).
+    res2 = service.send_to_nicelabel([str(a)], cfg)
+    assert res2["sent"] == ["a.OK"]
+
+
+def test_send_to_nicelabel_missing_folder(tmp_path):
+    from okgen.config import Config
+    a = tmp_path / "a.OK"; shutil.copy2(DATA_DIR / "StyleHeader.OK", a)
+    cfg = Config.load(FIXTURE_CONFIG)
+    cfg._nicelabel_path = str(tmp_path / "does-not-exist")
+    with pytest.raises(service.EditError):
+        service.send_to_nicelabel([str(a)], cfg)
+
+
 def test_delete_files_batch(tmp_path):
     a = tmp_path / "a.OK"; b = tmp_path / "b.OK"; c = tmp_path / "c.OK"
     for f in (a, b, c):

@@ -456,6 +456,28 @@ def delete_file(path) -> dict:
     return {"deleted": str(p)}
 
 
+def send_to_nicelabel(paths, config: Config) -> dict:
+    """Copy selected .OK files into NiceLabel's incoming folder (overwriting)."""
+    dest = config.nicelabel_path()
+    if not dest:
+        raise EditError("NiceLabel path is not configured (config/nicelabel.yaml)")
+    dd = Path(dest)
+    if not dd.is_dir():
+        raise EditError(f"NiceLabel folder not found or unreachable: {dest}")
+    sent, errors = [], []
+    for path in paths or []:
+        sp = Path(path)
+        if not is_ok_file(sp):
+            errors.append({"path": str(path), "error": "not an .OK file"})
+            continue
+        try:
+            shutil.copy2(sp, dd / sp.name)   # overwrite any same-name file
+            sent.append(sp.name)
+        except OSError as exc:
+            errors.append({"path": str(path), "error": str(exc)})
+    return {"sent": sent, "errors": errors, "dest": str(dd)}
+
+
 def delete_files(paths) -> dict:
     """Delete several .OK files; report per-file outcomes."""
     deleted, errors = [], []

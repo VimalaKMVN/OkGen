@@ -43,6 +43,7 @@
   <script>
     window.OKGEN_CHAINS = {{ chains | tojson }};
     window.OKGEN_FIELD_COLORS = {{ field_colors | tojson }};
+    window.OKGEN_NICELABEL = {{ nicelabel_path | tojson }};
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
