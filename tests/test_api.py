@@ -272,6 +272,39 @@ def test_bulk_op_set_all_rows(tmp_path, registry, config):
     assert all(r["values"]["qty"] == "00009" for r in size["records"])
 
 
+def test_bulk_op_unique_sequential(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    service.bulk_op_apply([str(f)], "StyleHeader", "Size",
+                          {"type": "unique", "field": "qty", "start": 1}, registry, config, backup=False)
+    view = service.parse_file_view(f, registry, config)
+    size = next(s for s in view["sections"] if s["name"] == "Size")
+    qtys = [r["values"]["qty"] for r in size["records"]]
+    assert qtys == ["00001", "00002", "00003", "00004"]   # qty size 5, 4 rows
+
+
+def test_bulk_op_unique_overflow(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    # 'size' field is width 6; start huge so start+rows overflows.
+    pv = service.bulk_op_preview([str(f)], "StyleHeader", "Size",
+                                 {"type": "unique", "field": "qty", "start": 99999}, registry, config)
+    assert pv["results"][0]["status"] == "too_wide"        # 99999..100002 > width 5
+
+
+def test_bulk_op_random_fits_width(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    res = service.bulk_op_apply([str(f)], "StyleHeader", "Size",
+                                {"type": "random", "field": "qty"}, registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+    view = service.parse_file_view(f, registry, config)
+    size = next(s for s in view["sections"] if s["name"] == "Size")
+    for r in size["records"]:
+        q = r["values"]["qty"]
+        assert len(q) == 5 and q.isdigit()                 # width preserved, numeric
+
+
 def test_bulk_op_scope_has_detail_sections(registry, config):
     scope = service.bulk_scope([str(DATA_DIR / "StyleHeader.OK")], registry, config)
     ds = {s["name"]: s for s in scope["detail_sections"]["StyleHeader"]}

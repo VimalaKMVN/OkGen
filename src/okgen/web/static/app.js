@@ -326,36 +326,54 @@ function renderBulkPanel(scope) {
 
   function opsForSection(sec) {
     if (sec.isHeader) return [{ v: "set", t: "Set value" }];
-    return [{ v: "set", t: "Set value (all rows)" }, { v: "add", t: "Add rows" }, { v: "keep", t: "Keep first N rows" }];
+    return [
+      { v: "set", t: "Set value (all rows)" },
+      { v: "random", t: "Set random value (each row)" },
+      { v: "unique", t: "Set unique value (each row)" },
+      { v: "add", t: "Add rows" },
+      { v: "keep", t: "Keep first N rows" },
+    ];
   }
 
   function rebuildInputs() {
     row2.innerHTML = "";
     const sec = curSection(); if (!sec) return;
     const op = opSel.value;
-    if (op === "set") {
+    if (op === "set" || op === "random" || op === "unique") {
       const fieldSel = el("select", "bulk-field");
       sec.fields.forEach((f) => fieldSel.appendChild(new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
-      const valueHolder = el("span", "bulk-value-holder");
-      const buildValue = () => {
-        valueHolder.innerHTML = "";
-        const f = sec.fields.find((x) => x.name === fieldSel.value); if (!f) return;
-        let ctrl;
-        if (f.options) {
-          ctrl = el("select", "bulk-value");
-          Object.keys(f.options).forEach((code) => ctrl.appendChild(new Option(`${f.options[code]} (${code})`, code)));
-        } else {
-          ctrl = el("input", "bulk-value"); ctrl.type = "text";
-          if (f.size != null) ctrl.maxLength = f.size;
-        }
-        valueHolder.appendChild(ctrl);
-      };
-      fieldSel.addEventListener("change", () => { buildValue(); reset(); });
       row2.appendChild(el("span", "bulk-label", "Field:"));
       row2.appendChild(fieldSel);
-      row2.appendChild(el("span", "bulk-label", "Set value:"));
-      row2.appendChild(valueHolder);
-      buildValue();
+
+      if (op === "set") {
+        const valueHolder = el("span", "bulk-value-holder");
+        const buildValue = () => {
+          valueHolder.innerHTML = "";
+          const f = sec.fields.find((x) => x.name === fieldSel.value); if (!f) return;
+          let ctrl;
+          if (f.options) {
+            ctrl = el("select", "bulk-value");
+            Object.keys(f.options).forEach((code) => ctrl.appendChild(new Option(`${f.options[code]} (${code})`, code)));
+          } else {
+            ctrl = el("input", "bulk-value"); ctrl.type = "text";
+            if (f.size != null) ctrl.maxLength = f.size;
+          }
+          valueHolder.appendChild(ctrl);
+        };
+        fieldSel.addEventListener("change", () => { buildValue(); reset(); });
+        row2.appendChild(el("span", "bulk-label", "Set value:"));
+        row2.appendChild(valueHolder);
+        buildValue();
+      } else if (op === "unique") {
+        const startInp = el("input", "bulk-value"); startInp.type = "number"; startInp.min = "0"; startInp.value = "1"; startInp.style.width = "90px";
+        row2.appendChild(el("span", "bulk-label", "Start at:"));
+        row2.appendChild(startInp);
+        row2.appendChild(el("span", "bulk-section", "· each row gets the next number (per file)"));
+        fieldSel.addEventListener("change", reset);
+      } else {  // random
+        row2.appendChild(el("span", "bulk-section", "· each row gets a random number of the field width"));
+        fieldSel.addEventListener("change", reset);
+      }
     } else {
       const cnt = el("input", "bulk-value"); cnt.type = "number"; cnt.min = "0"; cnt.value = op === "add" ? "1" : "5";
       cnt.style.width = "80px";
@@ -386,16 +404,23 @@ function renderBulkPanel(scope) {
   // Build the op spec from the current inputs.
   function buildOp() {
     const op = opSel.value;
+    const fieldSel = row2.querySelector("select.bulk-field");
     if (op === "set") {
-      const fieldSel = row2.querySelector("select.bulk-field");
-      const value = row2.querySelector(".bulk-value").value;
-      return { type: "set", field: fieldSel.value, value };
+      return { type: "set", field: fieldSel.value, value: row2.querySelector(".bulk-value").value };
+    }
+    if (op === "random") {
+      return { type: "random", field: fieldSel.value };
+    }
+    if (op === "unique") {
+      return { type: "unique", field: fieldSel.value, start: Number(row2.querySelector(".bulk-value").value || 0) };
     }
     return { type: op, count: Number(row2.querySelector(".bulk-value").value || 0) };
   }
   function describe() {
     const sec = curSection().name, op = buildOp();
     if (op.type === "set") return `${sec}: set ${op.field} = "${op.value}"`;
+    if (op.type === "random") return `${sec}: set ${op.field} to a random value on every row`;
+    if (op.type === "unique") return `${sec}: set ${op.field} to unique values from ${op.start}`;
     if (op.type === "add") return `${sec}: add ${op.count} row(s)`;
     return `${sec}: keep first ${op.count} row(s)`;
   }

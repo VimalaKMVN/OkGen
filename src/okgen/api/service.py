@@ -6,6 +6,7 @@ Kept HTTP-free so it can be unit-tested directly. The FastAPI app in
 
 from __future__ import annotations
 
+import random
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -768,26 +769,50 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
     t = op.get("type")
     before = len(recs)
 
-    if t == "set":
+    if t in ("set", "random", "unique"):
         field = op.get("field")
-        value = op.get("value", "")
         fdef = next((x for x in sec.fields if x.name == field), None)
         if fdef is None:
             return {"name": name, "status": "missing_field"}
-        if fdef.size is not None and len(value) > fdef.size:
-            return {"name": name, "status": "too_wide", "detail": f"value too long for {field}"}
-        changed = 0
-        first_old = recs[0].get(field) if recs else None
-        for r in recs:
-            cur = r.get(field)
-            r.set(field, value)
-            if r.get(field) != cur:
-                changed += 1
-        if changed == 0:
-            return {"name": name, "status": "unchanged", "detail": f"{before} row(s)"}
-        detail = (f"{field}: {first_old!r} -> {value!r}" if before == 1
-                  else f"set {field} on {changed}/{before} row(s)")
-        return {"name": name, "status": "change", "detail": detail, "okf": okf}
+        size = fdef.size
+        if size is None:
+            return {"name": name, "status": "error", "error": f"{field} has no fixed width"}
+
+        if t == "set":
+            value = op.get("value", "")
+            if len(value) > size:
+                return {"name": name, "status": "too_wide", "detail": f"value too long for {field}"}
+            changed = 0
+            first_old = recs[0].get(field) if recs else None
+            for r in recs:
+                cur = r.get(field)
+                r.set(field, value)
+                if r.get(field) != cur:
+                    changed += 1
+            if changed == 0:
+                return {"name": name, "status": "unchanged", "detail": f"{before} row(s)"}
+            detail = (f"{field}: {first_old!r} -> {value!r}" if before == 1
+                      else f"set {field} on {changed}/{before} row(s)")
+            return {"name": name, "status": "change", "detail": detail, "okf": okf}
+
+        if t == "random":
+            hi = 10 ** size - 1
+            for r in recs:
+                r.set(field, str(random.randint(0, hi)).zfill(size))
+            return {"name": name, "status": "change",
+                    "detail": f"random {field} on {before} row(s)", "okf": okf}
+
+        # unique: sequential from a start value, per file (each file restarts)
+        start = int(op.get("start", 1))
+        last = start + before - 1
+        if len(str(last)) > size:
+            return {"name": name, "status": "too_wide",
+                    "detail": f"start {start} + {before} rows overflows width {size}"}
+        for i, r in enumerate(recs):
+            r.set(field, str(start + i).zfill(size))
+        return {"name": name, "status": "change",
+                "detail": f"{field}: {str(start).zfill(size)}..{str(last).zfill(size)} ({before} rows)",
+                "okf": okf}
 
     if t in ("add", "keep"):
         if section_name == header_name:
