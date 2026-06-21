@@ -36,8 +36,9 @@ if errorlevel 1 (
 )
 
 set "PYTHONPATH=%CD%\src"
-echo Starting OkGen. A browser will open at http://127.0.0.1:8000
+echo Starting OkGen. Microsoft Edge will open at http://127.0.0.1:8000
 echo Close this window ^(or press Ctrl+C^) to stop.
-start "" http://127.0.0.1:8000
+REM Open Microsoft Edge explicitly (not the default file handler).
+start "" msedge "http://127.0.0.1:8000" || start "" "http://127.0.0.1:8000"
 ".venv\Scripts\python.exe" -m okgen.cli serve
 pause

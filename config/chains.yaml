@@ -10,7 +10,7 @@
 chains:
   "01":
     name: TJMAXX
-    short: TJX
+    short: TJM
     color: "#C8102E"
     icon: null
   "02":
@@ -25,7 +25,7 @@ chains:
     icon: null
   "04":
     name: Winners
-    short: WIN
+    short: WN
     color: "#5A2D81"
     icon: null
   "06":

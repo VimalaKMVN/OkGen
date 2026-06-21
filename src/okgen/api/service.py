@@ -344,12 +344,18 @@ def browse_folder(initial: Optional[str] = None) -> dict:
             )
         elif system == "Windows":
             start = (initial or "").replace("'", "''")
+            # Give the dialog a hidden top-most owner window so it appears in
+            # front of the browser instead of behind it.
             ps = (
                 "Add-Type -AssemblyName System.Windows.Forms;"
                 "$d = New-Object System.Windows.Forms.FolderBrowserDialog;"
+                "$d.Description = 'Select the folder with your OK files';"
                 + (f"$d.SelectedPath = '{start}';" if start else "")
-                + "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK)"
-                "{ Write-Output $d.SelectedPath }"
+                + "$o = New-Object System.Windows.Forms.Form;"
+                "$o.TopMost = $true; $o.ShowInTaskbar = $false; $o.Opacity = 0;"
+                "$null = $o.Show(); $o.Activate();"
+                "$r = $d.ShowDialog($o); $o.Close();"
+                "if ($r -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }"
             )
             proc = subprocess.run(
                 ["powershell", "-NoProfile", "-STA", "-Command", ps],
