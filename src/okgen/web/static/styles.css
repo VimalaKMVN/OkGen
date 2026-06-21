@@ -197,8 +197,25 @@ body {
 /* Header form */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px 16px; }
 .field { display: flex; flex-direction: column; gap: 2px; }
-.field label { font-size: 11px; color: var(--text-dim); }
+.field label { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 4px; }
 .field .size-hint { color: var(--text-dim); font-size: 10px; }
+
+/* Consistent label colors so a field type is recognizable at a glance. */
+.lbl-chain { color: #f06a6a !important; font-weight: 700; }    /* chain  = red */
+.lbl-format { color: #5aa9ff !important; font-weight: 700; }   /* format = blue */
+
+/* Highlight the layout's unique key field in the editor. */
+.field-key {
+  background: rgba(224, 176, 0, 0.10);
+  border-left: 3px solid #e0b000;
+  border-radius: 3px;
+  padding: 5px 7px;
+  margin: -5px -7px;
+}
+.key-tag {
+  color: #e0b000; font-weight: 700; font-size: 9px;
+  border: 1px solid #e0b000; border-radius: 3px; padding: 0 4px;
+}
 
 /* Repeating section table */
 .rec-table { overflow: auto; }

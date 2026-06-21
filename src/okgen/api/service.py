@@ -170,6 +170,7 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
         "format": fmt,
         "chain_info": chain_info.to_dict() if chain_info else None,
         "roundtrip_ok": roundtrip_ok,
+        "key_field": config.unique_field(layout_name),  # unique field for this layout
         "raw_text": path.read_bytes().decode(ENCODING),  # for the Raw verify tab
         "sections": sections_out,
     }

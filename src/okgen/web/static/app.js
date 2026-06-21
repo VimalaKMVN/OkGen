@@ -602,13 +602,26 @@ function makeControl(sec, rec, field) {
   return ctrl;
 }
 
+function fieldLabelClass(name) {
+  if (name === "chain") return "lbl-chain";
+  if (name === "format") return "lbl-format";
+  return "";
+}
+
 function renderForm(sec) {
   const grid = el("div", "form-grid");
   const rec = sec.records[0];
+  const keyField = state.view && state.view.key_field;
   sec.fields.forEach((field) => {
-    const f = el("div", "field");
-    const label = el("label", field.options ? "field-coded" : null,
-      `${field.name}  ·  ${field.size != null ? field.size : "?"}ch`);
+    const isKey = field.name === keyField;
+    const f = el("div", "field" + (isKey ? " field-key" : ""));
+    const cls = ["field-label"];
+    const nc = fieldLabelClass(field.name);
+    if (nc) cls.push(nc);             // chain/format colors take precedence
+    else if (field.options) cls.push("field-coded");
+    const label = el("label", cls.join(" "));
+    label.textContent = `${field.name}  ·  ${field.size != null ? field.size : "?"}ch`;
+    if (isKey) label.appendChild(el("span", "key-tag", "🔑 unique"));
     f.appendChild(label);
     f.appendChild(makeControl(sec, rec, field));
     grid.appendChild(f);
