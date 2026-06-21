@@ -228,6 +228,58 @@ def test_bulk_scope_and_preview_and_apply(tmp_path, registry, config):
     assert cl.read_bytes() == DATA_DIR.joinpath("CartonLabel.OK").read_bytes()  # untouched
 
 
+def _style_count(path, registry, config, section):
+    view = service.parse_file_view(path, registry, config)
+    return len(next(s for s in view["sections"] if s["name"] == section)["records"])
+
+
+def test_bulk_op_add_caps_at_max_and_syncs_count(tmp_path, registry, config):
+    # StyleHeader has 10 lanes already (Lane max = 10) and 4 sizes.
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    paths = [str(f)]
+
+    # Add 20 Lanes -> capped at 10 (already at limit -> unchanged).
+    pv = service.bulk_op_preview(paths, "StyleHeader", "Lane", {"type": "add", "count": 20}, registry, config)
+    assert pv["results"][0]["status"] == "unchanged"
+
+    # Add 20 Sizes -> appended (no Size limit), header size_rec synced.
+    ap = service.bulk_op_apply(paths, "StyleHeader", "Size", {"type": "add", "count": 20}, registry, config, backup=False)
+    assert ap["results"][0]["status"] == "changed"
+    assert _style_count(f, registry, config, "Size") == 24
+    hdr = service.parse_file_view(f, registry, config)["sections"][0]["records"][0]["values"]
+    assert hdr["size_rec"] == "24"      # count auto-synced (size 2)
+
+
+def test_bulk_op_keep_first_n_and_sync(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    ap = service.bulk_op_apply([str(f)], "StyleHeader", "Lane", {"type": "keep", "count": 5}, registry, config, backup=False)
+    assert ap["results"][0]["status"] == "changed"
+    assert _style_count(f, registry, config, "Lane") == 5
+    hdr = service.parse_file_view(f, registry, config)["sections"][0]["records"][0]["values"]
+    assert hdr["lane_rec"] == "05"
+
+
+def test_bulk_op_set_all_rows(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    # Set 'qty' = 00009 on every Size row.
+    ap = service.bulk_op_apply([str(f)], "StyleHeader", "Size", {"type": "set", "field": "qty", "value": "00009"}, registry, config, backup=False)
+    assert ap["results"][0]["status"] == "changed"
+    view = service.parse_file_view(f, registry, config)
+    size = next(s for s in view["sections"] if s["name"] == "Size")
+    assert all(r["values"]["qty"] == "00009" for r in size["records"])
+
+
+def test_bulk_op_scope_has_detail_sections(registry, config):
+    scope = service.bulk_scope([str(DATA_DIR / "StyleHeader.OK")], registry, config)
+    ds = {s["name"]: s for s in scope["detail_sections"]["StyleHeader"]}
+    assert ds["Lane"]["max_records"] == 10
+    assert ds["Lane"]["count_field"] == "lane_rec"
+    assert ds["Size"]["count_field"] == "size_rec"
+
+
 def test_bulk_preview_rejects_too_wide(tmp_path, registry, config):
     f = tmp_path / "a.OK"
     shutil.copy2(DATA_DIR / "StyleHeader.OK", f)

@@ -1,0 +1,16 @@
+# Header field that holds the record count for each repeating section.
+# When bulk Add/Keep changes a section's record count, this field is kept in
+# sync (zero-padded to its width). Editable.
+#
+#   layout -> { section name -> header count field }
+section_counts:
+  StyleHeader:
+    Lane: lane_rec
+    Size: size_rec
+  CartonLabel:
+    store: num_stores
+  DistLabels:
+    Store: store_lines
+    TSticker: t_lines
+  Preticket:
+    Lane: line_count

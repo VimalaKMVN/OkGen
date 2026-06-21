@@ -63,12 +63,14 @@ class Config:
         limits: Optional[Dict[str, Dict[str, int]]] = None,
         unique_fields: Optional[Dict[str, str]] = None,
         field_colors: Optional[Dict[str, str]] = None,
+        section_counts: Optional[Dict[str, Dict[str, str]]] = None,
     ):
         self._chains = chains
         self._rules = rules
         self._limits = limits or {}
         self._unique_fields = unique_fields or {}
         self._field_colors = field_colors or {}
+        self._section_counts = section_counts or {}
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -152,6 +154,13 @@ class Config:
             return None
         return self._limits.get(layout, {}).get(section)
 
+    # ----- section count fields -----
+    def count_field(self, layout: Optional[str], section: Optional[str]) -> Optional[str]:
+        """Header field that records a section's count, or None."""
+        if layout is None or section is None:
+            return None
+        return self._section_counts.get(layout, {}).get(section)
+
     # ----- loading -----
     @classmethod
     def load(cls, config_dir=None) -> "Config":
@@ -199,4 +208,14 @@ class Config:
             data = yaml.safe_load(fc_path.read_text(encoding="utf-8")) or {}
             field_colors = {str(k): str(v) for k, v in (data.get("field_colors") or {}).items()}
 
-        return cls(chains, rules, limits, unique_fields, field_colors)
+        section_counts: Dict[str, Dict[str, str]] = {}
+        sc_path = cdir / "section_counts.yaml"
+        if sc_path.is_file():
+            data = yaml.safe_load(sc_path.read_text(encoding="utf-8")) or {}
+            raw = data.get("section_counts") or {}
+            section_counts = {
+                str(layout): {str(sec): str(fld) for sec, fld in (secs or {}).items()}
+                for layout, secs in raw.items()
+            }
+
+        return cls(chains, rules, limits, unique_fields, field_colors, section_counts)

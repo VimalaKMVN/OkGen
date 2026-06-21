@@ -186,6 +186,20 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
             body.get("field"), body.get("value", ""), registry, config,
             backup=body.get("backup", True)))
 
+    @app.post("/api/bulk/op/preview")
+    def bulk_op_preview():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_op_preview(
+            body.get("paths", []), body.get("layout"), body.get("section"),
+            body.get("op", {}), registry, config))
+
+    @app.post("/api/bulk/op/apply")
+    def bulk_op_apply():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_op_apply(
+            body.get("paths", []), body.get("layout"), body.get("section"),
+            body.get("op", {}), registry, config, backup=body.get("backup", True)))
+
     @app.post("/api/folder/create")
     def folder_create():
         body = request.get_json(force=True, silent=True) or {}

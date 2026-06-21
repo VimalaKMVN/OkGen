@@ -277,33 +277,38 @@ function renderBulkPanel(scope) {
   }
 
   let selectedLayout = layoutNames[0];
+
+  // ---- Layout chooser ----
   const scopeBox = el("div", "bulk-scope");
   scopeBox.appendChild(el("span", "bulk-label", "Layout:"));
   layoutNames.forEach((name) => {
     const lbl = el("label", "bulk-radio");
     const rb = el("input"); rb.type = "radio"; rb.name = "bulkLayout";
     if (name === selectedLayout) rb.checked = true;
-    rb.addEventListener("change", () => { selectedLayout = name; rebuildFieldAndValue(); });
+    rb.addEventListener("change", () => { selectedLayout = name; rebuildSections(); });
     lbl.appendChild(rb);
     lbl.appendChild(document.createTextNode(` ${name} (${scope.layouts[name]})`));
     scopeBox.appendChild(lbl);
   });
-  scopeBox.appendChild(el("span", "bulk-section", "·  Section: Header"));
   panel.appendChild(scopeBox);
 
-  const editRow = el("div", "bulk-edit-row");
-  const fieldSel = el("select", "bulk-field");
-  const valueHolder = el("span", "bulk-value-holder");
-  editRow.appendChild(el("span", "bulk-label", "Field:"));
-  editRow.appendChild(fieldSel);
-  editRow.appendChild(el("span", "bulk-label", "Set value:"));
-  editRow.appendChild(valueHolder);
-  panel.appendChild(editRow);
+  // ---- Section + operation row ----
+  const row1 = el("div", "bulk-edit-row");
+  const sectionSel = el("select", "bulk-field");
+  const opSel = el("select", "bulk-field");
+  row1.appendChild(el("span", "bulk-label", "Section:"));
+  row1.appendChild(sectionSel);
+  row1.appendChild(el("span", "bulk-label", "Operation:"));
+  row1.appendChild(opSel);
+  panel.appendChild(row1);
+
+  // ---- Dynamic inputs (field/value or count) ----
+  const row2 = el("div", "bulk-edit-row");
+  panel.appendChild(row2);
 
   const actions = el("div", "bulk-actions");
   const previewBtn = el("button", "btn", "Preview");
-  const applyBtn = el("button", "btn btn-primary", "Apply");
-  applyBtn.disabled = true;
+  const applyBtn = el("button", "btn btn-primary", "Apply"); applyBtn.disabled = true;
   actions.appendChild(previewBtn); actions.appendChild(applyBtn);
   panel.appendChild(actions);
 
@@ -311,73 +316,125 @@ function renderBulkPanel(scope) {
   const resultsBox = el("div", "bulk-results");
   panel.appendChild(previewBox); panel.appendChild(resultsBox);
 
-  const fieldsFor = () => scope.header_fields[selectedLayout] || [];
-  const selField = () => fieldsFor().find((f) => f.name === fieldSel.value);
-  const valueCtrl = () => valueHolder.querySelector(".bulk-value");
+  // Sections for the current layout: Header + detail sections.
+  function sectionsFor() {
+    const det = (scope.detail_sections[selectedLayout] || []).map((d) => ({ ...d, isHeader: false }));
+    return [{ name: "Header", isHeader: true, fields: scope.header_fields[selectedLayout] || [] }, ...det];
+  }
+  const curSection = () => sectionsFor().find((s) => s.name === sectionSel.value);
   const reset = () => { applyBtn.disabled = true; previewBox.innerHTML = ""; resultsBox.innerHTML = ""; };
 
-  function rebuildValue() {
-    valueHolder.innerHTML = "";
-    const f = selField(); if (!f) return;
-    let ctrl;
-    if (f.options) {
-      ctrl = el("select", "bulk-value");
-      Object.keys(f.options).forEach((code) => ctrl.appendChild(new Option(`${f.options[code]} (${code})`, code)));
-    } else {
-      ctrl = el("input", "bulk-value"); ctrl.type = "text";
-      if (f.size != null) ctrl.maxLength = f.size;
-    }
-    valueHolder.appendChild(ctrl);
+  function opsForSection(sec) {
+    if (sec.isHeader) return [{ v: "set", t: "Set value" }];
+    return [{ v: "set", t: "Set value (all rows)" }, { v: "add", t: "Add rows" }, { v: "keep", t: "Keep first N rows" }];
   }
-  function rebuildFieldAndValue() {
-    fieldSel.innerHTML = "";
-    fieldsFor().forEach((f) => fieldSel.appendChild(new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
-    rebuildValue(); reset();
-  }
-  fieldSel.addEventListener("change", () => { rebuildValue(); reset(); });
 
-  previewBtn.addEventListener("click", async () => {
-    const f = selField(); if (!f) return;
-    if (!beginBusy("Previewing…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
-    previewBtn.disabled = true;
-    previewBox.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Previewing…</div>";
-    resultsBox.innerHTML = "";
+  function rebuildInputs() {
+    row2.innerHTML = "";
+    const sec = curSection(); if (!sec) return;
+    const op = opSel.value;
+    if (op === "set") {
+      const fieldSel = el("select", "bulk-field");
+      sec.fields.forEach((f) => fieldSel.appendChild(new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
+      const valueHolder = el("span", "bulk-value-holder");
+      const buildValue = () => {
+        valueHolder.innerHTML = "";
+        const f = sec.fields.find((x) => x.name === fieldSel.value); if (!f) return;
+        let ctrl;
+        if (f.options) {
+          ctrl = el("select", "bulk-value");
+          Object.keys(f.options).forEach((code) => ctrl.appendChild(new Option(`${f.options[code]} (${code})`, code)));
+        } else {
+          ctrl = el("input", "bulk-value"); ctrl.type = "text";
+          if (f.size != null) ctrl.maxLength = f.size;
+        }
+        valueHolder.appendChild(ctrl);
+      };
+      fieldSel.addEventListener("change", () => { buildValue(); reset(); });
+      row2.appendChild(el("span", "bulk-label", "Field:"));
+      row2.appendChild(fieldSel);
+      row2.appendChild(el("span", "bulk-label", "Set value:"));
+      row2.appendChild(valueHolder);
+      buildValue();
+    } else {
+      const cnt = el("input", "bulk-value"); cnt.type = "number"; cnt.min = "0"; cnt.value = op === "add" ? "1" : "5";
+      cnt.style.width = "80px";
+      row2.appendChild(el("span", "bulk-label", op === "add" ? "Add how many rows:" : "Keep first N rows:"));
+      row2.appendChild(cnt);
+      if (op === "add" && sec.max_records != null) {
+        row2.appendChild(el("span", "bulk-section", `(section max ${sec.max_records})`));
+      }
+      if (sec.count_field) row2.appendChild(el("span", "bulk-section", `· header ${sec.count_field} kept in sync`));
+    }
+    reset();
+  }
+
+  function rebuildOps() {
+    const sec = curSection();
+    opSel.innerHTML = "";
+    opsForSection(sec).forEach((o) => opSel.appendChild(new Option(o.t, o.v)));
+    rebuildInputs();
+  }
+  function rebuildSections() {
+    sectionSel.innerHTML = "";
+    sectionsFor().forEach((s) => sectionSel.appendChild(new Option(s.name, s.name)));
+    rebuildOps();
+  }
+  sectionSel.addEventListener("change", rebuildOps);
+  opSel.addEventListener("change", rebuildInputs);
+
+  // Build the op spec from the current inputs.
+  function buildOp() {
+    const op = opSel.value;
+    if (op === "set") {
+      const fieldSel = row2.querySelector("select.bulk-field");
+      const value = row2.querySelector(".bulk-value").value;
+      return { type: "set", field: fieldSel.value, value };
+    }
+    return { type: op, count: Number(row2.querySelector(".bulk-value").value || 0) };
+  }
+  function describe() {
+    const sec = curSection().name, op = buildOp();
+    if (op.type === "set") return `${sec}: set ${op.field} = "${op.value}"`;
+    if (op.type === "add") return `${sec}: add ${op.count} row(s)`;
+    return `${sec}: keep first ${op.count} row(s)`;
+  }
+
+  async function run(url, box, applied) {
+    if (!beginBusy(applied ? "Applying…" : "Previewing…")) { setStatus("Please wait — an operation is already running…", "dirty"); return null; }
+    previewBtn.disabled = true; applyBtn.disabled = true;
+    box.innerHTML = `<div class='bulk-loading'><span class='spinner'></span> ${applied ? "Applying" : "Previewing"}…</div>`;
     try {
-      const res = await postJSON("/api/bulk/preview", {
-        paths: scope.files.map((x) => x.path), layout: selectedLayout, field: f.name, value: valueCtrl().value,
+      return await postJSON(url, {
+        paths: scope.files.map((x) => x.path), layout: selectedLayout, section: curSection().name, op: buildOp(),
       });
-      renderBulkTable(previewBox, res.results, false);
-      applyBtn.disabled = !res.results.some((r) => r.status === "change");
     } catch (e) {
-      previewBox.innerHTML = ""; setStatus("Preview failed: " + e.message, "err");
+      box.innerHTML = ""; setStatus((applied ? "Apply" : "Preview") + " failed: " + e.message, "err");
+      return null;
     } finally {
       state.busy = false; previewBtn.disabled = false;
     }
+  }
+
+  previewBtn.addEventListener("click", async () => {
+    resultsBox.innerHTML = "";
+    const res = await run("/api/bulk/op/preview", previewBox, false);
+    if (!res) return;
+    renderBulkTable(previewBox, res.results, false);
+    applyBtn.disabled = !res.results.some((r) => r.status === "change");
   });
 
   applyBtn.addEventListener("click", async () => {
-    const f = selField(); if (!f) return;
-    if (!confirm(`Apply "${f.name} = ${valueCtrl().value}" to the ${selectedLayout} files?\nA .bak backup is made for each changed file.`)) return;
-    if (!beginBusy("Applying…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
-    applyBtn.disabled = true; previewBtn.disabled = true;
-    resultsBox.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Applying…</div>";
-    try {
-      const res = await postJSON("/api/bulk/apply", {
-        paths: scope.files.map((x) => x.path), layout: selectedLayout, field: f.name, value: valueCtrl().value,
-      });
-      renderBulkTable(resultsBox, res.results, true);
-      const folders = new Set(res.results.filter((r) => r.status === "changed").map((r) => folderOf(r.path)));
-      folders.forEach((fp) => refreshFolder(fp));
-      setStatus(`Bulk applied: ${res.results.filter((r) => r.status === "changed").length} changed`, "ok");
-    } catch (e) {
-      resultsBox.innerHTML = ""; setStatus("Apply failed: " + e.message, "err");
-    } finally {
-      state.busy = false; previewBtn.disabled = false;
-      // leave Apply disabled until the next Preview confirms pending changes
-    }
+    if (!confirm(`Apply — ${describe()} — to the ${selectedLayout} files?\nA .bak backup is made for each changed file.`)) return;
+    const res = await run("/api/bulk/op/apply", resultsBox, true);
+    if (!res) return;
+    renderBulkTable(resultsBox, res.results, true);
+    new Set(res.results.filter((r) => r.status === "changed").map((r) => folderOf(r.path))).forEach((fp) => refreshFolder(fp));
+    setStatus(`Bulk applied: ${res.results.filter((r) => r.status === "changed").length} changed`, "ok");
+    applyBtn.disabled = true;
   });
 
-  rebuildFieldAndValue();
+  rebuildSections();
 }
 
 function renderBulkTable(host, results, applied) {
@@ -388,14 +445,13 @@ function renderBulkTable(host, results, applied) {
   host.appendChild(el("div", "bulk-summary", (applied ? "Results:  " : "Preview:  ") + summary));
   const table = el("table", "bulk-table");
   const thead = el("thead"); const htr = el("tr");
-  ["File", "Current", "→ New", "Status"].forEach((h) => htr.appendChild(el("th", null, h)));
+  ["File", "Change", "Status"].forEach((h) => htr.appendChild(el("th", null, h)));
   thead.appendChild(htr); table.appendChild(thead);
   const tbody = el("tbody");
   results.forEach((r) => {
     const tr = el("tr", "st-" + r.status);
     tr.appendChild(el("td", null, r.name));
-    tr.appendChild(el("td", "mono", r.current != null ? JSON.stringify(r.current) : ""));
-    tr.appendChild(el("td", "mono", r.new != null ? JSON.stringify(r.new) : ""));
+    tr.appendChild(el("td", "mono", r.detail || ""));
     tr.appendChild(el("td", null, r.status + (r.error ? `: ${r.error}` : "")));
     tbody.appendChild(tr);
   });

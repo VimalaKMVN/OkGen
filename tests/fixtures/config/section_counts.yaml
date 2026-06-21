@@ -1,0 +1,12 @@
+# Fixed section count fields for tests.
+section_counts:
+  StyleHeader:
+    Lane: lane_rec
+    Size: size_rec
+  CartonLabel:
+    store: num_stores
+  DistLabels:
+    Store: store_lines
+    TSticker: t_lines
+  Preticket:
+    Lane: line_count

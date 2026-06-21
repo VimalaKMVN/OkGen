@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 from okgen.config import Config
 from okgen.detect import detect_from_header, detect_layout, read_chain, read_header_line
 from okgen.layout.registry import LayoutRegistry
-from okgen.okfile import ENCODING, OkFile, parse_okfile
+from okgen.okfile import ENCODING, OkFile, Record, parse_okfile
 
 OK_SUFFIX = ".ok"  # compared case-insensitively
 
@@ -703,11 +703,158 @@ def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
         if layout:
             layouts[layout] = layouts.get(layout, 0) + 1
     header_fields = {}
+    detail_sections = {}
     for name in layouts:
         lay = registry.get(name)
         if lay:
             header_fields[name] = _header_fields_for_layout(lay, config)
-    return {"files": files, "layouts": layouts, "header_fields": header_fields}
+            detail_sections[name] = _detail_sections_for_layout(lay, config)
+    return {
+        "files": files, "layouts": layouts,
+        "header_fields": header_fields, "detail_sections": detail_sections,
+    }
+
+
+def _detail_sections_for_layout(layout, config: Config) -> List[dict]:
+    """Metadata for each non-header section, for the bulk record/field ops."""
+    out = []
+    for sec in layout.sections[1:]:
+        fields = [{
+            "name": f.name, "size": f.size, "type": f.field_type,
+            "options": config.options(f.name, layout=layout.name) or None,
+        } for f in sec.fields]
+        out.append({
+            "name": sec.name,
+            "fields": fields,
+            "max_records": config.max_records(layout.name, sec.name),
+            "count_field": config.count_field(layout.name, sec.name),
+        })
+    return out
+
+
+def _sync_count(okf, layout_name, section_name, count, config):
+    """Keep the header count field in sync with a section's record count."""
+    cf = config.count_field(layout_name, section_name)
+    if not cf or not okf.records:
+        return
+    header = okf.records[0]
+    try:
+        f = header._field(cf)  # noqa: SLF001
+    except KeyError:
+        return
+    if f.size is None:
+        return
+    val = str(count).zfill(f.size)
+    if len(val) <= f.size:
+        header.set(cf, val)
+
+
+def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
+    """Evaluate a detail/header bulk op on one file (no write). Carries 'okf'
+    on a real change so apply can save it."""
+    name = sp.name
+    try:
+        if detect_layout(sp).layout != layout_name:
+            return {"name": name, "status": "skipped"}
+        okf = parse_okfile(sp, registry=registry)
+    except Exception as exc:
+        return {"name": name, "status": "error", "error": str(exc)}
+    grouped = okf.sections()
+    if section_name not in grouped:
+        return {"name": name, "status": "no_section"}
+    recs = grouped[section_name]
+    sec = recs[0].section
+    header_name = next(iter(grouped))
+    t = op.get("type")
+    before = len(recs)
+
+    if t == "set":
+        field = op.get("field")
+        value = op.get("value", "")
+        fdef = next((x for x in sec.fields if x.name == field), None)
+        if fdef is None:
+            return {"name": name, "status": "missing_field"}
+        if fdef.size is not None and len(value) > fdef.size:
+            return {"name": name, "status": "too_wide", "detail": f"value too long for {field}"}
+        changed = 0
+        first_old = recs[0].get(field) if recs else None
+        for r in recs:
+            cur = r.get(field)
+            r.set(field, value)
+            if r.get(field) != cur:
+                changed += 1
+        if changed == 0:
+            return {"name": name, "status": "unchanged", "detail": f"{before} row(s)"}
+        detail = (f"{field}: {first_old!r} -> {value!r}" if before == 1
+                  else f"set {field} on {changed}/{before} row(s)")
+        return {"name": name, "status": "change", "detail": detail, "okf": okf}
+
+    if t in ("add", "keep"):
+        if section_name == header_name:
+            return {"name": name, "status": "error", "error": "Add/Keep not valid on Header"}
+        n = int(op.get("count", 0))
+
+        if t == "add":
+            limit = config.max_records(layout_name, section_name)
+            room = max(0, (limit - before)) if limit is not None else n
+            to_add = min(n, room)
+            if to_add <= 0:
+                note = "at limit" if (limit is not None and before >= limit) else "nothing to add"
+                return {"name": name, "status": "unchanged", "detail": f"{before} row(s); {note}"}
+            template = recs[-1]
+            insert_at = okf.records.index(template) + 1
+            for i in range(to_add):
+                clone = Record(raw=template.raw.rstrip("\r"), offset=template.offset,
+                               section=template.section, index=template.index)
+                okf.records.insert(insert_at + i, clone)
+            _normalize_eols(okf)
+            new_count = before + to_add
+            _sync_count(okf, layout_name, section_name, new_count, config)
+            capped = n - to_add
+            detail = f"{before} -> {new_count}" + (f"  (capped, {capped} not added)" if capped else "")
+            return {"name": name, "status": "change", "detail": detail, "okf": okf}
+
+        # keep first N
+        target = max(0, min(n, before))
+        if target >= before:
+            return {"name": name, "status": "unchanged", "detail": f"{before} row(s) (<= {n})"}
+        for r in recs[target:]:
+            okf.records.remove(r)
+        _normalize_eols(okf)
+        _sync_count(okf, layout_name, section_name, target, config)
+        return {"name": name, "status": "change", "detail": f"{before} -> {target}", "okf": okf}
+
+    return {"name": name, "status": "error", "error": f"unknown op '{t}'"}
+
+
+def bulk_op_preview(paths, layout, section, op, registry, config) -> dict:
+    results = []
+    for p in paths or []:
+        r = _bulk_op_eval(Path(p), layout, section, op, registry, config)
+        r.pop("okf", None)
+        r["path"] = str(p)
+        results.append(r)
+    return {"results": results}
+
+
+def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> dict:
+    results = []
+    for p in paths or []:
+        sp = Path(p)
+        r = _bulk_op_eval(sp, layout, section, op, registry, config)
+        okf = r.pop("okf", None)
+        r["path"] = str(p)
+        if r["status"] == "change" and okf is not None:
+            try:
+                if backup and sp.exists():
+                    shutil.copy2(sp, sp.with_suffix(sp.suffix + ".bak"))
+                okf.save(sp)
+                r["status"] = "changed"
+            except OSError as exc:
+                r["status"] = "error"
+                r["error"] = str(exc)
+        results.append(r)
+    return {"results": results}
 
 
 def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry):
