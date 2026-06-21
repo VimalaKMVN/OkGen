@@ -7,24 +7,26 @@ correct for you, so you never have to count characters by hand.
 
 Runs entirely on your own machine. Your files never leave your computer.
 
-> **You received this as a ZIP file** (e.g. `OkGen.zip`). Everything you need is
-> inside it — there is nothing to download from any website except Python (once).
-> Just follow **Quick start** below.
+> **You received this as a ZIP file** (e.g. `OkGen.zip`) and it runs on
+> **Windows**. Everything the app needs is bundled inside the ZIP, so **no
+> internet is required** to install or run it. The only thing you install
+> separately is **Python** itself. Just follow **Quick start** below.
 
 ---
 
 ## What you need (one time)
 
-- **Python 3.9 or newer.**
-  - Windows: download from <https://www.python.org/downloads/> and during
-    install **check "Add Python to PATH"**.
-  - Check it's installed — open a terminal / Command Prompt and run:
-    ```
-    python --version
-    ```
+- **Windows** (64-bit).
+- **Python 3.9–3.13.** Download from <https://www.python.org/downloads/> and
+  during install **check "Add Python to PATH"**. To confirm it's installed, open
+  **Command Prompt** and run:
+  ```
+  python --version
+  ```
 
-That's it. No internet is needed after the first setup (which downloads a couple
-of small Python packages).
+That's the only thing to install. All the Python packages OkGen needs are already
+bundled in the ZIP (in the `vendor\wheels` folder), so setup works **completely
+offline**.
 
 ---
 
@@ -33,17 +35,14 @@ of small Python packages).
 1. **Unzip** the file you were given (e.g. `OkGen.zip`) anywhere — your Desktop is
    fine. It unzips into a folder (its name may include a version, e.g.
    `OkGen-0.1`). Open that folder.
-2. Double-click the launcher inside it:
-   - **Windows:** `run.bat`
-   - **macOS / Linux:** `run.sh` (or run `./run.sh` in a terminal)
-3. The first run sets everything up automatically (this step needs internet once,
-   to fetch a few small Python packages), then your browser opens to
-   **http://127.0.0.1:8000**. (If it doesn't open, paste that address into your
-   browser.)
-4. To stop the app, close the terminal window (or press **Ctrl + C** in it).
+2. Double-click **`run.bat`**.
+3. The first run sets everything up automatically (**offline** — nothing is
+   downloaded), then your browser opens to **http://127.0.0.1:8000**. (If it
+   doesn't open, paste that address into your browser.)
+4. To stop the app, close the black window (or press **Ctrl + C** in it).
 
 The launcher creates a private environment inside the folder the first time and
-reuses it afterwards, so later launches are fast and work offline.
+reuses it afterwards, so later launches are fast.
 
 > **Windows SmartScreen note:** the first time you run `run.bat`, Windows may show
 > a "Windows protected your PC" prompt because the file came from the internet.
@@ -54,29 +53,21 @@ reuses it afterwards, so later launches are fast and work offline.
 
 ## Manual start (if you prefer the command line)
 
-Open a terminal **in the OkGen folder** and run:
+Open **Command Prompt in the OkGen folder** and run (all offline):
 
-**Windows**
 ```bat
 py -m venv .venv
 .venv\Scripts\activate
-pip install -e .
-okgen serve
+pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
+set PYTHONPATH=src
+python -m okgen.cli serve
 ```
 
-**macOS / Linux**
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-okgen serve
-```
-
-Then open <http://127.0.0.1:8000>. Next time you only need the activate + serve
-steps:
-```
-.venv\Scripts\activate   &  okgen serve      (Windows)
-source .venv/bin/activate && okgen serve     (macOS/Linux)
+Then open <http://127.0.0.1:8000>. Next time you only need:
+```bat
+.venv\Scripts\activate
+set PYTHONPATH=src
+python -m okgen.cli serve
 ```
 
 ---
@@ -124,14 +115,19 @@ and you can match several chains/layouts at once with a list, e.g.
 
 ## Troubleshooting
 
-- **`python` / `okgen` not recognized (Windows):** Python wasn't added to PATH.
-  Re-run the Python installer and tick "Add Python to PATH", or use the `run.bat`
-  launcher which handles the environment for you.
+- **`python` not recognized:** Python wasn't added to PATH. Re-run the Python
+  installer and tick **"Add Python to PATH"**, then try `run.bat` again.
+- **`run.bat` says "Offline install failed":** your Python version isn't covered
+  by the bundled packages (they cover Python 3.9–3.13, 64-bit). Run
+  `python --version` and send it to whoever gave you OkGen so they can add your
+  version to the bundle.
 - **"Address already in use" / port 8000 busy:** another copy is running. Close
-  it, or start on another port: `okgen serve --port 8001` and open that address.
-- **Open Folder dialog doesn't appear:** it opens on the machine running the app;
-  bring it to the front (it may be behind the browser). As a fallback, paste the
-  folder path into the box and press Enter.
+  that window, or start on another port — after the manual `activate` +
+  `set PYTHONPATH=src` steps run: `python -m okgen.cli serve --port 8001` and open
+  that address.
+- **Open Folder dialog doesn't appear:** it can open *behind* the browser window —
+  check your taskbar / Alt-Tab. As a fallback, paste the folder path into the box
+  and press Enter.
 - **Nothing in the tree:** the folder has no `.OK` files (only `.OK` files show).
 - **Made a bad edit:** every save leaves a `.bak` copy next to the file — rename
   it back to recover.
@@ -143,4 +139,14 @@ and you can match several chains/layouts at once with a list, e.g.
 - This is a **local** tool — it serves only to your own machine (`127.0.0.1`).
 - The layout definitions (the `.xlsx` files in `data/OkFileDefinitions`) ship with
   the app; you normally don't touch them.
+- Bundled packages live in `vendor\wheels` (Python 3.9–3.13, 64-bit Windows).
 - For the technical design, see **IMPLEMENTATION_PLAN.md**.
+
+---
+
+### For developers / other platforms
+
+`run.sh` (macOS/Linux) and an online editable install (`pip install -e .`) are
+available for development. The bundled `vendor\wheels` are Windows-only; on other
+platforms install dependencies from PyPI instead. Run the tests with
+`python -m pytest tests/ -q`.

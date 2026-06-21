@@ -156,8 +156,11 @@ python -m pytest tests/ -q
 - **Header count sync** — adding/deleting Lane/Size rows does not yet update the
   header count fields (`lane_rec` / `size_rec`). Optional follow-up.
 - **Real format codes** — `config/display.yaml` is populated; extend as needed.
-- **Windows packaging** — optionally serve with `waitress` (pure-Python,
-  production-grade) and/or wrap as a one-click executable.
+- **Offline Windows distribution (done)** — dependency wheels for Python 3.9–3.13
+  (win_amd64) are vendored in `vendor/wheels`; `run.bat` installs from them with
+  `pip --no-index` and runs from source (`PYTHONPATH=src`), so no internet is
+  needed. Future: optionally serve with `waitress` and/or wrap as a one-click
+  executable.
 - **React migration** — if/when desired, reuse the `/api/*` JSON endpoints and
   replace `web/static` + `templates` with a React app; `service.py` is unchanged.
 - **Path safety** — the local backend reads/writes by absolute path (intended for
