@@ -397,31 +397,48 @@ def copy_file(src, dst) -> dict:
     return {"copied": str(s), "to": str(d)}
 
 
-def copy_files(srcs, dst_dir) -> dict:
-    """Copy several .OK files into a folder, keeping their names.
+def _unique_path(dst_dir: Path, name: str) -> Path:
+    """A non-existing path in ``dst_dir`` for ``name``, adding ' (1)', ' (2)'…
 
-    Returns per-file outcomes. Existing destinations are skipped (not
-    overwritten); non-.OK sources are reported as errors.
+    Mirrors how a browser's Downloads folder de-duplicates: the suffix goes
+    before the extension, e.g. 'Style.OK' -> 'Style (1).OK'.
+    """
+    p = Path(name)
+    stem, suffix = p.stem, p.suffix
+    candidate = dst_dir / name
+    i = 1
+    while candidate.exists():
+        candidate = dst_dir / f"{stem} ({i}){suffix}"
+        i += 1
+    return candidate
+
+
+def copy_files(srcs, dst_dir) -> dict:
+    """Copy several .OK files into a folder.
+
+    Never overwrites: if a name already exists, the copy is auto-renamed with a
+    ' (N)' suffix (Downloads-style). Returns per-file outcomes; non-.OK sources
+    are reported as errors.
     """
     dd = Path(dst_dir)
     if not dd.is_dir():
         raise EditError(f"not a folder: {dd}")
-    copied, skipped, errors = [], [], []
+    copied, renamed, errors = [], [], []
     for src in srcs or []:
         sp = Path(src)
         if not is_ok_file(sp):
             errors.append({"src": str(src), "error": "not an .OK file"})
             continue
-        dp = dd / sp.name
-        if dp.exists():
-            skipped.append(str(dp))
-            continue
+        target = dd / sp.name
+        if target.exists():
+            target = _unique_path(dd, sp.name)
+            renamed.append({"from": sp.name, "to": target.name})
         try:
-            shutil.copy2(sp, dp)
-            copied.append(str(dp))
+            shutil.copy2(sp, target)
+            copied.append(str(target))
         except OSError as exc:
             errors.append({"src": str(src), "error": str(exc)})
-    return {"copied": copied, "skipped": skipped, "errors": errors}
+    return {"copied": copied, "renamed": renamed, "errors": errors}
 
 
 def rename_file(src, dst) -> dict:

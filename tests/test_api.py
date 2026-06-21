@@ -133,9 +133,27 @@ def test_copy_files_batch(tmp_path):
         [str(tmp_path / "src" / "StyleHeader.OK"), str(tmp_path / "src" / "CartonLabel.OK")],
         tmp_path / "dst",
     )
-    assert len(res["copied"]) == 1                         # StyleHeader copied
-    assert len(res["skipped"]) == 1                        # CartonLabel already there
+    assert len(res["copied"]) == 2                         # both copied (none skipped)
+    assert len(res["renamed"]) == 1                        # CartonLabel collided -> renamed
+    assert res["renamed"][0]["to"] == "CartonLabel (1).OK"
     assert (tmp_path / "dst" / "StyleHeader.OK").exists()
+    assert (tmp_path / "dst" / "CartonLabel (1).OK").exists()
+    assert (tmp_path / "dst" / "CartonLabel.OK").exists()  # original untouched
+
+
+def test_copy_files_multiple_collisions(tmp_path):
+    (tmp_path / "dst").mkdir()
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", tmp_path / "CartonLabel.OK")
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", tmp_path / "dst" / "CartonLabel.OK")
+    src = str(tmp_path / "CartonLabel.OK")
+    # Paste the same file three times -> (1), (2), (3)
+    service.copy_files([src], tmp_path / "dst")
+    service.copy_files([src], tmp_path / "dst")
+    service.copy_files([src], tmp_path / "dst")
+    names = sorted(p.name for p in (tmp_path / "dst").iterdir())
+    assert names == [
+        "CartonLabel (1).OK", "CartonLabel (2).OK", "CartonLabel (3).OK", "CartonLabel.OK",
+    ]
 
 
 def test_save_as_and_copy_delete(tmp_path, registry):

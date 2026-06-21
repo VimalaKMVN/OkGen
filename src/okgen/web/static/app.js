@@ -604,11 +604,11 @@ async function pasteInto(folder) {
   try {
     const res = await postJSON("/api/file/copy-batch", { srcs: state.clipboard, dst_dir: folder });
     await refreshFolder(folder);
-    const c = res.copied.length, s = res.skipped.length, er = res.errors.length;
+    const c = res.copied.length, r = (res.renamed || []).length, er = res.errors.length;
     const msg = `Pasted ${c} file(s)` +
-      (s ? `, ${s} skipped (name exists)` : "") +
+      (r ? `, ${r} renamed to avoid overwrite` : "") +
       (er ? `, ${er} failed` : "");
-    setStatus(msg, (s || er) ? "dirty" : "ok");
+    setStatus(msg, er ? "err" : "ok");
   } catch (e) { setStatus("Paste failed: " + e.message, "err"); }
 }
 
