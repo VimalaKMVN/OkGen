@@ -117,6 +117,8 @@ and you can match several chains/layouts at once with a list, e.g.
 
 - **`python` not recognized:** Python wasn't added to PATH. Re-run the Python
   installer and tick **"Add Python to PATH"**, then try `run.bat` again.
+- **A previous run failed partway:** just run `run.bat` again — it detects a
+  half-set-up environment and finishes installing. (No need to delete anything.)
 - **`run.bat` says "Offline install failed":** your Python version isn't covered
   by the bundled packages (they cover Python 3.9–3.13, 64-bit). Run
   `python --version` and send it to whoever gave you OkGen so they can add your
