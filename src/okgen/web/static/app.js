@@ -1009,10 +1009,18 @@ function finishCopyAnimation(res) {
   const overlay = $("#sendOverlay");
   if (!overlay) return;
   const s = res.sent.length, er = res.errors.length;
-  overlay.querySelector(".send-card").innerHTML = `
-    <div class="send-done">✓</div>
-    <div class="send-title">Sent ${s} file(s) to NiceLabel${er ? ` · ${er} failed` : ""}</div>`;
-  setTimeout(hideCopyAnimation, 1100);
+  const card = overlay.querySelector(".send-card");
+  // Keep the scene (papers keep flying) for enjoyment; just show the result + OK.
+  const title = card.querySelector(".send-title");
+  if (title) title.innerHTML = `<span class="send-ok-check">✓</span> Sent ${s} file(s) to NiceLabel${er ? ` · ${er} failed` : ""}`;
+  const sub = card.querySelector(".send-sub");
+  if (sub) sub.remove();
+  if (!card.querySelector(".send-ok-btn")) {
+    const btn = el("button", "btn btn-primary send-ok-btn", "OK");
+    btn.addEventListener("click", hideCopyAnimation);
+    card.appendChild(btn);
+    btn.focus();   // Enter/Space closes it
+  }
 }
 
 function hideCopyAnimation() {

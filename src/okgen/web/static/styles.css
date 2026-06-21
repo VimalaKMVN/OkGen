@@ -304,6 +304,8 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .send-title { font-size: 14px; color: var(--text); }
 .send-sub { font-size: 11px; color: var(--text-dim); margin-top: 7px; word-break: break-all; }
 .send-done { color: var(--ok); font-size: 34px; line-height: 1; margin-bottom: 8px; }
+.send-ok-check { color: var(--ok); font-weight: 700; }
+.send-ok-btn { margin-top: 12px; min-width: 90px; }
 
 /* Context menu */
 .ctx-menu {
