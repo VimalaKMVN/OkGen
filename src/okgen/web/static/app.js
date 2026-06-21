@@ -491,5 +491,41 @@ window.addEventListener("beforeunload", (e) => {
   if (isDirty()) { e.preventDefault(); e.returnValue = ""; }
 });
 
+// ---- resizable file panel ----
+(function setupResizer() {
+  const pane = $("#treePane");
+  const bar = $("#dragbar");
+  if (!pane || !bar) return;
+  const saved = parseInt(localStorage.getItem("okgen.treeWidth"), 10);
+  if (saved) pane.style.width = saved + "px";
+
+  let dragging = false;
+  bar.addEventListener("mousedown", (e) => {
+    dragging = true;
+    bar.classList.add("dragging");
+    document.body.style.userSelect = "none";
+    e.preventDefault();
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const layout = pane.parentElement.getBoundingClientRect();
+    let w = e.clientX - layout.left;
+    w = Math.max(160, Math.min(w, layout.width - 220));  // keep room for the editor
+    pane.style.width = w + "px";
+  });
+  window.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    bar.classList.remove("dragging");
+    document.body.style.userSelect = "";
+    localStorage.setItem("okgen.treeWidth", String(parseInt(pane.style.width, 10) || 300));
+  });
+  // Double-click the divider to reset to the default width.
+  bar.addEventListener("dblclick", () => {
+    pane.style.width = "300px";
+    localStorage.setItem("okgen.treeWidth", "300");
+  });
+})();
+
 const last = localStorage.getItem("okgen.dir");
 if (last) { $("#folderPath").value = last; openFolder(last); }

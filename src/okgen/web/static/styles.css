@@ -65,10 +65,18 @@ body {
 .layout { flex: 1; display: flex; min-height: 0; }
 .tree-pane {
   width: 300px;
+  flex: 0 0 auto;
+  min-width: 160px;
   background: var(--bg-pane);
-  border-right: 1px solid var(--border);
   overflow: auto;
 }
+.dragbar {
+  flex: 0 0 auto;
+  width: 5px;
+  cursor: col-resize;
+  background: var(--border);
+}
+.dragbar:hover, .dragbar.dragging { background: var(--accent); }
 .pane-title {
   padding: 6px 12px;
   text-transform: uppercase;
@@ -112,6 +120,7 @@ body {
 .node.selected { background: var(--selected); }
 .folder > .node::before { content: "▸"; color: var(--text-dim); display: inline-block; width: 10px; }
 .folder.open > .node::before { content: "▾"; }
+.folder:not(.open) > ul { display: none; }   /* collapse children when closed */
 .chain-badge {
   display: inline-flex;
   align-items: center;
