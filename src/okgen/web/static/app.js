@@ -62,7 +62,7 @@ function updateDirtyIndicator() {
 async function browseFolder() {
   try {
     const res = await postJSON("/api/browse-folder", {});
-    if (res.path) { $("#folderPath").value = res.path; openFolder(res.path); }
+    if (res.path) { const fp = $("#folderPath"); fp.value = res.path; fp.title = res.path; openFolder(res.path); }
     else setStatus("No folder selected");
   } catch (e) {
     setStatus("Native dialog unavailable — paste a path instead", "err");
@@ -126,7 +126,9 @@ function renderFolderNode(node, openPreloaded) {
   const li = el("li", "folder");
   const row = el("div", "node");
   row.dataset.path = node.path;
-  row.appendChild(el("span", "file-name", node.name || node.path));
+  const nameEl = el("span", "file-name", node.name || node.path);
+  nameEl.title = node.name || node.path;   // full name on hover
+  row.appendChild(nameEl);
   const childUl = el("ul");
   li.appendChild(row);
   li.appendChild(childUl);
@@ -150,8 +152,10 @@ function renderFileNode(node) {
   const badge = el("span", "chain-badge", info.short || node.chain || "?");
   badge.style.background = info.color || "#666";
   badge.title = info.name || ("chain " + (node.chain || "?"));
+  const nameEl = el("span", "file-name", node.name);
+  nameEl.title = node.name;            // full name on hover (names truncate)
   row.appendChild(badge);
-  row.appendChild(el("span", "file-name", node.name));
+  row.appendChild(nameEl);
   if (node.duplicate) {
     const warn = el("span", "dup-warn", "⚠");
     warn.title = `duplicate ${node.key_field || "key"}: ${node.key_value}`;
@@ -1006,6 +1010,8 @@ $("#tabRaw").addEventListener("click", () => switchTab("raw"));
 $("#openBtn").addEventListener("click", browseFolder);
 $("#bulkBtn").addEventListener("click", enterBulkMode);
 $("#folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") openFolder(e.target.value.trim()); });
+// Show the full folder path on hover (the box is usually too narrow to see it).
+$("#folderPath").addEventListener("input", (e) => { e.target.title = e.target.value; });
 $("#saveBtn").addEventListener("click", () => save(null));
 $("#saveAsBtn").addEventListener("click", () => {
   const dflt = state.file ? state.file.replace(/\.OK$/i, "_copy.OK") : "";
@@ -1054,4 +1060,4 @@ window.addEventListener("beforeunload", (e) => {
 })();
 
 const last = localStorage.getItem("okgen.dir");
-if (last) { $("#folderPath").value = last; openFolder(last); }
+if (last) { $("#folderPath").value = last; $("#folderPath").title = last; openFolder(last); }
