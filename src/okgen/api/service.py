@@ -386,10 +386,12 @@ def browse_folder(initial: Optional[str] = None) -> dict:
             import base64
 
             start = (initial or "").replace("'", "''")
-            set_start = f"$d.SelectedPath = '{start}';" if start else ""
-            # A real top-most owner window + the Alt-key trick releases Windows'
-            # foreground lock so the dialog reliably appears IN FRONT of Edge
-            # (a background process otherwise can't take foreground).
+            set_start = f"$d.InitialDirectory = '{start}';" if start else ""
+            # Modern Explorer-style window via OpenFileDialog in folder-select
+            # mode (the user goes INTO the folder and clicks Open). A real
+            # top-most owner + the Alt-key trick releases Windows' foreground
+            # lock so it appears IN FRONT of Edge (a background process
+            # otherwise can't take foreground).
             ps = f'''
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
@@ -412,12 +414,16 @@ $o.Show()
 [Fg]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
 [Fg]::SetForegroundWindow($o.Handle) | Out-Null
 $o.Activate()
-$d = New-Object System.Windows.Forms.FolderBrowserDialog
-$d.Description = 'Select the folder with your OK files'
+$d = New-Object System.Windows.Forms.OpenFileDialog
+$d.Title = 'Go INTO the folder with your OK files, then click Open'
+$d.ValidateNames = $false
+$d.CheckFileExists = $false
+$d.CheckPathExists = $true
+$d.FileName = 'Select this folder'
 {set_start}
 $r = $d.ShowDialog($o)
 $o.Close()
-if ($r -eq [System.Windows.Forms.DialogResult]::OK) {{ [Console]::Out.Write($d.SelectedPath) }}
+if ($r -eq [System.Windows.Forms.DialogResult]::OK) {{ [Console]::Out.Write([System.IO.Path]::GetDirectoryName($d.FileName)) }}
 '''
             enc = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
             proc = subprocess.run(

@@ -74,8 +74,10 @@ python -m okgen.cli serve
 
 ## Using the app
 
-1. Click **Open Folder…** and pick the folder that contains your `.OK` files.
-   (Only `.OK` files are shown; other files are hidden.)
+1. Click **Open Folder…**. In the Explorer window that opens, **double-click into
+   the folder** that contains your `.OK` files (so that folder is the one shown),
+   then click **Open** (the filename box shows a "Select this folder" placeholder
+   — that's expected). Only `.OK` files are shown; other files are hidden.
 2. Each file in the left tree has a **colored badge** for its chain
    (TJX / MAR / HG / WIN / HS).
 3. Click a file to open it. Fields appear grouped by **section**
@@ -127,9 +129,10 @@ and you can match several chains/layouts at once with a list, e.g.
   that window, or start on another port — after the manual `activate` +
   `set PYTHONPATH=src` steps run: `python -m okgen.cli serve --port 8001` and open
   that address.
-- **Open Folder dialog doesn't appear:** it can open *behind* the browser window —
-  check your taskbar / Alt-Tab. As a fallback, paste the folder path into the box
-  and press Enter.
+- **Open Folder dialog:** it's an Explorer-style window — go *into* the folder you
+  want and click **Open** (the "Select this folder" placeholder in the filename
+  box is normal). If it ever opens behind the browser, check the taskbar / Alt-Tab,
+  or as a fallback paste the folder path into the box at the top and press Enter.
 - **Nothing in the tree:** the folder has no `.OK` files (only `.OK` files show).
 - **Made a bad edit:** every save leaves a `.bak` copy next to the file — rename
   it back to recover.
