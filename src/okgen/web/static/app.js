@@ -302,19 +302,33 @@ function renderRaw(view) {
   host.appendChild(toolbar);
   updateRawBanner();
 
-  const text = (view.raw_text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  let text = (view.raw_text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const lines = text.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();  // drop phantom last line
+  const body = lines.join("\n");
   const maxLen = lines.reduce((m, l) => Math.max(m, l.length), 0);
 
-  const pre = el("pre", "raw-pre" + (gridOn ? " grid" : ""));
-  // Position ruler so the user can verify character columns.
+  // Scroll container: a sticky line-number gutter + the code column.
+  const wrap = el("div", "raw-pre" + (gridOn ? " grid" : ""));
+  const inner = el("div", "raw-inner");
+
+  const gutter = el("pre", "raw-gutter");
+  // The ruler spans TWO rows (tens + ones); reserve two blank gutter rows so
+  // line 1 aligns with the first data line, then 1..N.
+  gutter.textContent = " \n \n" + lines.map((_, i) => i + 1).join("\n");
+
+  const code = el("pre", "raw-code");
   const ruler = el("span", "raw-ruler", positionRuler(maxLen) + "\n");
-  pre.appendChild(ruler);
-  pre.appendChild(document.createTextNode(text));
-  host.appendChild(pre);
+  code.appendChild(ruler);
+  code.appendChild(document.createTextNode(body));
+
+  inner.appendChild(gutter);
+  inner.appendChild(code);
+  wrap.appendChild(inner);
+  host.appendChild(wrap);
 
   cb.addEventListener("change", () => {
-    pre.classList.toggle("grid", cb.checked);
+    wrap.classList.toggle("grid", cb.checked);
     localStorage.setItem("okgen.rawGrid", cb.checked ? "1" : "0");
   });
 }

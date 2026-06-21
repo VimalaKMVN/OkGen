@@ -113,11 +113,19 @@ body {
   font-size: 12px; line-height: 1.4;
   background: var(--bg-pane); color: var(--text);
   border: 1px solid var(--border); border-radius: 4px;
-  padding: 10px; overflow: auto; white-space: pre;
-  max-height: calc(100vh - 190px);
+  overflow: auto; max-height: calc(100vh - 190px);
 }
+.raw-inner { display: flex; align-items: flex-start; width: max-content; min-width: 100%; }
+.raw-gutter {
+  margin: 0; padding: 10px 8px; text-align: right;
+  color: var(--text-dim); background: var(--bg-pane);
+  border-right: 1px solid var(--border);
+  position: sticky; left: 0; z-index: 1;
+  white-space: pre; user-select: none;
+}
+.raw-code { margin: 0; padding: 10px; white-space: pre; }
 /* Light vertical guides every 10 character columns, aligned to the ruler. */
-.raw-pre.grid {
+.raw-pre.grid .raw-code {
   background-image: repeating-linear-gradient(
     to right,
     transparent 0, transparent calc(10ch - 1px),
