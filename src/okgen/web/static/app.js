@@ -11,6 +11,7 @@ const state = {
   treeAbort: null,     // AbortController for the in-flight root load
   selection: new Set(),// multi-selected file paths (for bulk copy / future bulk edit)
   selAnchor: null,     // last plainly-clicked file, for Shift-range select
+  busy: false,         // guards slow file ops (make-unique) from double-runs
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -206,6 +207,12 @@ function updateSelectionUI() {
   if (c) c.textContent = n > 1 ? ` · ${n} selected` : "";
   const btn = $("#bulkBtn");
   if (btn) { btn.classList.toggle("hidden", n < 2); btn.textContent = `Bulk Edit (${n})`; }
+  // Bulk Edit only makes sense for a multi-selection — close it otherwise.
+  if (isBulkOpen() && n < 2) exitBulkMode();
+}
+
+function isBulkOpen() {
+  return !$("#bulkPanel").classList.contains("hidden");
 }
 
 // ---- bulk edit (B1: Header field, one layout, set value) ----
@@ -233,10 +240,19 @@ async function enterBulkMode() {
 }
 
 function exitBulkMode() {
-  $("#bulkPanel").classList.add("hidden");
-  $("#bulkPanel").innerHTML = "";
+  const panel = $("#bulkPanel");
+  if (panel.classList.contains("hidden")) return;
+  panel.classList.add("hidden");
+  panel.innerHTML = "";
   $("#editor").classList.remove("hidden");
-  $("#editorEmpty").style.display = "";
+  if (state.view) {
+    $("#editorTabs").classList.remove("hidden");
+    $("#editorEmpty").style.display = "none";
+  } else {
+    $("#editorTabs").classList.add("hidden");
+    $("#rawView").classList.add("hidden");
+    $("#editorEmpty").style.display = "";
+  }
 }
 
 function renderBulkPanel(scope) {
@@ -371,6 +387,7 @@ function renderBulkTable(host, results, applied) {
 }
 
 async function toggleFolder(li, node, childUl) {
+  setSelection([]);   // clicking a folder clears any file multi-selection (and closes bulk)
   const willOpen = !li.classList.contains("open");
   li.classList.toggle("open");
   if (!willOpen || li.dataset.loaded) return;   // collapsing, or already loaded
@@ -786,24 +803,47 @@ function showFolderCtxMenu(e, node) {
   menu.classList.remove("hidden");
 }
 
+function beginBusy(message) {
+  if (state.busy) return false;
+  state.busy = true;
+  setStatus(message, "dirty");   // immediate feedback before the (possibly slow) call
+  return true;
+}
+
 async function makeUniqueFolder(path) {
+  if (!beginBusy("Making keys unique…")) {
+    setStatus("Please wait — an operation is already running…", "dirty");
+    return;
+  }
   try {
     const res = await postJSON("/api/unique/folder", { path });
     await refreshFolder(path);
     const n = (res.rekeyed || []).filter((r) => r.to).length;
     setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
-  } catch (e) { setStatus("Make unique failed: " + e.message, "err"); }
+  } catch (e) {
+    setStatus("Make unique failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
 }
 
 async function makeUniqueSelection() {
   const paths = [...state.selection];
   if (!paths.length) return;
+  if (!beginBusy("Making keys unique…")) {
+    setStatus("Please wait — an operation is already running…", "dirty");
+    return;
+  }
   try {
     const res = await postJSON("/api/unique/bulk", { paths });
     new Set(paths.map(folderOf)).forEach((f) => refreshFolder(f));
     const n = (res.folders || []).reduce((a, f) => a + (f.rekeyed || []).filter((r) => r.to).length, 0);
     setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
-  } catch (e) { setStatus("Make unique failed: " + e.message, "err"); }
+  } catch (e) {
+    setStatus("Make unique failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
 }
 
 async function createFolder(parentPath) {
