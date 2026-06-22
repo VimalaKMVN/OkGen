@@ -145,6 +145,9 @@ and you can match several chains/layouts at once with a list, e.g.
 - The layout definitions (the `.xlsx` files in `data/OkFileDefinitions`) ship with
   the app; you normally don't touch them.
 - Bundled packages live in `vendor\wheels` (Python 3.9–3.13, 64-bit Windows).
+- **Branding (optional):** drop a `favicon.ico` and/or `logo.png` into
+  `src\okgen\web\static\` — the browser-tab icon and the header logo pick them up
+  automatically (the header falls back to the "OkGen" text if no `logo.png`).
 
 ### Project documentation
 - **IMPLEMENTATION_PLAN.md** — technical design, data model, module map.

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, abort, jsonify, render_template, request, send_from_directory
 
 from okgen.api import service
 from okgen.config import Config
@@ -36,6 +36,13 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
                                nicelabel_path=config.nicelabel_path() or "")
 
     # ----- JSON API -----
+    @app.get("/favicon.ico")
+    def favicon():
+        path = service.Path(app.static_folder) / "favicon.ico"
+        if not path.is_file():
+            abort(404)
+        return send_from_directory(app.static_folder, "favicon.ico")
+
     @app.get("/api/health")
     def health():
         return jsonify({"ok": True, "layouts": registry.names()})

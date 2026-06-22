@@ -4,11 +4,16 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>OkGen Editor</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.ico') }}" />
   <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}" />
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">OkGen</div>
+    <div class="brand">
+      <img id="brandLogo" class="brand-logo" src="{{ url_for('static', filename='logo.png') }}"
+           alt="" onerror="this.style.display='none'" />
+      <span class="brand-text">OkGen</span>
+    </div>
     <input id="folderPath" class="folder-input" type="text"
            placeholder="Folder path (or click Open Folder to browse)…" />
     <button id="openBtn" class="btn">Open Folder…</button>
