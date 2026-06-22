@@ -989,21 +989,30 @@ def _sanitize_label(s: str) -> str:
 
 
 def _file_tokens(path: Path, registry, config, custom: dict) -> dict:
-    """Resolve all rename-token values for one file from its header."""
-    header = read_header_line(path)
-    layout = detect_from_header(header).layout
-    chain = header[1:3]
-    lay = registry.get(layout) if layout else None
+    """Resolve all rename-token values for one file.
+
+    Field values come from the header first; any field not in the header is
+    taken from the first record of the detail section that has it (e.g. for
+    Preticket, comp_price/comp_up/ret_price/type live in the Lane section).
+    """
+    okf = parse_okfile(path, registry=registry)
+    layout = okf.layout.name
     toks: dict = {}
-    if lay and lay.sections:
-        for f in lay.sections[0].fields:
-            toks[f.name] = (_key_from_header(header, lay, f) or "").strip()
+    for _secname, recs in okf.sections().items():   # header section comes first
+        if not recs or recs[0].section is None:
+            continue
+        first = recs[0]
+        for f in first.section.fields:
+            v = first.get(f.name)
+            if v is not None:
+                toks.setdefault(f.name, v.strip())   # don't override a header value
+    chain = toks.get("chain", "")
     toks["chain"] = chain
     toks["brand"] = config.chain_name(chain)
-    toks["layout"] = layout or ""
+    toks["layout"] = layout
     fmt = toks.get("format", "")
     toks["format_label"] = config.label("format", fmt, chain=chain, layout=layout, fmt=fmt) if fmt else ""
-    kf = config.unique_field(layout) if layout else None
+    kf = config.unique_field(layout)
     toks["key"] = toks.get(kf, "") if kf else ""
     toks["orig"] = path.stem
     for cname, cval in (custom or {}).items():
@@ -1051,15 +1060,18 @@ def rename_scope(paths, registry, config) -> dict:
         if layout and layout not in layouts:
             layouts.append(layout)
 
+    # Union of fields across ALL sections (header + detail), so detail-only
+    # fields (e.g. Preticket comp_price/comp_up/ret_price/type) are offered too.
     header_union, seen = [], set()
     for lay in layouts:
         L = registry.get(lay)
-        if not L or not L.sections:
+        if not L:
             continue
-        for f in L.sections[0].fields:
-            if f.name not in seen:
-                seen.add(f.name)
-                header_union.append(f.name)
+        for sec in L.sections:
+            for f in sec.fields:
+                if f.name not in seen:
+                    seen.add(f.name)
+                    header_union.append(f.name)
 
     groups = config.rename_token_groups()
     if groups is None:
