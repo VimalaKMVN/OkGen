@@ -17,7 +17,7 @@ quips:
   - "Stamping fresh barcodes…"
   - "Loading the delivery truck…"
   - "Sprinkling magic toner…"
-  - "Negotiating with the printer…"
+  - "Negotiating with NiceLabel…"
   - "Aligning the perforations…"
   - "Routing through the hot folder…"
   - "Counting the cartons…"
@@ -31,7 +31,7 @@ quips:
 
 # Celebratory line shown once the send succeeds (one is picked at random).
 done_quips:
-  - "Off to the printers! 🎉"
+  - "Off to NiceLabel! 🎉"
   - "Labels are on their way!"
   - "NiceLabel has the ball now."
   - "Delivered to the hot folder!"
