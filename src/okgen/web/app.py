@@ -34,7 +34,9 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         return render_template("index.html", chains=chains,
                                field_colors=config.field_colors(),
                                nicelabel_path=config.nicelabel_path() or "",
-                               nicelabel_warning=config.nicelabel_warning())
+                               nicelabel_warning=config.nicelabel_warning(),
+                               send_quips=config.send_quips(),
+                               send_done_quips=config.send_done_quips())
 
     # ----- JSON API -----
     @app.get("/favicon.ico")

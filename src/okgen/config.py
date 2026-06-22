@@ -14,6 +14,24 @@ import yaml
 
 _DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 
+_DEFAULT_SEND_QUIPS = [
+    "Beaming labels to NiceLabel…", "Folding the OK files neatly…",
+    "Greasing the conveyor belt…", "Waking up the print triggers…",
+    "Stamping fresh barcodes…", "Loading the delivery truck…",
+    "Sprinkling magic toner…", "Negotiating with the printer…",
+    "Aligning the perforations…", "Routing through the hot folder…",
+    "Counting the cartons…", "Polishing the price tags…",
+    "Teleporting to the DC…", "Warming up the label rollers…",
+    "Convincing NiceLabel to cooperate…", "Untangling the ribbon…",
+    "Double-checking the SKUs…", "Lining up the carton labels…",
+]
+
+_DEFAULT_SEND_DONE_QUIPS = [
+    "Off to the printers! 🎉", "Labels are on their way!",
+    "NiceLabel has the ball now.", "Delivered to the hot folder!",
+    "Wheels up — bon voyage! ✈️", "Cartons loaded and rolling.",
+]
+
 
 @dataclass
 class ChainInfo:
@@ -68,6 +86,8 @@ class Config:
         rename_tokens: Optional[Dict[str, List[str]]] = None,
         rename_presets: Optional[List[dict]] = None,
         nicelabel_warning: Optional[str] = None,
+        send_quips: Optional[List[str]] = None,
+        send_done_quips: Optional[List[str]] = None,
     ):
         self._chains = chains
         self._rules = rules
@@ -80,6 +100,8 @@ class Config:
         self._rename_tokens = rename_tokens
         self._rename_presets = rename_presets or []
         self._nicelabel_warning = nicelabel_warning
+        self._send_quips = send_quips
+        self._send_done_quips = send_done_quips
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -158,6 +180,15 @@ class Config:
             "Make sure the correct NiceLabel trigger(s) are running (started / "
             "turned ON) before sending — otherwise the files will sit unprocessed."
         )
+
+    # ----- send-animation quips -----
+    def send_quips(self) -> List[str]:
+        """Status lines that rotate during a send (configured, or built-in)."""
+        return list(self._send_quips) if self._send_quips else list(_DEFAULT_SEND_QUIPS)
+
+    def send_done_quips(self) -> List[str]:
+        """Celebratory lines shown on a successful send (configured, or built-in)."""
+        return list(self._send_done_quips) if self._send_done_quips else list(_DEFAULT_SEND_DONE_QUIPS)
 
     # ----- bulk-rename token inclusion list -----
     def rename_token_groups(self) -> Optional[dict]:
@@ -261,11 +292,19 @@ class Config:
 
         nicelabel_path = None
         nicelabel_warning = None
+        send_quips = None
+        send_done_quips = None
         nl_path = cdir / "nicelabel.yaml"
         if nl_path.is_file():
             data = yaml.safe_load(nl_path.read_text(encoding="utf-8")) or {}
             nicelabel_path = data.get("nicelabel_path") or None
             nicelabel_warning = data.get("warning") or None
+            quips = data.get("quips")
+            if isinstance(quips, list) and quips:
+                send_quips = [str(q) for q in quips]
+            done = data.get("done_quips")
+            if isinstance(done, list) and done:
+                send_done_quips = [str(q) for q in done]
 
         rename_tokens = None
         rt_path = cdir / "rename_tokens.yaml"
@@ -302,4 +341,4 @@ class Config:
 
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
-                   nicelabel_warning)
+                   nicelabel_warning, send_quips, send_done_quips)

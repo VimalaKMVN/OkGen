@@ -1410,7 +1410,8 @@ const SEND_SCENES = [
      <span class="send-folder bm-ship">🛸</span>` },
 ];
 
-const SEND_QUIPS = [
+// Configurable via config/nicelabel.yaml (quips / done_quips); fall back to these.
+const _DEFAULT_QUIPS = [
   "Beaming labels to NiceLabel…", "Folding the OK files neatly…",
   "Greasing the conveyor belt…", "Waking up the print triggers…",
   "Stamping fresh barcodes…", "Loading the delivery truck…",
@@ -1422,11 +1423,16 @@ const SEND_QUIPS = [
   "Double-checking the SKUs…", "Lining up the carton labels…",
 ];
 
-const SEND_DONE_QUIPS = [
+const _DEFAULT_DONE_QUIPS = [
   "Off to the printers! 🎉", "Labels are on their way!",
   "NiceLabel has the ball now.", "Delivered to the hot folder!",
   "Wheels up — bon voyage! ✈️", "Cartons loaded and rolling.",
 ];
+
+const SEND_QUIPS = (Array.isArray(window.OKGEN_SEND_QUIPS) && window.OKGEN_SEND_QUIPS.length)
+  ? window.OKGEN_SEND_QUIPS : _DEFAULT_QUIPS;
+const SEND_DONE_QUIPS = (Array.isArray(window.OKGEN_SEND_DONE_QUIPS) && window.OKGEN_SEND_DONE_QUIPS.length)
+  ? window.OKGEN_SEND_DONE_QUIPS : _DEFAULT_DONE_QUIPS;
 
 let sendQuipTimer = null;
 const _pick = (arr) => arr[Math.floor(Math.random() * arr.length)];

@@ -54,6 +54,8 @@
     window.OKGEN_FIELD_COLORS = {{ field_colors | tojson }};
     window.OKGEN_NICELABEL = {{ nicelabel_path | tojson }};
     window.OKGEN_NICELABEL_WARNING = {{ nicelabel_warning | tojson }};
+    window.OKGEN_SEND_QUIPS = {{ send_quips | tojson }};
+    window.OKGEN_SEND_DONE_QUIPS = {{ send_done_quips | tojson }};
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
