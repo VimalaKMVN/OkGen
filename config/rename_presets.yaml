@@ -25,3 +25,24 @@ presets:
   - name: "Chain Format Key (no separator)"
     separator: ""
     parts: [chain, format, key]
+
+  # Labelled full tag, e.g.
+  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
+  # (custom label token, then its header value, repeated)
+  - name: "Labelled full tag (StyleHeader)"
+    separator: "_"
+    parts:
+      - brand          # Homegoods
+      - layout         # StyleHeader
+      - FMT            # label "FMT"
+      - format         #   value A
+      - T              # label "T"
+      - type           #   value 2
+      - DEPT           # label "D"
+      - dept           #   value 78
+      - CP             # label "CP"
+      - comp_price     #   value 000000
+      - CU             # label "CU"
+      - comp_up        #   value N
+      - RP             # label "RP"
+      - ret_price      #   value 002099
