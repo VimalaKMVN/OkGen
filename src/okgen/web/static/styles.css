@@ -33,8 +33,13 @@ body {
   background: var(--bg-alt);
   border-bottom: 1px solid var(--border);
 }
-.brand { font-weight: 700; letter-spacing: 0.5px; color: #fff; display: flex; align-items: center; gap: 8px; }
-.brand-logo { height: 22px; width: auto; display: block; }
+.brand { font-weight: 700; letter-spacing: 0.5px; color: #fff; display: flex; align-items: center; gap: 9px; }
+/* TJX logo on a white rounded chip so the red reads on the dark header */
+.brand-logo {
+  height: 20px; width: auto; display: block;
+  background: #fff; padding: 4px 7px; border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+}
 .spacer { flex: 1; }
 .folder-input {
   width: 380px;
