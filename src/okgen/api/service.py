@@ -1070,7 +1070,8 @@ def rename_scope(paths, registry, config) -> dict:
             sample = _file_tokens(Path(paths[0]), registry, config, palette["custom"])
         except Exception:
             sample = {}
-    return {"files": files, "palette": palette, "sample": sample}
+    return {"files": files, "palette": palette, "sample": sample,
+            "presets": config.rename_presets()}
 
 
 def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:

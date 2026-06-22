@@ -15,6 +15,12 @@ rename_tokens:
   # like. Example: a token "FMT" that inserts "FMT" so you can build FMT_A.
   custom:
     FMT: "FMT"
+    KEY: "KEY"
+    DEPT: "D"
+    CP: "CP"
+    CU: "CU"
+    RP: "RP"
+    T: "T"
     # PROD: "PROD"
     # REPRINT: "RP"
 

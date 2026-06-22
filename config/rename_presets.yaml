@@ -1,0 +1,27 @@
+# Saved rename patterns. Pick a preset in the Bulk Rename panel to fill in ALL
+# the parts at once (then tweak if you like) instead of adding parts one by one.
+#
+# Each preset has:
+#   name       -> shown in the preset dropdown
+#   separator  -> how the parts are joined ("_", "-", ".", "" for none)
+#   parts      -> ordered list. Each entry is a TOKEN NAME (a custom token from
+#                 rename_tokens.yaml, a derived token, or a header field). For
+#                 literal text, either define a custom token, or use {text: "..."}.
+#
+# Easy to edit — add/remove presets and reorder parts freely.
+presets:
+  - name: "Brand · Layout · Key"
+    separator: "_"
+    parts: [brand, layout, key]
+
+  - name: "FMT + Format + Keytrol"
+    separator: "_"
+    parts: [FMT, format, KEY, keytrol]
+
+  - name: "Dept + Key"
+    separator: "_"
+    parts: [DEPT, dept, KEY, key]
+
+  - name: "Chain Format Key (no separator)"
+    separator: ""
+    parts: [chain, format, key]

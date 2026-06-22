@@ -395,6 +395,20 @@ def test_rename_scope_palette(tmp_path, registry, config):
     assert sc["sample"]["keytrol"] == "550000"
 
 
+def test_rename_presets_in_scope(tmp_path, registry, config):
+    f = tmp_path / "x.OK"; shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    sc = service.rename_scope([str(f)], registry, config)
+    names = [p["name"] for p in sc["presets"]]
+    assert "Brand Layout Key" in names
+    blk = next(p for p in sc["presets"] if p["name"] == "Brand Layout Key")
+    assert blk["separator"] == "_"
+    assert blk["parts"] == [
+        {"type": "token", "name": "brand"},
+        {"type": "token", "name": "layout"},
+        {"type": "token", "name": "key"},
+    ]
+
+
 def test_rename_preview_and_apply(tmp_path, registry, config):
     f = tmp_path / "orig.OK"; shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
     parts = [

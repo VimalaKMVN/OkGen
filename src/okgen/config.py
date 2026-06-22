@@ -66,6 +66,7 @@ class Config:
         section_counts: Optional[Dict[str, Dict[str, str]]] = None,
         nicelabel_path: Optional[str] = None,
         rename_tokens: Optional[Dict[str, List[str]]] = None,
+        rename_presets: Optional[List[dict]] = None,
     ):
         self._chains = chains
         self._rules = rules
@@ -76,6 +77,7 @@ class Config:
         self._nicelabel_path = nicelabel_path
         # {"derived": [...], "header_fields": [...]} or None (= show all)
         self._rename_tokens = rename_tokens
+        self._rename_presets = rename_presets or []
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -166,6 +168,10 @@ class Config:
         if groups is None:
             return None
         return groups["derived"] + groups["header_fields"] + list(groups["custom"].keys())
+
+    def rename_presets(self) -> List[dict]:
+        """Saved rename patterns: [{name, separator, parts:[{type,name|value}]}]."""
+        return [dict(p, parts=list(p["parts"])) for p in self._rename_presets]
 
     # ----- unique key field -----
     def unique_field(self, layout: Optional[str]) -> Optional[str]:
@@ -265,5 +271,22 @@ class Config:
             elif isinstance(rt, list):   # back-compat: a flat list = header fields
                 rename_tokens = {"derived": [], "header_fields": [str(t) for t in rt], "custom": {}}
 
+        rename_presets: List[dict] = []
+        rp_path = cdir / "rename_presets.yaml"
+        if rp_path.is_file():
+            data = yaml.safe_load(rp_path.read_text(encoding="utf-8")) or {}
+            for pr in (data.get("presets") or []):
+                parts = []
+                for part in (pr.get("parts") or []):
+                    if isinstance(part, dict) and "text" in part:
+                        parts.append({"type": "text", "value": str(part["text"])})
+                    else:
+                        parts.append({"type": "token", "name": str(part)})
+                rename_presets.append({
+                    "name": str(pr.get("name", "preset")),
+                    "separator": str(pr.get("separator", "_")),
+                    "parts": parts,
+                })
+
         return cls(chains, rules, limits, unique_fields, field_colors,
-                   section_counts, nicelabel_path, rename_tokens)
+                   section_counts, nicelabel_path, rename_tokens, rename_presets)

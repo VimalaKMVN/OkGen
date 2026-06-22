@@ -1,0 +1,8 @@
+# Fixed rename presets for tests.
+presets:
+  - name: "Brand Layout Key"
+    separator: "_"
+    parts: [brand, layout, key]
+  - name: "FMT Format Keytrol"
+    separator: "_"
+    parts: [FMT, format, keytrol]

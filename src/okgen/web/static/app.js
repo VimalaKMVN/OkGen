@@ -553,6 +553,21 @@ function renderRenamePanel(scope) {
   panel.appendChild(head);
   if (!scope.files.length) { panel.appendChild(el("div", "bulk-note", "No files.")); return; }
 
+  // Preset chooser — fills all the parts at once.
+  if ((scope.presets || []).length) {
+    const presetRow = el("div", "bulk-edit-row");
+    presetRow.appendChild(el("span", "bulk-label", "Preset:"));
+    const presetSel = el("select", "bulk-field");
+    presetSel.appendChild(new Option("— choose a preset —", ""));
+    scope.presets.forEach((p, i) => presetSel.appendChild(new Option(p.name, String(i))));
+    presetSel.addEventListener("change", () => {
+      if (presetSel.value === "") return;
+      applyPreset(scope.presets[Number(presetSel.value)]);
+    });
+    presetRow.appendChild(presetSel);
+    panel.appendChild(presetRow);
+  }
+
   const partsBox = el("div", "rn-parts");
   panel.appendChild(partsBox);
   const addRow = el("div", "bulk-actions");
@@ -600,11 +615,23 @@ function renderRenamePanel(scope) {
     og.appendChild(new Option("— custom text —", "__text__")); sel.appendChild(og);
     return sel;
   }
-  function addPartRow() {
+  function addPartRow(part) {
     const row = el("div", "rn-part");
     const sel = tokenSelect();
     const txt = el("input", "rn-text"); txt.type = "text"; txt.placeholder = "text"; txt.classList.add("hidden");
     const up = el("button", "btn rn-mini", "↑"), down = el("button", "btn rn-mini", "↓"), del = el("button", "btn rn-mini", "✕");
+    if (part) {
+      if (part.type === "text") {
+        sel.value = "__text__"; txt.value = part.value || ""; txt.classList.remove("hidden");
+      } else {
+        const name = part.name;
+        if (![...sel.options].some((o) => o.value === name)) {   // token not in palette -> inject
+          const og = document.createElement("optgroup"); og.label = "Preset";
+          og.appendChild(new Option(name, name)); sel.insertBefore(og, sel.firstChild);
+        }
+        sel.value = name;
+      }
+    }
     sel.addEventListener("change", () => { txt.classList.toggle("hidden", sel.value !== "__text__"); updateLive(); });
     txt.addEventListener("input", updateLive);
     up.addEventListener("click", () => { const p = row.previousElementSibling; if (p) partsBox.insertBefore(row, p); updateLive(); });
@@ -612,6 +639,18 @@ function renderRenamePanel(scope) {
     del.addEventListener("click", () => { row.remove(); updateLive(); });
     row.append(sel, txt, up, down, del);
     partsBox.appendChild(row);
+    updateLive();
+  }
+  function applyPreset(preset) {
+    partsBox.innerHTML = "";
+    const sepVal = preset.separator != null ? preset.separator : "_";
+    if ([...sepSel.options].some((o) => o.value === sepVal)) {
+      sepSel.value = sepVal; sepCustom.classList.add("hidden");
+    } else {
+      sepSel.value = "__custom__"; sepCustom.classList.remove("hidden"); sepCustom.value = sepVal;
+    }
+    (preset.parts || []).forEach((p) => addPartRow(p));
+    if (!partsBox.children.length) addPartRow();
     updateLive();
   }
   function buildParts() {
