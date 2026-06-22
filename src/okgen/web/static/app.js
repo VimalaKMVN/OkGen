@@ -1066,7 +1066,7 @@ function renderTable(sec) {
   const n = sec.records.length;
   sec.records.forEach((rec, i) => {
     const tr = el("tr");
-    const num = el("td"); num.appendChild(el("span", "rownum", String(rec.index))); tr.appendChild(num);
+    const num = el("td"); num.appendChild(el("span", "rownum", String(i + 1))); tr.appendChild(num);  // per-section row #
     sec.fields.forEach((field) => {
       const td = el("td");
       td.appendChild(makeControl(sec, rec, field));

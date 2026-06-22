@@ -226,7 +226,7 @@ body {
 table { border-collapse: collapse; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
 th, td { border: 1px solid var(--border); padding: 2px 4px; text-align: left; }
 th { background: var(--bg-alt); color: var(--text-dim); font-weight: 600; position: sticky; top: 0; }
-td .rownum { color: var(--text-dim); }
+td .rownum { color: #e0a44a; }   /* amber, like the raw-view ruler */
 
 input.cell, select.cell, input.fval, select.fval {
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
