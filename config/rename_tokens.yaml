@@ -4,9 +4,19 @@
 #
 # If this whole file is deleted, ALL tokens are shown.
 #
-# Two groups: `derived` are computed tokens; `header_fields` are raw header
-# values. Trim either list to taste. (Everything is included below.)
+# Three groups: `derived` are computed tokens; `header_fields` are raw header
+# values; `custom` are reusable literal strings you define. Trim any to taste.
+# (You can also add one-off literal text directly in the builder via a Text
+# part — `custom` here is just for ones you want to reuse.)
 rename_tokens:
+
+  # ---- custom tokens (reusable literal strings: name -> text inserted) ----
+  # Use them in the builder like any other token, as many times / anywhere you
+  # like. Example: a token "FMT" that inserts "FMT" so you can build FMT_A.
+  custom:
+    FMT: "FMT"
+    # PROD: "PROD"
+    # REPRINT: "RP"
 
   # ---- derived (computed) tokens ----
   derived:

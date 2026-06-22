@@ -150,21 +150,22 @@ class Config:
         return self._nicelabel_path
 
     # ----- bulk-rename token inclusion list -----
-    def rename_token_groups(self) -> Optional[Dict[str, List[str]]]:
-        """{'derived': [...], 'header_fields': [...]} allowed tokens, or None (all)."""
+    def rename_token_groups(self) -> Optional[dict]:
+        """{'derived': [...], 'header_fields': [...], 'custom': {name: text}} or None (all)."""
         if self._rename_tokens is None:
             return None
         return {
             "derived": list(self._rename_tokens.get("derived", [])),
             "header_fields": list(self._rename_tokens.get("header_fields", [])),
+            "custom": dict(self._rename_tokens.get("custom", {})),
         }
 
     def rename_tokens(self) -> Optional[List[str]]:
-        """Flat allowed-token list (derived + header_fields), or None to allow all."""
+        """Flat allowed-token names (derived + header_fields + custom), or None (all)."""
         groups = self.rename_token_groups()
         if groups is None:
             return None
-        return groups["derived"] + groups["header_fields"]
+        return groups["derived"] + groups["header_fields"] + list(groups["custom"].keys())
 
     # ----- unique key field -----
     def unique_field(self, layout: Optional[str]) -> Optional[str]:
@@ -259,9 +260,10 @@ class Config:
                 rename_tokens = {
                     "derived": [str(t) for t in (rt.get("derived") or [])],
                     "header_fields": [str(t) for t in (rt.get("header_fields") or [])],
+                    "custom": {str(k): str(v) for k, v in (rt.get("custom") or {}).items()},
                 }
             elif isinstance(rt, list):   # back-compat: a flat list = header fields
-                rename_tokens = {"derived": [], "header_fields": [str(t) for t in rt]}
+                rename_tokens = {"derived": [], "header_fields": [str(t) for t in rt], "custom": {}}
 
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens)
