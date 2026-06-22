@@ -67,6 +67,7 @@ class Config:
         nicelabel_path: Optional[str] = None,
         rename_tokens: Optional[Dict[str, List[str]]] = None,
         rename_presets: Optional[List[dict]] = None,
+        nicelabel_warning: Optional[str] = None,
     ):
         self._chains = chains
         self._rules = rules
@@ -78,6 +79,7 @@ class Config:
         # {"derived": [...], "header_fields": [...]} or None (= show all)
         self._rename_tokens = rename_tokens
         self._rename_presets = rename_presets or []
+        self._nicelabel_warning = nicelabel_warning
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -150,6 +152,12 @@ class Config:
     # ----- NiceLabel destination -----
     def nicelabel_path(self) -> Optional[str]:
         return self._nicelabel_path
+
+    def nicelabel_warning(self) -> str:
+        return self._nicelabel_warning or (
+            "Make sure the correct NiceLabel trigger(s) are running (started / "
+            "turned ON) before sending — otherwise the files will sit unprocessed."
+        )
 
     # ----- bulk-rename token inclusion list -----
     def rename_token_groups(self) -> Optional[dict]:
@@ -252,10 +260,12 @@ class Config:
             }
 
         nicelabel_path = None
+        nicelabel_warning = None
         nl_path = cdir / "nicelabel.yaml"
         if nl_path.is_file():
             data = yaml.safe_load(nl_path.read_text(encoding="utf-8")) or {}
             nicelabel_path = data.get("nicelabel_path") or None
+            nicelabel_warning = data.get("warning") or None
 
         rename_tokens = None
         rt_path = cdir / "rename_tokens.yaml"
@@ -291,4 +301,5 @@ class Config:
                 })
 
         return cls(chains, rules, limits, unique_fields, field_colors,
-                   section_counts, nicelabel_path, rename_tokens, rename_presets)
+                   section_counts, nicelabel_path, rename_tokens, rename_presets,
+                   nicelabel_warning)

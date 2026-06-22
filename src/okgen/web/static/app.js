@@ -1301,7 +1301,10 @@ async function sendToNiceLabel() {
   const paths = [...state.selection];
   if (!paths.length) return;
   const dest = window.OKGEN_NICELABEL || "the NiceLabel folder";
-  if (!confirm(`Send ${paths.length} file(s) to NiceLabel?\n\n${dest}`)) return;
+  const warn = window.OKGEN_NICELABEL_WARNING || "";
+  const msg = `Send ${paths.length} file(s) to NiceLabel?\n\n${dest}`
+    + (warn ? `\n\n⚠  ${warn}` : "");
+  if (!confirm(msg)) return;
   // overlay:false — Send has its own copy animation; don't stack the generic one.
   if (!beginBusy("Sending to NiceLabel…", false)) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
 

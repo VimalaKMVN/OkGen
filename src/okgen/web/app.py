@@ -33,7 +33,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         chains = {code: info.to_dict() for code, info in config.chains().items()}
         return render_template("index.html", chains=chains,
                                field_colors=config.field_colors(),
-                               nicelabel_path=config.nicelabel_path() or "")
+                               nicelabel_path=config.nicelabel_path() or "",
+                               nicelabel_warning=config.nicelabel_warning())
 
     # ----- JSON API -----
     @app.get("/favicon.ico")
