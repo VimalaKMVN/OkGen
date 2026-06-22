@@ -1376,33 +1376,107 @@ async function sendToNiceLabel() {
   }
 }
 
+// ---- Send animation: a different little scene each time, for fun ----
+// Each scene fills .send-scene; movers live in the .send-mid band and ride
+// from left:0 → left:100% so the start/end emoji anchors frame the journey.
+const SEND_SCENES = [
+  { cls: "scene-fly", html:                       // ✈ original: papers flutter across
+    `<span class="send-folder">📂</span>
+     <span class="send-mid"><span class="send-paper"></span><span class="send-paper"></span><span class="send-paper"></span></span>
+     <span class="send-folder">🏷️</span>` },
+  { cls: "scene-rocket", html:                     // 🚀 rocket blasts the files over
+    `<span class="send-folder">🛰️</span>
+     <span class="send-mid"><span class="rk-spark">✨</span><span class="rk-rocket">🚀</span></span>
+     <span class="send-folder">🏷️</span>` },
+  { cls: "scene-truck", html:                      // 🚚 delivery truck hauls them
+    `<span class="send-folder">🏭</span>
+     <span class="send-mid"><span class="tk-truck">🚚</span></span>
+     <span class="send-folder">🏬</span>` },
+  { cls: "scene-belt", html:                       // 📦 conveyor belt of cartons
+    `<span class="send-folder">📥</span>
+     <span class="send-mid"><span class="bl-box">📦</span><span class="bl-box">📦</span><span class="bl-box">📦</span><span class="bl-box">📦</span></span>
+     <span class="send-folder">📤</span>` },
+  { cls: "scene-printer", html:                    // 🖨️ printer spitting out labels
+    `<span class="send-folder pr-printer">🖨️</span>
+     <span class="send-mid"><span class="pr-lab">🏷️</span><span class="pr-lab">🏷️</span><span class="pr-lab">🏷️</span></span>
+     <span class="send-folder">📥</span>` },
+  { cls: "scene-plane", html:                      // ✈️ airmail express
+    `<span class="send-folder">📨</span>
+     <span class="send-mid"><span class="pl-plane">✈️</span></span>
+     <span class="send-folder">📬</span>` },
+  { cls: "scene-beam", html:                        // 🛸 beamed up to the mothership
+    `<span class="send-folder">🗂️</span>
+     <span class="send-mid"><span class="bm-file">📄</span><span class="bm-file">📄</span><span class="bm-file">📄</span></span>
+     <span class="send-folder bm-ship">🛸</span>` },
+];
+
+const SEND_QUIPS = [
+  "Beaming labels to NiceLabel…", "Folding the OK files neatly…",
+  "Greasing the conveyor belt…", "Waking up the print triggers…",
+  "Stamping fresh barcodes…", "Loading the delivery truck…",
+  "Sprinkling magic toner…", "Negotiating with the printer…",
+  "Aligning the perforations…", "Routing through the hot folder…",
+  "Counting the cartons…", "Polishing the price tags…",
+  "Teleporting to the DC…", "Warming up the label rollers…",
+  "Convincing NiceLabel to cooperate…", "Untangling the ribbon…",
+  "Double-checking the SKUs…", "Lining up the carton labels…",
+];
+
+const SEND_DONE_QUIPS = [
+  "Off to the printers! 🎉", "Labels are on their way!",
+  "NiceLabel has the ball now.", "Delivered to the hot folder!",
+  "Wheels up — bon voyage! ✈️", "Cartons loaded and rolling.",
+];
+
+let sendQuipTimer = null;
+const _pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
 function showCopyAnimation(n, dest) {
   hideCopyAnimation();
+  const scene = _pick(SEND_SCENES);
   const overlay = el("div", "send-overlay");
   overlay.id = "sendOverlay";
+  const safeDest = (dest || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
   overlay.innerHTML = `
     <div class="send-card">
-      <div class="send-scene">
-        <span class="send-folder">📂</span>
-        <span class="send-papers">
-          <span class="send-paper"></span><span class="send-paper"></span><span class="send-paper"></span>
-        </span>
-        <span class="send-folder">🏷️</span>
-      </div>
+      <div class="send-scene ${scene.cls}">${scene.html}</div>
       <div class="send-title">Sending ${n} file(s) to NiceLabel…</div>
-      <div class="send-sub">${(dest || "").replace(/&/g, "&amp;").replace(/</g, "&lt;")}</div>
+      <div class="send-quip"></div>
+      <div class="send-sub">${safeDest}</div>
     </div>`;
   document.body.appendChild(overlay);
+
+  // Rotate playful status lines while the send is in flight.
+  const quipEl = overlay.querySelector(".send-quip");
+  let last = -1;
+  const tick = () => {
+    let i;
+    do { i = Math.floor(Math.random() * SEND_QUIPS.length); }
+    while (i === last && SEND_QUIPS.length > 1);
+    last = i;
+    quipEl.textContent = SEND_QUIPS[i];
+    quipEl.classList.remove("q-show");
+    void quipEl.offsetWidth;          // reflow so the fade-in replays
+    quipEl.classList.add("q-show");
+  };
+  tick();
+  sendQuipTimer = setInterval(tick, 1300);
 }
 
 function finishCopyAnimation(res) {
   const overlay = $("#sendOverlay");
   if (!overlay) return;
+  if (sendQuipTimer) { clearInterval(sendQuipTimer); sendQuipTimer = null; }
   const s = res.sent.length, er = res.errors.length;
   const card = overlay.querySelector(".send-card");
-  // Keep the scene (papers keep flying) for enjoyment; just show the result + OK.
+  // Keep the scene playing for enjoyment; just show the result + OK.
   const title = card.querySelector(".send-title");
   if (title) title.innerHTML = `<span class="send-ok-check">✓</span> Sent ${s} file(s) to NiceLabel${er ? ` · ${er} failed` : ""}`;
+  const quip = card.querySelector(".send-quip");
+  if (quip) {
+    quip.textContent = er ? "Some files didn't make it — check the list." : _pick(SEND_DONE_QUIPS);
+    quip.classList.add("q-show");
+  }
   const sub = card.querySelector(".send-sub");
   if (sub) sub.remove();
   if (!card.querySelector(".send-ok-btn")) {
@@ -1414,6 +1488,7 @@ function finishCopyAnimation(res) {
 }
 
 function hideCopyAnimation() {
+  if (sendQuipTimer) { clearInterval(sendQuipTimer); sendQuipTimer = null; }
   const overlay = $("#sendOverlay");
   if (overlay) overlay.remove();
 }

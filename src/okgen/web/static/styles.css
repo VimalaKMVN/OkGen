@@ -343,23 +343,103 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
   position: relative; height: 64px; margin: 4px 18px 14px;
   display: flex; align-items: center; justify-content: space-between;
 }
-.send-folder { font-size: 36px; line-height: 1; }
-.send-papers { position: absolute; left: 50px; right: 50px; top: 0; bottom: 0; }
-.send-paper {
-  position: absolute; top: 22px; left: 0; width: 15px; height: 19px;
+.send-folder { font-size: 36px; line-height: 1; z-index: 1; }
+/* Shared travel band: movers ride left:0 → left:100% between the two anchors. */
+.send-mid { position: absolute; left: 48px; right: 48px; top: 0; bottom: 0; }
+.send-mid > span { position: absolute; }
+
+/* ✈ paper flight (original) */
+.scene-fly .send-paper {
+  top: 22px; left: 0; width: 15px; height: 19px;
   background: #eef1f4; border: 1px solid #9aa3ad; border-radius: 2px;
   box-shadow: 0 1px 2px rgba(0,0,0,0.4);
   animation: sendFly 1.05s linear infinite;
 }
-.send-paper:nth-child(2) { animation-delay: 0.35s; }
-.send-paper:nth-child(3) { animation-delay: 0.70s; }
+.scene-fly .send-paper:nth-child(2) { animation-delay: 0.35s; }
+.scene-fly .send-paper:nth-child(3) { animation-delay: 0.70s; }
 @keyframes sendFly {
   0%   { left: 0;    opacity: 0; transform: translateY(0) scale(0.8); }
   15%  { opacity: 1; }
   85%  { opacity: 1; }
   100% { left: 100%; opacity: 0; transform: translateY(-7px) scale(1); }
 }
+
+/* 🚀 rocket */
+.scene-rocket .rk-rocket { top: 50%; font-size: 28px; animation: rkFly 1.3s ease-in infinite; }
+.scene-rocket .rk-spark  { top: 50%; font-size: 15px; opacity: 0.7; animation: rkFly 1.3s ease-in infinite; animation-delay: 0.14s; }
+@keyframes rkFly {
+  0%   { left: 0;    opacity: 0; transform: translateY(-50%) rotate(-4deg); }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; transform: translateY(-62%) rotate(8deg); }
+}
+
+/* 🚚 delivery truck */
+.scene-truck .tk-truck { top: 50%; font-size: 30px; animation: tkDrive 1.5s ease-in-out infinite; }
+@keyframes tkDrive {
+  0%   { left: 0;    opacity: 0; transform: translateY(-50%); }
+  12%  { opacity: 1; }
+  48%  { transform: translateY(-56%); }
+  88%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; transform: translateY(-50%); }
+}
+
+/* 📦 conveyor belt */
+.scene-belt .bl-box { top: 50%; font-size: 22px; animation: blSlide 1.9s linear infinite; }
+.scene-belt .bl-box:nth-child(2) { animation-delay: 0.48s; }
+.scene-belt .bl-box:nth-child(3) { animation-delay: 0.95s; }
+.scene-belt .bl-box:nth-child(4) { animation-delay: 1.42s; }
+@keyframes blSlide {
+  0%   { left: 0;    opacity: 0; transform: translateY(-50%); }
+  10%  { opacity: 1; }
+  90%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; transform: translateY(-50%); }
+}
+
+/* 🖨️ printer spitting labels */
+.scene-printer .pr-printer { animation: prShake 0.32s linear infinite; }
+@keyframes prShake { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+.scene-printer .pr-lab { top: 50%; font-size: 20px; animation: prSpit 1.25s ease-out infinite; }
+.scene-printer .pr-lab:nth-child(2) { animation-delay: 0.42s; }
+.scene-printer .pr-lab:nth-child(3) { animation-delay: 0.84s; }
+@keyframes prSpit {
+  0%   { left: 0;    opacity: 0; transform: translateY(-50%) scale(0.5); }
+  20%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; transform: translateY(-42%) scale(1); }
+}
+
+/* ✈️ airmail */
+.scene-plane .pl-plane { top: 50%; font-size: 26px; animation: plFly 1.6s ease-in-out infinite; }
+@keyframes plFly {
+  0%   { left: 0;    opacity: 0; transform: translateY(-42%); }
+  12%  { opacity: 1; }
+  50%  { transform: translateY(-64%); }
+  88%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; transform: translateY(-46%); }
+}
+
+/* 🛸 beam-up */
+.scene-beam .bm-ship { animation: bmHover 1.5s ease-in-out infinite; }
+@keyframes bmHover { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+.scene-beam .bm-file { top: 50%; font-size: 20px; animation: bmBeam 1.3s ease-in infinite; }
+.scene-beam .bm-file:nth-child(2) { animation-delay: 0.42s; }
+.scene-beam .bm-file:nth-child(3) { animation-delay: 0.84s; }
+@keyframes bmBeam {
+  0%   { left: 0;    opacity: 0; transform: translateY(-50%) scale(1); }
+  15%  { opacity: 1; }
+  100% { left: 100%; opacity: 0; transform: translateY(-72%) scale(0.3); }
+}
+
 .send-title { font-size: 14px; color: var(--text); }
+.send-quip {
+  font-size: 12px; color: var(--accent); margin-top: 8px;
+  min-height: 16px; font-style: italic; opacity: 0;
+}
+.send-quip.q-show { animation: quipFade 0.45s ease forwards; }
+@keyframes quipFade {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 .send-sub { font-size: 11px; color: var(--text-dim); margin-top: 7px; word-break: break-all; }
 .send-done { color: var(--ok); font-size: 34px; line-height: 1; margin-bottom: 8px; }
 .send-ok-check { color: var(--ok); font-weight: 700; }
