@@ -280,6 +280,8 @@ class Config:
                 for part in (pr.get("parts") or []):
                     if isinstance(part, dict) and "text" in part:
                         parts.append({"type": "text", "value": str(part["text"])})
+                    elif (isinstance(part, dict) and part.get("glue")) or part == "no_delim":
+                        parts.append({"type": "glue"})
                     else:
                         parts.append({"type": "token", "name": str(part)})
                 rename_presets.append({

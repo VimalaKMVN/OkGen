@@ -1012,10 +1012,16 @@ def _file_tokens(path: Path, registry, config, custom: dict) -> dict:
 
 
 def _build_name(parts, toks, separator, seq, seq_pad=4) -> str:
-    """Join the ordered parts into a filename stem (empty values skipped)."""
-    vals = []
+    """Join ordered parts into a filename stem. A {'type': 'glue'} part means the
+    next value attaches with NO separator. Empty values are skipped."""
+    out = ""
+    glue = False
     for part in parts or []:
-        if part.get("type") == "text":
+        ptype = part.get("type")
+        if ptype == "glue":
+            glue = True
+            continue
+        if ptype == "text":
             v = _strip_invalid(part.get("value", ""))
         else:
             name = part.get("name") or part.get("value", "")
@@ -1025,9 +1031,11 @@ def _build_name(parts, toks, separator, seq, seq_pad=4) -> str:
                 v = _sanitize_label(toks.get(name, ""))
             else:
                 v = _strip_invalid(toks.get(name, ""))
-        if v != "":
-            vals.append(v)
-    return separator.join(vals)
+        if v == "":
+            continue
+        out = v if out == "" else out + ("" if glue else separator) + v
+        glue = False
+    return out
 
 
 def rename_scope(paths, registry, config) -> dict:

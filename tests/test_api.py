@@ -426,6 +426,19 @@ def test_rename_preview_and_apply(tmp_path, registry, config):
     assert not f.exists()
 
 
+def test_rename_no_delim_glue(tmp_path, registry, config):
+    f = tmp_path / "x.OK"; shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    # FMT + (glue) + format  -> "FMTA"; then _ + keytrol
+    parts = [
+        {"type": "token", "name": "FMT"},
+        {"type": "glue"},
+        {"type": "token", "name": "format"},
+        {"type": "token", "name": "keytrol"},
+    ]
+    pv = service.bulk_rename_preview([str(f)], parts, "_", registry, config)
+    assert pv["results"][0]["new"] == "FMTA_550000.OK"
+
+
 def test_rename_collision_counter(tmp_path, registry, config):
     a = tmp_path / "a.OK"; b = tmp_path / "b.OK"
     shutil.copy2(DATA_DIR / "StyleHeader.OK", a)   # both same brand+layout

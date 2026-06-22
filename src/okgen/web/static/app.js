@@ -530,16 +530,19 @@ function exitRenameMode() {
 
 function jsBuildName(parts, sample, sep) {
   const inv = /[\\/:*?"<>|]/g;
-  const vals = [];
+  let out = ""; let glue = false;
   (parts || []).forEach((p) => {
+    if (p.type === "glue") { glue = true; return; }
     let v = "";
     if (p.type === "text") v = String(p.value || "").replace(inv, "");
     else if (p.name === "seq") v = "0001";
     else if (p.name === "brand" || p.name === "format_label") v = String(sample[p.name] || "").replace(/ /g, "_").replace(inv, "");
     else v = String(sample[p.name] || "").replace(inv, "");
-    if (v !== "") vals.push(v);
+    if (v === "") return;
+    out = out === "" ? v : out + (glue ? "" : sep) + v;
+    glue = false;
   });
-  return vals.join(sep) + ".OK";
+  return out + ".OK";
 }
 
 function renderRenamePanel(scope) {
@@ -612,7 +615,9 @@ function renderRenamePanel(scope) {
     grp("Derived", scope.palette.derived || []);
     grp("Header fields", scope.palette.header_fields || []);
     const og = document.createElement("optgroup"); og.label = "Other";
-    og.appendChild(new Option("— custom text —", "__text__")); sel.appendChild(og);
+    og.appendChild(new Option("— custom text —", "__text__"));
+    og.appendChild(new Option("— no separator —", "__glue__"));
+    sel.appendChild(og);
     return sel;
   }
   function addPartRow(part) {
@@ -621,7 +626,9 @@ function renderRenamePanel(scope) {
     const txt = el("input", "rn-text"); txt.type = "text"; txt.placeholder = "text"; txt.classList.add("hidden");
     const up = el("button", "btn rn-mini", "↑"), down = el("button", "btn rn-mini", "↓"), del = el("button", "btn rn-mini", "✕");
     if (part) {
-      if (part.type === "text") {
+      if (part.type === "glue") {
+        sel.value = "__glue__";
+      } else if (part.type === "text") {
         sel.value = "__text__"; txt.value = part.value || ""; txt.classList.remove("hidden");
       } else {
         const name = part.name;
@@ -656,6 +663,7 @@ function renderRenamePanel(scope) {
   function buildParts() {
     return [...partsBox.querySelectorAll(".rn-part")].map((row) => {
       const sel = row.querySelector(".rn-token");
+      if (sel.value === "__glue__") return { type: "glue" };
       if (sel.value === "__text__") return { type: "text", value: row.querySelector(".rn-text").value };
       return { type: "token", name: sel.value };
     });
