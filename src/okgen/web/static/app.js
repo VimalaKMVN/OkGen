@@ -246,7 +246,7 @@ function updateSelectionUI() {
   const c = $("#selCount");
   if (c) c.textContent = n > 1 ? ` · ${n} selected` : "";
   const btn = $("#bulkBtn");
-  if (btn) { btn.classList.toggle("hidden", n < 2); btn.textContent = `Bulk Edit (${n})`; }
+  if (btn) { btn.classList.toggle("hidden", n < 2); btn.textContent = `Bulk Actions (${n}) ▾`; }
   // Bulk Edit only makes sense for a multi-selection — close it otherwise.
   if (isBulkOpen() && n < 2) exitBulkMode();
 }
@@ -1200,11 +1200,12 @@ function showCtxMenu(e, node, row) {
   if (count <= 1) add("Open", () => loadFile(node.path));
   add(count > 1 ? `Copy ${count} files` : "Copy", () => copySelection());
   add("Paste here", () => pasteInto(folderOf(node.path)), !state.clipboard.length);
+  menu.appendChild(el("div", "ctx-sep"));
+  if (count > 1) add(`Bulk Edit (${count})`, () => enterBulkMode());
+  add(count > 1 ? `Bulk Rename (${count})…` : "Bulk Rename…", () => enterRenameMode());
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
+  add(count > 1 ? `🏷️  Send ${count} to NiceLabel` : "🏷️  Send to NiceLabel", () => sendToNiceLabel());
   menu.appendChild(el("div", "ctx-sep"));
-  add(count > 1 ? `Send ${count} files to NiceLabel` : "Send to NiceLabel", () => sendToNiceLabel());
-  menu.appendChild(el("div", "ctx-sep"));
-  add(count > 1 ? `Bulk Rename ${count} files…` : "Bulk Rename…", () => enterRenameMode());
   add("Rename…", () => renameFile(node), count > 1);
   add(count > 1 ? `Delete ${count} files` : "Delete",
       () => (count > 1 ? deleteSelection() : deleteFile(node)));
@@ -1508,7 +1509,31 @@ document.addEventListener("click", hideCtxMenu);
 $("#tabRendered").addEventListener("click", () => switchTab("rendered"));
 $("#tabRaw").addEventListener("click", () => switchTab("raw"));
 $("#openBtn").addEventListener("click", browseFolder);
-$("#bulkBtn").addEventListener("click", enterBulkMode);
+$("#bulkBtn").addEventListener("click", (e) => { e.stopPropagation(); showBulkMenu(); });
+
+// Dropdown of bulk actions, anchored under the "Bulk Actions" button —
+// mirrors the right-click menu so both places offer the same options.
+function showBulkMenu() {
+  const n = state.selection.size;
+  if (n < 1) return;
+  const menu = $("#ctxMenu");
+  menu.innerHTML = "";
+  const add = (label, fn, disabled) => {
+    const it = el("div", "ctx-item", label);
+    if (disabled) it.classList.add("disabled");
+    else it.addEventListener("click", () => { hideCtxMenu(); fn(); });
+    menu.appendChild(it);
+  };
+  add(`Bulk Edit (${n})`, () => enterBulkMode(), n < 2);
+  add(`Bulk Rename (${n})`, () => enterRenameMode());
+  add(`Make keys unique (${n})`, () => makeUniqueSelection());
+  menu.appendChild(el("div", "ctx-sep"));
+  add(`🏷️  Send ${n} to NiceLabel`, () => sendToNiceLabel());
+  const r = $("#bulkBtn").getBoundingClientRect();
+  menu.style.left = Math.max(8, r.right - 220) + "px";
+  menu.style.top = (r.bottom + 4) + "px";
+  menu.classList.remove("hidden");
+}
 $("#folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") openFolder(e.target.value.trim()); });
 // Show the full folder path on hover (the box is usually too narrow to see it).
 $("#folderPath").addEventListener("input", (e) => { e.target.title = e.target.value; });
