@@ -974,6 +974,176 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
 
 
 # --------------------------------------------------------------------------- #
+# Bulk rename
+# --------------------------------------------------------------------------- #
+DERIVED_TOKENS = ["brand", "format_label", "layout", "key", "seq", "orig"]
+_INVALID_NAME = set('\\/:*?"<>|')
+
+
+def _strip_invalid(s: str) -> str:
+    return "".join(c for c in str(s) if c not in _INVALID_NAME)
+
+
+def _sanitize_label(s: str) -> str:
+    return _strip_invalid(str(s).replace(" ", "_"))
+
+
+def _file_tokens(path: Path, registry, config, custom: dict) -> dict:
+    """Resolve all rename-token values for one file from its header."""
+    header = read_header_line(path)
+    layout = detect_from_header(header).layout
+    chain = header[1:3]
+    lay = registry.get(layout) if layout else None
+    toks: dict = {}
+    if lay and lay.sections:
+        for f in lay.sections[0].fields:
+            toks[f.name] = (_key_from_header(header, lay, f) or "").strip()
+    toks["chain"] = chain
+    toks["brand"] = config.chain_name(chain)
+    toks["layout"] = layout or ""
+    fmt = toks.get("format", "")
+    toks["format_label"] = config.label("format", fmt, chain=chain, layout=layout, fmt=fmt) if fmt else ""
+    kf = config.unique_field(layout) if layout else None
+    toks["key"] = toks.get(kf, "") if kf else ""
+    toks["orig"] = path.stem
+    for cname, cval in (custom or {}).items():
+        toks[cname] = cval
+    return toks
+
+
+def _build_name(parts, toks, separator, seq, seq_pad=4) -> str:
+    """Join the ordered parts into a filename stem (empty values skipped)."""
+    vals = []
+    for part in parts or []:
+        if part.get("type") == "text":
+            v = _strip_invalid(part.get("value", ""))
+        else:
+            name = part.get("name") or part.get("value", "")
+            if name == "seq":
+                v = str(seq).zfill(seq_pad)
+            elif name in ("brand", "format_label"):
+                v = _sanitize_label(toks.get(name, ""))
+            else:
+                v = _strip_invalid(toks.get(name, ""))
+        if v != "":
+            vals.append(v)
+    return separator.join(vals)
+
+
+def rename_scope(paths, registry, config) -> dict:
+    """Files + the token palette (filtered by config) + sample values (file 1)."""
+    files = []
+    layouts = []
+    for p in paths or []:
+        try:
+            layout = detect_layout(p).layout
+        except Exception:
+            layout = None
+        files.append({"path": str(p), "name": Path(p).name, "layout": layout})
+        if layout and layout not in layouts:
+            layouts.append(layout)
+
+    header_union, seen = [], set()
+    for lay in layouts:
+        L = registry.get(lay)
+        if not L or not L.sections:
+            continue
+        for f in L.sections[0].fields:
+            if f.name not in seen:
+                seen.add(f.name)
+                header_union.append(f.name)
+
+    groups = config.rename_token_groups()
+    if groups is None:
+        palette = {"derived": list(DERIVED_TOKENS), "header_fields": header_union, "custom": {}}
+    else:
+        ad, ah = set(groups["derived"]), set(groups["header_fields"])
+        palette = {
+            "derived": [t for t in DERIVED_TOKENS if t in ad],
+            "header_fields": [f for f in header_union if f in ah],
+            "custom": dict(groups["custom"]),
+        }
+
+    sample = {}
+    if paths:
+        try:
+            sample = _file_tokens(Path(paths[0]), registry, config, palette["custom"])
+        except Exception:
+            sample = {}
+    return {"files": files, "palette": palette, "sample": sample}
+
+
+def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:
+    groups = config.rename_token_groups()
+    custom = groups["custom"] if groups else {}
+    from collections import defaultdict
+
+    by_folder = defaultdict(list)
+    for p in paths or []:
+        by_folder[str(Path(p).parent)].append(Path(p))
+
+    results = []
+    for folder, files in by_folder.items():
+        folder = Path(folder)
+        selected = {f.name for f in files}
+        used = {e.name for e in folder.iterdir() if e.is_file()} - selected
+        seq = 0
+        for f in files:
+            seq += 1
+            try:
+                toks = _file_tokens(f, registry, config, custom)
+            except Exception as exc:
+                results.append({"path": str(f), "old": f.name, "new": None, "status": "error", "error": str(exc)})
+                continue
+            base = _build_name(parts, toks, separator, seq)
+            if not base:
+                results.append({"path": str(f), "old": f.name, "new": None, "status": "empty"})
+                continue
+            cand = base + ".OK"
+            i = 1
+            while cand in used:
+                cand = f"{base}_{i:03d}.OK"
+                i += 1
+            used.add(cand)
+            results.append({"path": str(f), "old": f.name, "new": cand,
+                            "status": "unchanged" if cand == f.name else "rename"})
+    return {"results": results}
+
+
+def bulk_rename_apply(paths, parts, separator, registry, config) -> dict:
+    """Two-phase rename (temp names first) so in-batch name swaps can't clobber."""
+    from collections import defaultdict
+
+    pv = bulk_rename_preview(paths, parts, separator, registry, config)["results"]
+    results = []
+    by_folder = defaultdict(list)
+    for r in pv:
+        if r["status"] == "rename":
+            by_folder[str(Path(r["path"]).parent)].append(r)
+        else:
+            results.append(r)
+
+    for folder, rs in by_folder.items():
+        folder = Path(folder)
+        staged = []
+        for idx, r in enumerate(rs):
+            src = Path(r["path"])
+            tmp = folder / f".okgentmp_{idx}_{r['new']}"
+            try:
+                src.rename(tmp)
+                staged.append((tmp, folder / r["new"], r))
+            except OSError as exc:
+                results.append({**r, "status": "error", "error": str(exc)})
+        for tmp, final, r in staged:
+            try:
+                tmp.rename(final)
+                results.append({**r, "status": "renamed"})
+            except OSError as exc:
+                results.append({**r, "status": "error", "error": str(exc)})
+    return {"results": results}
+
+
+# --------------------------------------------------------------------------- #
 # Folder operations
 # --------------------------------------------------------------------------- #
 _BAD_NAME_CHARS = set('\\/:*?"<>|')

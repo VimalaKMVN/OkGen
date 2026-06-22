@@ -266,9 +266,22 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .bulk-table th, .bulk-table td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
 .bulk-table th { background: var(--bg-alt); color: var(--text-dim); position: sticky; top: 0; }
 .bulk-table .mono { font-family: ui-monospace, Menlo, Consolas, monospace; white-space: pre; }
-.bulk-table tr.st-change td, .bulk-table tr.st-changed td { color: var(--ok); }
+.bulk-table tr.st-change td, .bulk-table tr.st-changed td,
+.bulk-table tr.st-rename td, .bulk-table tr.st-renamed td { color: var(--ok); }
 .bulk-table tr.st-too_wide td, .bulk-table tr.st-error td { color: var(--err); }
-.bulk-table tr.st-skipped td, .bulk-table tr.st-unchanged td, .bulk-table tr.st-missing td { color: var(--text-dim); }
+.bulk-table tr.st-skipped td, .bulk-table tr.st-unchanged td,
+.bulk-table tr.st-missing td, .bulk-table tr.st-empty td { color: var(--text-dim); }
+
+/* Bulk Rename builder */
+.rn-parts { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.rn-part { display: flex; align-items: center; gap: 6px; }
+.rn-token, .rn-text {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  background: #2d2d2d; color: var(--text);
+  border: 1px solid var(--border); border-radius: 3px; padding: 5px 7px;
+}
+.rn-mini { padding: 3px 9px; }
+.rn-live { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--ok); margin: 6px 0 12px; }
 
 /* Send-to-NiceLabel copy animation overlay */
 .send-overlay {

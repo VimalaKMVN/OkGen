@@ -496,6 +496,192 @@ function renderBulkTable(host, results, applied) {
   table.appendChild(tbody); host.appendChild(table);
 }
 
+// ---- Bulk Rename ----
+async function enterRenameMode() {
+  if (!state.selection.size) return;
+  if (!confirmDiscardIfDirty()) return;
+  state.file = null; state.view = null; state.edits = {};
+  $("#editorTabs").classList.add("hidden");
+  $("#editor").classList.add("hidden");
+  $("#rawView").classList.add("hidden");
+  $("#bulkPanel").classList.add("hidden"); $("#bulkPanel").innerHTML = "";
+  $("#editorEmpty").style.display = "none";
+  $("#fileTitle").textContent = "";
+  updateSaveButtons();
+  const panel = $("#renamePanel");
+  panel.classList.remove("hidden");
+  panel.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Loading…</div>";
+  try {
+    const scope = await postJSON("/api/rename/scope", { paths: [...state.selection] });
+    renderRenamePanel(scope);
+  } catch (e) {
+    panel.innerHTML = ""; setStatus("Rename scope failed: " + e.message, "err");
+  }
+}
+
+function exitRenameMode() {
+  const panel = $("#renamePanel");
+  if (panel.classList.contains("hidden")) return;
+  panel.classList.add("hidden"); panel.innerHTML = "";
+  $("#editor").classList.remove("hidden");
+  if (state.view) { $("#editorTabs").classList.remove("hidden"); $("#editorEmpty").style.display = "none"; }
+  else { $("#editorTabs").classList.add("hidden"); $("#rawView").classList.add("hidden"); $("#editorEmpty").style.display = ""; }
+}
+
+function jsBuildName(parts, sample, sep) {
+  const inv = /[\\/:*?"<>|]/g;
+  const vals = [];
+  (parts || []).forEach((p) => {
+    let v = "";
+    if (p.type === "text") v = String(p.value || "").replace(inv, "");
+    else if (p.name === "seq") v = "0001";
+    else if (p.name === "brand" || p.name === "format_label") v = String(sample[p.name] || "").replace(/ /g, "_").replace(inv, "");
+    else v = String(sample[p.name] || "").replace(inv, "");
+    if (v !== "") vals.push(v);
+  });
+  return vals.join(sep) + ".OK";
+}
+
+function renderRenamePanel(scope) {
+  const panel = $("#renamePanel");
+  panel.innerHTML = "";
+  const head = el("div", "bulk-head");
+  head.appendChild(el("h3", null, `Bulk Rename — ${scope.files.length} file(s)`));
+  const close = el("button", "btn", "✕ Close");
+  close.addEventListener("click", exitRenameMode);
+  head.appendChild(close);
+  panel.appendChild(head);
+  if (!scope.files.length) { panel.appendChild(el("div", "bulk-note", "No files.")); return; }
+
+  const partsBox = el("div", "rn-parts");
+  panel.appendChild(partsBox);
+  const addRow = el("div", "bulk-actions");
+  const addBtn = el("button", "btn", "＋ Add part");
+  addRow.appendChild(addBtn);
+  panel.appendChild(addRow);
+
+  const sepRow = el("div", "bulk-edit-row");
+  sepRow.appendChild(el("span", "bulk-label", "Separator:"));
+  const sepSel = el("select", "bulk-field");
+  [["_", "_ underscore"], ["-", "- dash"], [".", ". dot"], ["", "(none)"], ["__custom__", "custom…"]]
+    .forEach(([v, t]) => sepSel.appendChild(new Option(t, v)));
+  const sepCustom = el("input", "bulk-value"); sepCustom.style.width = "60px"; sepCustom.placeholder = "sep"; sepCustom.classList.add("hidden");
+  sepSel.addEventListener("change", () => { sepCustom.classList.toggle("hidden", sepSel.value !== "__custom__"); updateLive(); });
+  sepCustom.addEventListener("input", updateLive);
+  sepRow.appendChild(sepSel); sepRow.appendChild(sepCustom);
+  panel.appendChild(sepRow);
+
+  const live = el("div", "rn-live");
+  panel.appendChild(live);
+
+  const actions = el("div", "bulk-actions");
+  const previewBtn = el("button", "btn", "Preview");
+  const applyBtn = el("button", "btn btn-primary", "Apply"); applyBtn.disabled = true;
+  actions.appendChild(previewBtn); actions.appendChild(applyBtn);
+  panel.appendChild(actions);
+  const previewBox = el("div", "bulk-preview");
+  const resultsBox = el("div", "bulk-results");
+  panel.appendChild(previewBox); panel.appendChild(resultsBox);
+
+  const sep = () => (sepSel.value === "__custom__" ? sepCustom.value : sepSel.value);
+
+  function tokenSelect() {
+    const sel = el("select", "rn-token");
+    const grp = (label, names) => {
+      if (!names || !names.length) return;
+      const g = document.createElement("optgroup"); g.label = label;
+      names.forEach((n) => g.appendChild(new Option(n, n)));
+      sel.appendChild(g);
+    };
+    grp("Custom", Object.keys(scope.palette.custom || {}));
+    grp("Derived", scope.palette.derived || []);
+    grp("Header fields", scope.palette.header_fields || []);
+    const og = document.createElement("optgroup"); og.label = "Other";
+    og.appendChild(new Option("— custom text —", "__text__")); sel.appendChild(og);
+    return sel;
+  }
+  function addPartRow() {
+    const row = el("div", "rn-part");
+    const sel = tokenSelect();
+    const txt = el("input", "rn-text"); txt.type = "text"; txt.placeholder = "text"; txt.classList.add("hidden");
+    const up = el("button", "btn rn-mini", "↑"), down = el("button", "btn rn-mini", "↓"), del = el("button", "btn rn-mini", "✕");
+    sel.addEventListener("change", () => { txt.classList.toggle("hidden", sel.value !== "__text__"); updateLive(); });
+    txt.addEventListener("input", updateLive);
+    up.addEventListener("click", () => { const p = row.previousElementSibling; if (p) partsBox.insertBefore(row, p); updateLive(); });
+    down.addEventListener("click", () => { const n = row.nextElementSibling; if (n) partsBox.insertBefore(n, row); updateLive(); });
+    del.addEventListener("click", () => { row.remove(); updateLive(); });
+    row.append(sel, txt, up, down, del);
+    partsBox.appendChild(row);
+    updateLive();
+  }
+  function buildParts() {
+    return [...partsBox.querySelectorAll(".rn-part")].map((row) => {
+      const sel = row.querySelector(".rn-token");
+      if (sel.value === "__text__") return { type: "text", value: row.querySelector(".rn-text").value };
+      return { type: "token", name: sel.value };
+    });
+  }
+  function updateLive() {
+    const parts = buildParts();
+    live.textContent = parts.length ? "Example (file 1):  " + jsBuildName(parts, scope.sample, sep()) : "Add parts to build a name…";
+    previewBox.innerHTML = ""; resultsBox.innerHTML = ""; applyBtn.disabled = true;
+  }
+  addBtn.addEventListener("click", addPartRow);
+
+  async function run(url, box, applied) {
+    if (!beginBusy(applied ? "Renaming…" : "Previewing…")) { setStatus("Please wait — an operation is already running…", "dirty"); return null; }
+    previewBtn.disabled = true; applyBtn.disabled = true;
+    box.innerHTML = `<div class='bulk-loading'><span class='spinner'></span> ${applied ? "Renaming" : "Previewing"}…</div>`;
+    try {
+      return await postJSON(url, { paths: scope.files.map((x) => x.path), parts: buildParts(), separator: sep() });
+    } catch (e) {
+      box.innerHTML = ""; setStatus((applied ? "Rename" : "Preview") + " failed: " + e.message, "err"); return null;
+    } finally {
+      state.busy = false; previewBtn.disabled = false;
+    }
+  }
+  previewBtn.addEventListener("click", async () => {
+    resultsBox.innerHTML = "";
+    const res = await run("/api/rename/preview", previewBox, false);
+    if (!res) return;
+    renderRenameTable(previewBox, res.results, false);
+    applyBtn.disabled = !res.results.some((r) => r.status === "rename");
+  });
+  applyBtn.addEventListener("click", async () => {
+    if (!confirm(`Rename ${scope.files.length} file(s)?`)) return;
+    const res = await run("/api/rename/apply", resultsBox, true);
+    if (!res) return;
+    renderRenameTable(resultsBox, res.results, true);
+    new Set(scope.files.map((x) => folderOf(x.path))).forEach((fp) => refreshFolder(fp));
+    setSelection([]);
+    setStatus(`Renamed ${res.results.filter((r) => r.status === "renamed").length} file(s)`, "ok");
+    applyBtn.disabled = true;
+  });
+
+  addPartRow();
+}
+
+function renderRenameTable(host, results, applied) {
+  host.innerHTML = "";
+  const counts = {};
+  results.forEach((r) => { counts[r.status] = (counts[r.status] || 0) + 1; });
+  host.appendChild(el("div", "bulk-summary", (applied ? "Results:  " : "Preview:  ") +
+    Object.entries(counts).map(([k, v]) => `${v} ${k}`).join("  ·  ")));
+  const table = el("table", "bulk-table");
+  const thead = el("thead"); const htr = el("tr");
+  ["Old name", "New name", "Status"].forEach((h) => htr.appendChild(el("th", null, h)));
+  thead.appendChild(htr); table.appendChild(thead);
+  const tbody = el("tbody");
+  results.forEach((r) => {
+    const tr = el("tr", "st-" + r.status);
+    tr.appendChild(el("td", "mono", r.old || ""));
+    tr.appendChild(el("td", "mono", r.new || ""));
+    tr.appendChild(el("td", null, r.status + (r.error ? `: ${r.error}` : "")));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody); host.appendChild(table);
+}
+
 async function toggleFolder(li, node, childUl) {
   setSelection([]);   // clicking a folder clears any file multi-selection (and closes bulk)
   const willOpen = !li.classList.contains("open");
@@ -872,6 +1058,7 @@ function showCtxMenu(e, node, row) {
   menu.appendChild(el("div", "ctx-sep"));
   add(count > 1 ? `Send ${count} files to NiceLabel` : "Send to NiceLabel", () => sendToNiceLabel());
   menu.appendChild(el("div", "ctx-sep"));
+  add(count > 1 ? `Bulk Rename ${count} files…` : "Bulk Rename…", () => enterRenameMode());
   add("Rename…", () => renameFile(node), count > 1);
   add(count > 1 ? `Delete ${count} files` : "Delete",
       () => (count > 1 ? deleteSelection() : deleteFile(node)));

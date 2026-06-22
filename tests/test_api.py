@@ -384,6 +384,55 @@ def test_paste_folder_into_itself_rejected(tmp_path):
     assert res["errors"] and "itself" in res["errors"][0]["error"]
 
 
+def test_rename_scope_palette(tmp_path, registry, config):
+    f = tmp_path / "x.OK"; shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    sc = service.rename_scope([str(f)], registry, config)
+    assert sc["files"][0]["layout"] == "StyleHeader"
+    assert "brand" in sc["palette"]["derived"]
+    assert "keytrol" in sc["palette"]["header_fields"]
+    assert sc["palette"]["custom"] == {"FMT": "FMT"}     # from fixture rename_tokens
+    assert sc["sample"]["brand"] == "Homegoods"
+    assert sc["sample"]["keytrol"] == "550000"
+
+
+def test_rename_preview_and_apply(tmp_path, registry, config):
+    f = tmp_path / "orig.OK"; shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    parts = [
+        {"type": "token", "name": "FMT"},        # custom -> "FMT"
+        {"type": "token", "name": "brand"},      # Homegoods
+        {"type": "token", "name": "key"},        # 550000
+    ]
+    pv = service.bulk_rename_preview([str(f)], parts, "_", registry, config)
+    assert pv["results"][0]["new"] == "FMT_Homegoods_550000.OK"
+    assert f.exists()                            # preview wrote nothing
+
+    ap = service.bulk_rename_apply([str(f)], parts, "_", registry, config)
+    assert ap["results"][0]["status"] == "renamed"
+    assert (tmp_path / "FMT_Homegoods_550000.OK").exists()
+    assert not f.exists()
+
+
+def test_rename_collision_counter(tmp_path, registry, config):
+    a = tmp_path / "a.OK"; b = tmp_path / "b.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", a)   # both same brand+layout
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", b)
+    parts = [{"type": "token", "name": "brand"}, {"type": "token", "name": "layout"}]
+    ap = service.bulk_rename_apply([str(a), str(b)], parts, "_", registry, config)
+    names = sorted(p.name for p in tmp_path.iterdir())
+    assert names == ["Homegoods_StyleHeader.OK", "Homegoods_StyleHeader_001.OK"]
+
+
+def test_rename_text_and_swap(tmp_path, registry, config):
+    # Two-phase swap: a->b, b->a must not clobber.
+    a = tmp_path / "a.OK"; b = tmp_path / "b.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", a)
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", b)
+    # rename using orig + literal text
+    parts = [{"type": "token", "name": "orig"}, {"type": "text", "value": "_v2"}]
+    ap = service.bulk_rename_apply([str(a), str(b)], parts, "", registry, config)
+    assert (tmp_path / "a_v2.OK").exists() and (tmp_path / "b_v2.OK").exists()
+
+
 def test_send_to_nicelabel(tmp_path):
     from okgen.config import Config
     dest = tmp_path / "incoming"; dest.mkdir()

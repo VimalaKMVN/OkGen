@@ -1,0 +1,20 @@
+# Fixed rename-token palette for tests.
+rename_tokens:
+  custom:
+    FMT: "FMT"
+  derived:
+    - brand
+    - format_label
+    - layout
+    - key
+    - seq
+    - orig
+  header_fields:
+    - chain
+    - format
+    - type
+    - keytrol
+    - po
+    - picklist_id
+    - size_rec
+    - lane_rec

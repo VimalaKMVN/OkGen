@@ -130,6 +130,23 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(service.delete_files(body.get("paths", [])))
 
+    @app.post("/api/rename/scope")
+    def rename_scope():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.rename_scope(body.get("paths", []), registry, config))
+
+    @app.post("/api/rename/preview")
+    def rename_preview():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_rename_preview(
+            body.get("paths", []), body.get("parts", []), body.get("separator", "_"), registry, config))
+
+    @app.post("/api/rename/apply")
+    def rename_apply():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_rename_apply(
+            body.get("paths", []), body.get("parts", []), body.get("separator", "_"), registry, config))
+
     @app.post("/api/send")
     def send():
         body = request.get_json(force=True, silent=True) or {}
