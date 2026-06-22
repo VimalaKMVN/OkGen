@@ -250,6 +250,13 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
   padding: 1px 6px;
 }
 .row-del:hover { background: #5a2222; border-color: var(--err); }
+.row-move {
+  background: transparent; color: var(--text-dim);
+  border: 1px solid transparent; border-radius: 3px;
+  cursor: pointer; padding: 1px 6px; margin-right: 2px;
+}
+.row-move:hover:not(:disabled) { background: var(--row-hover); color: var(--text); border-color: var(--border); }
+.row-move:disabled { opacity: 0.25; cursor: default; }
 
 /* Bulk edit panel */
 .bulk { padding: 4px 2px 30px; }

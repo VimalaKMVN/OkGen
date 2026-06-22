@@ -579,6 +579,33 @@ def test_delete_record(tmp_path, registry, config):
     assert view["roundtrip_ok"]
 
 
+def test_move_record_reorders(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    before = service.parse_file_view(f, registry, config)
+    lane = next(s for s in before["sections"] if s["name"] == "Lane")
+    first, second = lane["records"][0], lane["records"][1]
+    v0, v1 = first["values"]["lane1"], second["values"]["lane1"]
+
+    # Move the first lane down -> the first two swap.
+    view = service.move_record(f, first["index"], "down", [], registry, config, backup=False)
+    lane2 = next(s for s in view["sections"] if s["name"] == "Lane")
+    assert lane2["records"][0]["values"]["lane1"] == v1
+    assert lane2["records"][1]["values"]["lane1"] == v0
+    assert view["roundtrip_ok"]
+
+
+def test_move_record_edge_and_header(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    view = service.parse_file_view(f, registry, config)
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+    with pytest.raises(service.EditError):                  # first row can't go up
+        service.move_record(f, lane["records"][0]["index"], "up", [], registry, config, backup=False)
+    with pytest.raises(service.EditError):                  # header can't move
+        service.move_record(f, 0, "down", [], registry, config, backup=False)
+
+
 def test_delete_header_rejected(tmp_path, registry, config):
     src = DATA_DIR / "CartonLabel.OK"
     work = tmp_path / "CartonLabel.OK"

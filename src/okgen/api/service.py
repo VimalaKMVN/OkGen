@@ -329,6 +329,36 @@ def delete_record(
     return parse_file_view(src, registry, config)
 
 
+def move_record(path, record_index, direction, edits, registry, config, backup=True) -> dict:
+    """Apply pending edits, move one record up/down within its section, save.
+
+    Reordering stays inside the record's own section (it can't jump into the
+    header or another section). The header record can't be moved.
+    """
+    src = Path(path)
+    okf = parse_okfile(src, registry=registry)
+    _apply_edits_to_okf(okf, edits)
+    recs = okf.records
+    idx = next((i for i, r in enumerate(recs) if r.index == record_index), None)
+    if idx is None:
+        raise EditError(f"record_index {record_index} not found")
+    target = recs[idx]
+    if target.index == 0:
+        raise EditError("the header record cannot be moved")
+    if direction == "up":
+        j = idx - 1
+    elif direction == "down":
+        j = idx + 1
+    else:
+        raise EditError(f"invalid direction '{direction}'")
+    if j < 0 or j >= len(recs) or recs[j].section is not target.section:
+        raise EditError("row is already at the edge of its section")
+    recs[idx], recs[j] = recs[j], recs[idx]
+    _normalize_eols(okf)
+    _backup_and_save(okf, src, backup)
+    return parse_file_view(src, registry, config)
+
+
 def _backup_and_save(okf, out: Path, backup: bool) -> None:
     if backup and out.exists():
         shutil.copy2(out, out.with_suffix(out.suffix + ".bak"))

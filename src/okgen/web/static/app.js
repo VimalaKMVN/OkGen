@@ -1059,11 +1059,12 @@ function renderTable(sec) {
   const htr = el("tr");
   htr.appendChild(el("th", null, "#"));
   sec.fields.forEach((f) => htr.appendChild(el("th", null, `${f.name} (${f.size != null ? f.size : "?"})`)));
-  htr.appendChild(el("th", null, ""));   // delete column
+  htr.appendChild(el("th", null, ""));   // row actions column
   thead.appendChild(htr);
   table.appendChild(thead);
   const tbody = el("tbody");
-  sec.records.forEach((rec) => {
+  const n = sec.records.length;
+  sec.records.forEach((rec, i) => {
     const tr = el("tr");
     const num = el("td"); num.appendChild(el("span", "rownum", String(rec.index))); tr.appendChild(num);
     sec.fields.forEach((field) => {
@@ -1071,17 +1072,43 @@ function renderTable(sec) {
       td.appendChild(makeControl(sec, rec, field));
       tr.appendChild(td);
     });
-    const delTd = el("td", "del-cell");
+    const actTd = el("td", "del-cell");
+    const up = el("button", "row-move", "↑"); up.title = "Move up"; up.disabled = i === 0;
+    up.addEventListener("click", () => moveRow(rec.index, "up"));
+    const down = el("button", "row-move", "↓"); down.title = "Move down"; down.disabled = i === n - 1;
+    down.addEventListener("click", () => moveRow(rec.index, "down"));
     const delBtn = el("button", "row-del", "✕");
     delBtn.title = "Delete this row";
     delBtn.addEventListener("click", () => deleteRow(rec.index));
-    delTd.appendChild(delBtn);
-    tr.appendChild(delTd);
+    actTd.append(up, down, delBtn);
+    tr.appendChild(actTd);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
   box.appendChild(table);
   return box;
+}
+
+async function moveRow(recordIndex, direction) {
+  if (!state.file) return;
+  if (!beginBusy(direction === "up" ? "Moving row up…" : "Moving row down…")) {
+    setStatus("Please wait — an operation is already running…", "dirty"); return;
+  }
+  try {
+    const view = await postJSON("/api/record/move", {
+      path: state.file, record_index: recordIndex, direction, edits: collectEdits(),
+    });
+    state.view = view;
+    state.edits = {};
+    renderEditor(view);
+    updateSaveButtons();
+    updateDirtyIndicator();
+    setStatus("Row moved (saved)", "ok");
+  } catch (e) {
+    setStatus("Move failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
 }
 
 async function deleteRow(recordIndex) {
