@@ -124,7 +124,7 @@ body {
 .raw-inner { display: flex; align-items: flex-start; width: max-content; min-width: 100%; }
 .raw-gutter {
   margin: 0; padding: 10px 8px; text-align: right;
-  color: var(--text-dim); background: var(--bg-pane);
+  color: #e0a44a; background: var(--bg-pane);   /* same amber as the ruler */
   border-right: 1px solid var(--border);
   position: sticky; left: 0; z-index: 1;
   white-space: pre; user-select: none;
