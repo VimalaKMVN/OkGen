@@ -204,6 +204,7 @@ function renderFileNode(node) {
 
 // ---- multi-select ----
 function onFileClick(e, node, row) {
+  if (isRenameOpen()) exitRenameMode();    // clicking into the tree closes Bulk Rename
   if (e.metaKey || e.ctrlKey) {            // toggle this file in the selection
     e.preventDefault();
     if (state.selection.has(node.path)) state.selection.delete(node.path);
@@ -252,6 +253,9 @@ function updateSelectionUI() {
 
 function isBulkOpen() {
   return !$("#bulkPanel").classList.contains("hidden");
+}
+function isRenameOpen() {
+  return !$("#renamePanel").classList.contains("hidden");
 }
 
 // ---- bulk edit (B1: Header field, one layout, set value) ----
@@ -591,39 +595,23 @@ function renderRenamePanel(scope) {
   panel.appendChild(head);
   if (!scope.files.length) { panel.appendChild(el("div", "bulk-note", "No files.")); return; }
 
-  // Preset chooser — fills all the parts at once.
-  if ((scope.presets || []).length) {
-    const presetRow = el("div", "bulk-edit-row");
-    presetRow.appendChild(el("span", "bulk-label", "Preset:"));
-    const presetSel = el("select", "bulk-field");
-    presetSel.appendChild(new Option("— choose a preset —", ""));
-    scope.presets.forEach((p, i) => presetSel.appendChild(new Option(p.name, String(i))));
-    presetSel.addEventListener("change", () => {
-      if (presetSel.value === "") return;
-      applyPreset(scope.presets[Number(presetSel.value)]);
-    });
-    presetRow.appendChild(presetSel);
-    panel.appendChild(presetRow);
-  }
+  const hasPresets = (scope.presets || []).length > 0;
 
-  const partsBox = el("div", "rn-parts");
-  panel.appendChild(partsBox);
-  const addRow = el("div", "bulk-actions");
-  const addBtn = el("button", "btn", "＋ Add part");
-  addRow.appendChild(addBtn);
-  panel.appendChild(addRow);
+  // 1) Choose a pattern (the main path for most users)
+  const presetRow = el("div", "bulk-edit-row");
+  presetRow.appendChild(el("span", "bulk-label", "Choose a pattern:"));
+  const presetSel = el("select", "bulk-field");
+  presetSel.appendChild(new Option(hasPresets ? "— choose a pattern —" : "— no saved patterns —", ""));
+  (scope.presets || []).forEach((p, i) => presetSel.appendChild(new Option(p.name, String(i))));
+  presetSel.disabled = !hasPresets;
+  presetSel.addEventListener("change", () => {
+    if (presetSel.value === "") return;
+    applyPreset(scope.presets[Number(presetSel.value)]);
+  });
+  presetRow.appendChild(presetSel);
+  panel.appendChild(presetRow);
 
-  const sepRow = el("div", "bulk-edit-row");
-  sepRow.appendChild(el("span", "bulk-label", "Separator:"));
-  const sepSel = el("select", "bulk-field");
-  [["_", "_ underscore"], ["-", "- dash"], [".", ". dot"], ["", "(none)"], ["__custom__", "custom…"]]
-    .forEach(([v, t]) => sepSel.appendChild(new Option(t, v)));
-  const sepCustom = el("input", "bulk-value"); sepCustom.style.width = "60px"; sepCustom.placeholder = "sep"; sepCustom.classList.add("hidden");
-  sepSel.addEventListener("change", () => { sepCustom.classList.toggle("hidden", sepSel.value !== "__custom__"); updateLive(); });
-  sepCustom.addEventListener("input", updateLive);
-  sepRow.appendChild(sepSel); sepRow.appendChild(sepCustom);
-  panel.appendChild(sepRow);
-
+  // 2) Live example + Preview/Apply — what casual users actually use
   const live = el("div", "rn-live");
   panel.appendChild(live);
 
@@ -635,6 +623,34 @@ function renderRenamePanel(scope) {
   const previewBox = el("div", "bulk-preview");
   const resultsBox = el("div", "bulk-results");
   panel.appendChild(previewBox); panel.appendChild(resultsBox);
+
+  // 3) Advanced — the parts builder, tucked away (collapsed by default)
+  const advToggle = el("button", "rn-adv-toggle", "▸ Customize parts (advanced)");
+  panel.appendChild(advToggle);
+  const adv = el("div", "rn-advanced hidden");
+  panel.appendChild(adv);
+  advToggle.addEventListener("click", () => {
+    const hidden = adv.classList.toggle("hidden");
+    advToggle.textContent = (hidden ? "▸" : "▾") + " Customize parts (advanced)";
+  });
+
+  const sepRow = el("div", "bulk-edit-row");
+  sepRow.appendChild(el("span", "bulk-label", "Separator:"));
+  const sepSel = el("select", "bulk-field");
+  [["_", "_ underscore"], ["-", "- dash"], [".", ". dot"], ["", "(none)"], ["__custom__", "custom…"]]
+    .forEach(([v, t]) => sepSel.appendChild(new Option(t, v)));
+  const sepCustom = el("input", "bulk-value"); sepCustom.style.width = "60px"; sepCustom.placeholder = "sep"; sepCustom.classList.add("hidden");
+  sepSel.addEventListener("change", () => { sepCustom.classList.toggle("hidden", sepSel.value !== "__custom__"); updateLive(); });
+  sepCustom.addEventListener("input", updateLive);
+  sepRow.appendChild(sepSel); sepRow.appendChild(sepCustom);
+  adv.appendChild(sepRow);
+
+  const partsBox = el("div", "rn-parts");
+  adv.appendChild(partsBox);
+  const addRow = el("div", "bulk-actions");
+  const addBtn = el("button", "btn", "＋ Add part");
+  addRow.appendChild(addBtn);
+  adv.appendChild(addRow);
 
   const sep = () => (sepSel.value === "__custom__" ? sepCustom.value : sepSel.value);
 
@@ -705,10 +721,18 @@ function renderRenamePanel(scope) {
   }
   function updateLive() {
     const parts = buildParts();
-    live.textContent = parts.length ? "Example (file 1):  " + jsBuildName(parts, scope.sample, sep()) : "Add parts to build a name…";
+    if (!parts.length) {
+      live.textContent = hasPresets
+        ? "Choose a pattern above — or expand “Customize parts” to build one."
+        : "Expand “Customize parts” and add parts to build a name.";
+      previewBtn.disabled = true;
+    } else {
+      live.textContent = "Example (file 1):  " + jsBuildName(parts, scope.sample, sep());
+      previewBtn.disabled = false;
+    }
     previewBox.innerHTML = ""; resultsBox.innerHTML = ""; applyBtn.disabled = true;
   }
-  addBtn.addEventListener("click", addPartRow);
+  addBtn.addEventListener("click", () => addPartRow());
 
   async function run(url, box, applied) {
     if (!beginBusy(applied ? "Renaming…" : "Previewing…")) { setStatus("Please wait — an operation is already running…", "dirty"); return null; }
@@ -740,7 +764,14 @@ function renderRenamePanel(scope) {
     applyBtn.disabled = true;
   });
 
-  addPartRow();
+  // No saved patterns? open the builder so they can start. Otherwise keep it
+  // tucked away — most users just pick a pattern, review, preview, apply.
+  if (!hasPresets) {
+    adv.classList.remove("hidden");
+    advToggle.textContent = "▾ Customize parts (advanced)";
+    addPartRow();
+  }
+  updateLive();
 }
 
 function renderRenameTable(host, results, applied) {
@@ -765,6 +796,7 @@ function renderRenameTable(host, results, applied) {
 }
 
 async function toggleFolder(li, node, childUl) {
+  if (isRenameOpen()) exitRenameMode();   // clicking a folder closes Bulk Rename too
   setSelection([]);   // clicking a folder clears any file multi-selection (and closes bulk)
   const willOpen = !li.classList.contains("open");
   li.classList.toggle("open");

@@ -288,6 +288,13 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 }
 .rn-mini { padding: 3px 9px; }
 .rn-live { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--ok); margin: 6px 0 12px; }
+.rn-adv-toggle {
+  background: transparent; border: none; color: var(--text-dim);
+  cursor: pointer; padding: 6px 0; font-size: 12px; margin-top: 14px;
+}
+.rn-adv-toggle:hover { color: var(--text); }
+.rn-advanced { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 12px; }
+.rn-advanced.hidden { display: none; }
 
 /* Prominent activity indicator (center-top): spinner while working, then result */
 #activity {
