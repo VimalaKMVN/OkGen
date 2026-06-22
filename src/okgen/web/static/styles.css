@@ -283,6 +283,24 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .rn-mini { padding: 3px 9px; }
 .rn-live { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--ok); margin: 6px 0 12px; }
 
+/* Prominent activity indicator (center-top): spinner while working, then result */
+#activity {
+  position: fixed; top: 56px; left: 50%; transform: translateX(-50%);
+  z-index: 90; display: flex; align-items: center; gap: 10px;
+  background: var(--bg-alt); border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 6px; padding: 10px 18px; max-width: 72vw;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  font-size: 13px; color: var(--text); pointer-events: none;
+}
+#activity.hidden { display: none; }
+#activity.act-ok { border-left-color: var(--ok); }
+#activity.act-err { border-left-color: var(--err); }
+#activity .act-icon { font-size: 16px; font-weight: 700; }
+#activity.act-ok .act-icon { color: var(--ok); }
+#activity.act-err .act-icon { color: var(--err); }
+#activity .act-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* Send-to-NiceLabel copy animation overlay */
 .send-overlay {
   position: fixed; inset: 0; z-index: 100;

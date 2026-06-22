@@ -12,6 +12,8 @@ const state = {
   selection: new Set(),// multi-selected file paths (for bulk copy / future bulk edit)
   selAnchor: null,     // last plainly-clicked file, for Shift-range select
   busy: false,         // guards slow file ops (make-unique) from double-runs
+  activityTimer: null, // auto-hide timer for the activity indicator
+  activityResult: false, // a result is showing — don't let a follow-up status clobber it
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -40,7 +42,40 @@ function setStatus(msg, kind) {
   const s = $("#status");
   s.textContent = msg || "";
   s.className = "status" + (kind ? " " + kind : "");
+  // Mirror into the prominent activity indicator while it's on screen.
+  const a = $("#activity");
+  if (a && !a.classList.contains("hidden")) {
+    if (state.activityResult) return;   // keep the operation's result; don't clobber it
+    if (kind === "ok" || kind === "err") activityResult(msg, kind);
+    else activityWorking(msg);
+  }
 }
+
+// ---- prominent activity indicator (center-top) ----
+function showActivity(msg) {
+  const a = $("#activity");
+  clearTimeout(state.activityTimer);
+  state.activityResult = false;
+  a.className = "act-working";
+  a.innerHTML = '<span class="spinner"></span><span class="act-msg"></span>';
+  a.querySelector(".act-msg").textContent = msg || "Working…";
+  a.classList.remove("hidden");
+}
+function activityWorking(msg) {
+  const m = $("#activity .act-msg");
+  if (m) m.textContent = msg;
+}
+function activityResult(msg, kind) {
+  const a = $("#activity");
+  state.activityResult = true;
+  a.className = kind === "err" ? "act-err" : "act-ok";
+  a.innerHTML = `<span class="act-icon">${kind === "err" ? "✗" : "✓"}</span><span class="act-msg"></span>`;
+  a.querySelector(".act-msg").textContent = msg;
+  a.classList.remove("hidden");
+  clearTimeout(state.activityTimer);
+  state.activityTimer = setTimeout(() => { $("#activity").classList.add("hidden"); state.activityResult = false; }, 2800);
+}
+function hideActivity() { $("#activity").classList.add("hidden"); }
 
 // ---- dirty state ----
 function isDirty() { return Object.keys(state.edits).length > 0; }
@@ -917,6 +952,7 @@ function renderSection(sec) {
 
 async function addRow(sectionIndex) {
   if (!state.file) return;
+  if (!beginBusy("Adding row…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
     const view = await postJSON("/api/record/add", {
       path: state.file,
@@ -931,6 +967,8 @@ async function addRow(sectionIndex) {
     setStatus("Row added — copied from last row (saved)", "ok");
   } catch (e) {
     setStatus("Add failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
   }
 }
 
@@ -1017,6 +1055,7 @@ function renderTable(sec) {
 async function deleteRow(recordIndex) {
   if (!state.file) return;
   if (!confirm("Delete this row?")) return;
+  if (!beginBusy("Deleting row…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
     const view = await postJSON("/api/record/delete", {
       path: state.file,
@@ -1031,6 +1070,8 @@ async function deleteRow(recordIndex) {
     setStatus("Row deleted (saved)", "ok");
   } catch (e) {
     setStatus("Delete failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
   }
 }
 
@@ -1065,6 +1106,7 @@ function collectEdits() {
 
 async function save(targetPath) {
   if (!state.file) return;
+  if (!beginBusy("Saving…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   const edits = collectEdits();
   try {
     const res = await postJSON("/api/save", {
@@ -1080,6 +1122,8 @@ async function save(targetPath) {
     await loadFile(openPath);
   } catch (e) {
     setStatus("Save failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
   }
 }
 
@@ -1150,10 +1194,11 @@ function showFolderCtxMenu(e, node) {
   menu.classList.remove("hidden");
 }
 
-function beginBusy(message) {
+function beginBusy(message, overlay = true) {
   if (state.busy) return false;
   state.busy = true;
-  setStatus(message, "dirty");   // immediate feedback before the (possibly slow) call
+  if (overlay) showActivity(message);   // prominent spinner up front
+  setStatus(message, "dirty");          // (also the small top-right status)
   return true;
 }
 
@@ -1201,7 +1246,8 @@ async function sendToNiceLabel() {
   if (!paths.length) return;
   const dest = window.OKGEN_NICELABEL || "the NiceLabel folder";
   if (!confirm(`Send ${paths.length} file(s) to NiceLabel?\n\n${dest}`)) return;
-  if (!beginBusy("Sending to NiceLabel…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+  // overlay:false — Send has its own copy animation; don't stack the generic one.
+  if (!beginBusy("Sending to NiceLabel…", false)) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
 
   showCopyAnimation(paths.length, dest);
   const minOnScreen = delay(2000);   // keep the animation up long enough to register
