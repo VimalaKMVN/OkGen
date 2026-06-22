@@ -1,0 +1,81 @@
+# Tokens offered in the Bulk Rename builder. Remove any line you don't want to
+# appear as an option (to cut noise). A header-field token only shows when it
+# exists in the selected files' layout(s).
+#
+# If this whole file is deleted, ALL tokens are shown.
+#
+# Everything is included below — trim to taste.
+rename_tokens:
+  # ---- derived (computed) tokens ----
+  - brand          # chain name from chains.yaml (e.g. Homegoods)
+  - format_label   # friendly format from display.yaml (e.g. Regular Tag)
+  - layout         # CartonLabel / DistLabels / Preticket / StyleHeader
+  - key            # the layout's unique key value (keytrol / po / picklist_id)
+  - seq            # running counter 0001, 0002, ...
+  - orig           # the file's current name (handy for second-pass renames)
+
+  # ---- header fields (raw values; union across all layouts) ----
+  - chain
+  - format
+  - indicator
+  - keytrol
+  - po
+  - picklist_pre
+  - picklist_id
+  - picklist_seq
+  - suffix
+  - hsuffix
+  - seq_code
+  - pack_id
+  - dept
+  - category
+  - style
+  - type
+  - psi
+  - date
+  - time
+  - distro_date
+  - ad_date
+  - ladder_mmdd
+  - num_packs
+  - num_stores
+  - store_lines
+  - t_lines
+  - line_count
+  - block_num
+  - num_block
+  - lane_rec
+  - size_rec
+  - pieces
+  - packsize
+  - pack_type
+  - distro_type
+  - aisle
+  - slot
+  - tier
+  - locator
+  - area
+  - house
+  - housenum
+  - coord
+  - nested
+  - partial
+  - suppress
+  - markdown
+  - add
+  - version
+  - instructions
+  - ven_style
+  - desc
+  - price
+  - ret_price
+  - comp_price
+  - comp_up
+  - tot_qty
+  - tot_ret
+  - message1
+  - message2
+  - item
+  - fact1
+  - fact2
+  - fact3

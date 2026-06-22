@@ -65,6 +65,7 @@ class Config:
         field_colors: Optional[Dict[str, str]] = None,
         section_counts: Optional[Dict[str, Dict[str, str]]] = None,
         nicelabel_path: Optional[str] = None,
+        rename_tokens: Optional[List[str]] = None,
     ):
         self._chains = chains
         self._rules = rules
@@ -73,6 +74,7 @@ class Config:
         self._field_colors = field_colors or {}
         self._section_counts = section_counts or {}
         self._nicelabel_path = nicelabel_path
+        self._rename_tokens = rename_tokens   # None = show all
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -145,6 +147,11 @@ class Config:
     # ----- NiceLabel destination -----
     def nicelabel_path(self) -> Optional[str]:
         return self._nicelabel_path
+
+    # ----- bulk-rename token inclusion list -----
+    def rename_tokens(self) -> Optional[List[str]]:
+        """Allowed bulk-rename tokens, or None to allow all."""
+        return list(self._rename_tokens) if self._rename_tokens is not None else None
 
     # ----- unique key field -----
     def unique_field(self, layout: Optional[str]) -> Optional[str]:
@@ -230,5 +237,13 @@ class Config:
             data = yaml.safe_load(nl_path.read_text(encoding="utf-8")) or {}
             nicelabel_path = data.get("nicelabel_path") or None
 
+        rename_tokens = None
+        rt_path = cdir / "rename_tokens.yaml"
+        if rt_path.is_file():
+            data = yaml.safe_load(rt_path.read_text(encoding="utf-8")) or {}
+            toks = data.get("rename_tokens")
+            if toks is not None:
+                rename_tokens = [str(t) for t in toks]
+
         return cls(chains, rules, limits, unique_fields, field_colors,
-                   section_counts, nicelabel_path)
+                   section_counts, nicelabel_path, rename_tokens)
