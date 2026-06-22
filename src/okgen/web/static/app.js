@@ -1297,14 +1297,65 @@ async function makeUniqueSelection() {
 // ---- Send to NiceLabel ----
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Custom confirm modal for Send: yellow warning + a guard checkbox that must
+// be ticked before the Send button enables. Resolves true (send) / false.
+function confirmSend(count, dest, warn) {
+  return new Promise((resolve) => {
+    const ov = el("div", "modal-overlay");
+    const card = el("div", "modal-card");
+    card.appendChild(el("h3", "modal-title", `Send ${count} file(s) to NiceLabel?`));
+    if (dest) card.appendChild(el("div", "modal-dest", dest));
+
+    if (warn) {
+      const box = el("div", "modal-warn");
+      box.appendChild(el("span", "modal-warn-icon", "⚠"));
+      box.appendChild(el("span", "modal-warn-text", warn));
+      card.appendChild(box);
+    }
+
+    const check = el("label", "modal-check");
+    const cb = el("input");
+    cb.type = "checkbox";
+    check.appendChild(cb);
+    check.appendChild(el("span", null, "I've confirmed the correct NiceLabel trigger(s) are running."));
+    card.appendChild(check);
+
+    const acts = el("div", "modal-actions");
+    const cancel = el("button", "btn", "Cancel");
+    const send = el("button", "btn btn-primary", "Send");
+    send.disabled = true;
+    acts.appendChild(cancel);
+    acts.appendChild(send);
+    card.appendChild(acts);
+
+    ov.appendChild(card);
+    document.body.appendChild(ov);
+
+    const close = (val) => {
+      document.removeEventListener("keydown", onKey);
+      ov.remove();
+      resolve(val);
+    };
+    const onKey = (e) => {
+      if (e.key === "Escape") close(false);
+      else if (e.key === "Enter" && cb.checked) close(true);
+    };
+
+    cb.addEventListener("change", () => { send.disabled = !cb.checked; });
+    cancel.addEventListener("click", () => close(false));
+    send.addEventListener("click", () => { if (cb.checked) close(true); });
+    ov.addEventListener("click", (e) => { if (e.target === ov) close(false); });
+    document.addEventListener("keydown", onKey);
+    cb.focus();
+  });
+}
+
 async function sendToNiceLabel() {
   const paths = [...state.selection];
   if (!paths.length) return;
   const dest = window.OKGEN_NICELABEL || "the NiceLabel folder";
   const warn = window.OKGEN_NICELABEL_WARNING || "";
-  const msg = `Send ${paths.length} file(s) to NiceLabel?\n\n${dest}`
-    + (warn ? `\n\n⚠  ${warn}` : "");
-  if (!confirm(msg)) return;
+  if (!(await confirmSend(paths.length, dest, warn))) return;
   // overlay:false — Send has its own copy animation; don't stack the generic one.
   if (!beginBusy("Sending to NiceLabel…", false)) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
 

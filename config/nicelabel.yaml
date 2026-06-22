@@ -5,4 +5,4 @@ nicelabel_path: "D:\\NiceLabel\\TJX GTA\\Automation\\Incoming"
 
 # Shown in the confirmation dialog before sending. Remind operators to verify
 # the right NiceLabel trigger(s) are running. Edit to name your actual triggers.
-warning: "Make sure the correct NiceLabel trigger(s) are STARTED / turned ON in NiceLabel Automation before sending — otherwise the files will sit unprocessed in the incoming folder."
+warning: "Make sure the correct NiceLabel trigger(s) are STARTED / turned ON in NiceLabel Automation before sending."
