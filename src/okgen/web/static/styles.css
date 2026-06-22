@@ -257,6 +257,13 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 }
 .row-move:hover:not(:disabled) { background: var(--row-hover); color: var(--text); border-color: var(--border); }
 .row-move:disabled { opacity: 0.25; cursor: default; }
+.row-add {
+  background: transparent; color: var(--ok);
+  border: 1px solid transparent; border-radius: 3px;
+  cursor: pointer; padding: 1px 6px; margin-right: 2px;
+}
+.row-add:hover:not(:disabled) { background: #143a30; border-color: var(--ok); }
+.row-add:disabled { opacity: 0.25; cursor: default; }
 
 /* Bulk edit panel */
 .bulk { padding: 4px 2px 30px; }

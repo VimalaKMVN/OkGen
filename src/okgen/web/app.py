@@ -89,13 +89,15 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def record_add():
         body = request.get_json(force=True, silent=True) or {}
         try:
+            si = body.get("section_index")
             return jsonify(service.add_record(
                 body.get("path"),
-                int(body.get("section_index")),
+                None if si is None else int(si),
                 body.get("edits", []),
                 registry,
                 config,
                 backup=body.get("backup", True),
+                after_index=body.get("after_index"),
             ))
         except service.EditError as exc:
             return _err(str(exc), 422)

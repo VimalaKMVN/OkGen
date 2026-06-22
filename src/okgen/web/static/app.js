@@ -960,20 +960,12 @@ function renderSection(sec) {
   const meta = count +
     (sec.ignored_fields && sec.ignored_fields.length ? `  ·  ignored: ${sec.ignored_fields.join(", ")}` : "");
   head.appendChild(el("span", "meta", meta));
-
-  // Add-row button for repeating sections (not the single Header record).
-  if (!sec.is_header) {
-    const atLimit = sec.max_records != null && sec.records.length >= sec.max_records;
-    const addBtn = el("button", "btn add-btn", "＋ Add row");
-    addBtn.disabled = atLimit;
-    if (atLimit) addBtn.title = `Limit of ${sec.max_records} reached`;
-    addBtn.addEventListener("click", () => addRow(sec.index));
-    head.appendChild(addBtn);
-  }
   wrap.appendChild(head);
 
   const body = el("div", "section-body");
-  if (sec.is_header || sec.records.length === 1) {
+  // Header = form (single record); detail sections = table with per-row controls
+  // (always a table, so even a 1-row section can grow via the row's ＋).
+  if (sec.is_header) {
     body.appendChild(renderForm(sec));
   } else {
     body.appendChild(renderTable(sec));
@@ -982,13 +974,13 @@ function renderSection(sec) {
   return wrap;
 }
 
-async function addRow(sectionIndex) {
+async function addRowAfter(recordIndex) {
   if (!state.file) return;
   if (!beginBusy("Adding row…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
     const view = await postJSON("/api/record/add", {
       path: state.file,
-      section_index: sectionIndex,
+      after_index: recordIndex,
       edits: collectEdits(),
     });
     state.view = view;
@@ -996,7 +988,7 @@ async function addRow(sectionIndex) {
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
-    setStatus("Row added — copied from last row (saved)", "ok");
+    setStatus("Row added — copied below (saved)", "ok");
   } catch (e) {
     setStatus("Add failed: " + e.message, "err");
   } finally {
@@ -1072,15 +1064,19 @@ function renderTable(sec) {
       td.appendChild(makeControl(sec, rec, field));
       tr.appendChild(td);
     });
+    const atMax = sec.max_records != null && n >= sec.max_records;
     const actTd = el("td", "del-cell");
     const up = el("button", "row-move", "↑"); up.title = "Move up"; up.disabled = i === 0;
     up.addEventListener("click", () => moveRow(rec.index, "up"));
     const down = el("button", "row-move", "↓"); down.title = "Move down"; down.disabled = i === n - 1;
     down.addEventListener("click", () => moveRow(rec.index, "down"));
+    const addB = el("button", "row-add", "＋"); addB.disabled = atMax;
+    addB.title = atMax ? `Limit of ${sec.max_records} reached` : "Add a copy below";
+    addB.addEventListener("click", () => addRowAfter(rec.index));
     const delBtn = el("button", "row-del", "✕");
     delBtn.title = "Delete this row";
     delBtn.addEventListener("click", () => deleteRow(rec.index));
-    actTd.append(up, down, delBtn);
+    actTd.append(up, down, addB, delBtn);
     tr.appendChild(actTd);
     tbody.appendChild(tr);
   });

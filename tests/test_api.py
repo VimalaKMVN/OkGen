@@ -614,6 +614,29 @@ def test_delete_header_rejected(tmp_path, registry, config):
         service.delete_record(work, 0, [], registry, config, backup=False)
 
 
+def test_add_record_after_index_inserts_below(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    before = service.parse_file_view(f, registry, config)
+    size = next(s for s in before["sections"] if s["name"] == "Size")
+    first = size["records"][0]
+    n = len(size["records"])
+
+    view = service.add_record(f, edits=[], registry=registry, config=config,
+                              backup=False, after_index=first["index"])
+    size2 = next(s for s in view["sections"] if s["name"] == "Size")
+    assert len(size2["records"]) == n + 1
+    assert size2["records"][1]["values"]["size"] == first["values"]["size"]  # copy sits right below
+    assert view["roundtrip_ok"]
+
+
+def test_add_record_after_header_rejected(tmp_path, registry, config):
+    f = tmp_path / "a.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", f)
+    with pytest.raises(service.EditError):
+        service.add_record(f, edits=[], registry=registry, config=config, backup=False, after_index=0)
+
+
 def test_add_record_respects_lane_limit(tmp_path, registry, config):
     src = DATA_DIR / "StyleHeader.OK"        # already has 10 lanes (the limit)
     work = tmp_path / "StyleHeader.OK"

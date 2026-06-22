@@ -254,49 +254,57 @@ def _apply_edits_to_okf(okf, edits: List[dict]) -> None:
 # --------------------------------------------------------------------------- #
 def add_record(
     path,
-    section_index: int,
-    edits: List[dict],
-    registry: LayoutRegistry,
-    config: Config,
+    section_index=None,
+    edits=None,
+    registry: LayoutRegistry = None,
+    config: Config = None,
     backup: bool = True,
+    after_index=None,
 ) -> dict:
-    """Apply pending edits, append a copy of the section's last record, and save.
+    """Apply pending edits, add a copy of a record, and save.
 
-    The new record duplicates the last existing record of the section (its
-    field values included) — users typically copy a row and tweak a few fields.
-    Enforces the section's ``max_records`` limit and keeps the file well-formed.
+    If ``after_index`` is given, a copy of THAT row is inserted right below it
+    (row-level "duplicate here"). Otherwise a copy of the section's last record
+    is appended (``section_index``). Enforces the section's ``max_records`` limit.
     """
-    from okgen.okfile import Record
-
     src = Path(path)
     okf = parse_okfile(src, registry=registry)
-    _apply_edits_to_okf(okf, edits)
+    _apply_edits_to_okf(okf, edits or [])
 
-    grouped = list(okf.sections().items())
-    if section_index < 0 or section_index >= len(grouped):
-        raise EditError(f"section_index {section_index} out of range")
-    sec_name, recs = grouped[section_index]
-    if not recs or recs[0].section is None:
-        raise EditError(f"section '{sec_name}' has no record to copy")
+    if after_index is not None:
+        anchor = next((r for r in okf.records if r.index == after_index), None)
+        if anchor is None or anchor.section is None:
+            raise EditError(f"record_index {after_index} not found")
+        if okf.records and anchor.section is okf.records[0].section:
+            raise EditError("cannot add rows to the header section")
+        template = anchor
+    else:
+        grouped = list(okf.sections().items())
+        if section_index is None or section_index < 0 or section_index >= len(grouped):
+            raise EditError(f"section_index {section_index} out of range")
+        _name, recs = grouped[section_index]
+        if not recs or recs[0].section is None:
+            raise EditError("section has no record to copy")
+        template = recs[-1]
 
-    limit = config.max_records(okf.layout.name, sec_name)
-    if limit is not None and len(recs) >= limit:
-        raise EditError(f"section '{sec_name}' is at its limit of {limit} records")
+    sec = template.section
+    sec_count = sum(1 for r in okf.records if r.section is sec)
+    limit = config.max_records(okf.layout.name, sec.name)
+    if limit is not None and sec_count >= limit:
+        raise EditError(f"section '{sec.name}' is at its limit of {limit} records")
 
-    template = recs[-1]
     clone = Record(
         raw=template.raw.rstrip("\r"),       # copy values; EOL fixed up below
         offset=template.offset,
         section=template.section,
         index=template.index,                # placeholder; reassigned on reload
     )
-    insert_at = okf.records.index(template) + 1
-    okf.records.insert(insert_at, clone)
+    okf.records.insert(okf.records.index(template) + 1, clone)
     _normalize_eols(okf)
 
     _backup_and_save(okf, src, backup)
     view = parse_file_view(src, registry, config)
-    view["added_section"] = sec_name
+    view["added_section"] = sec.name
     return view
 
 
