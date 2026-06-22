@@ -14,32 +14,32 @@
 #
 # Easy to edit — add/remove presets and reorder parts freely.
 presets:
-  - name: "Brand · Layout · Key"
-    separator: "_"
-    parts: [brand, layout, key]
-
-  - name: "FMT + Format + Keytrol"
-    separator: "_"
-    parts: [FMT, format, KEY, keytrol]
-
-  - name: "Dept + Key"
-    separator: "_"
-    parts: [DEPT, dept, KEY, key]
-
-  - name: "Chain Format Key (no separator)"
-    separator: ""
-    parts: [chain, format, key]
-
-  # Glue example: FMT joins directly to the format value, the rest use "_".
-  #   -> Homegoods_FMTA_550000.OK
-  - name: "FMT glued to format"
-    separator: "_"
-    parts: [brand, FMT, no_delim, format, keytrol]
+#  - name: "Brand · Layout · Key"
+#    separator: "_"
+#    parts: [brand, layout, key]
+#
+#  - name: "FMT + Format + Keytrol"
+#    separator: "_"
+#    parts: [FMT, format, KEY, keytrol]
+#
+#  - name: "Dept + Key"
+#    separator: "_"
+#    parts: [DEPT, dept, KEY, key]
+#
+#  - name: "Chain Format Key (no separator)"
+#    separator: ""
+#    parts: [chain, format, key]
+#
+#  # Glue example: FMT joins directly to the format value, the rest use "_".
+#  #   -> Homegoods_FMTA_550000.OK
+#  - name: "FMT glued to format"
+#    separator: "_"
+#    parts: [brand, FMT, no_delim, format, keytrol]
 
   # Labelled full tag, e.g.
   #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
   # (custom label token, then its header value, repeated)
-  - name: "Labelled full tag (StyleHeader)"
+  - name: "Styleheader naming convension"
     separator: "_"
     parts:
       - brand          # Homegoods
@@ -48,6 +48,7 @@ presets:
       - format         #   value A
       - KEY
       - keytrol
+      - no_delim       # no delimiter
       - suffix
       - T              # label "T"
       - type           #   value 2
@@ -59,3 +60,62 @@ presets:
       - comp_up        #   value N
       - RP             # label "RP"
       - ret_price      #   value 002099
+
+
+  # Labelled full tag, e.g.
+  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
+  # (custom label token, then its header value, repeated)
+  - name: "Preticket naming convension"
+    separator: "_"
+    parts:
+      - brand          # Homegoods
+      - layout         # StyleHeader
+      - FMT            # label "FMT"
+      - format         #   value A
+      - KEY
+      - po
+      - T              # label "T"
+      - type           #   value 2
+      - DEPT           # label "DEPT"
+      - dept           #   value 78
+      - CP             # label "CP"
+      - comp_price     #   value 000000
+      - CU             # label "CU"
+      - comp_up        #   value N
+      - RP             # label "RP"
+      - ret_price      #   value 002099
+      
+      
+  # Labelled full tag, e.g.
+  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
+  # (custom label token, then its header value, repeated)
+  - name: "Carton Label naming convension"
+    separator: "_"
+    parts:
+      - brand          # Homegoods
+      - layout         # StyleHeader
+      - FMT            # label "FMT"
+      - format         #   value A
+      - KEY
+      - C
+      - no_delim
+      - picklist_id
+      - no_delim
+      - picklist_seq
+
+
+
+  # Labelled full tag, e.g.
+  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
+  # (custom label token, then its header value, repeated)
+  - name: "Distribution Label naming convension"
+    separator: "_"
+    parts:
+      - brand          # Homegoods
+      - layout         # StyleHeader
+      - FMT            # label "FMT"
+      - format         #   value A
+      - KEY
+      - keytrol
+      - no_delim       # no delimiter
+      - hsuffix

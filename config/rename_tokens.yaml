@@ -21,6 +21,7 @@ rename_tokens:
     CU: "CU"
     RP: "RP"
     T: "T"
+    C: "C"
     # PROD: "PROD"
     # REPRINT: "RP"
 
