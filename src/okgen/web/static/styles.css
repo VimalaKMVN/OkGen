@@ -375,13 +375,14 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 }
 
 /* 🚚 delivery truck */
+/* scaleX(-1): the 🚚 glyph faces left, so flip it to face its direction of travel. */
 .scene-truck .tk-truck { top: 50%; font-size: 30px; animation: tkDrive 1.5s ease-in-out infinite; }
 @keyframes tkDrive {
-  0%   { left: 0;    opacity: 0; transform: translateY(-50%); }
+  0%   { left: 0;    opacity: 0; transform: translateY(-50%) scaleX(-1); }
   12%  { opacity: 1; }
-  48%  { transform: translateY(-56%); }
+  48%  { transform: translateY(-56%) scaleX(-1); }
   88%  { opacity: 1; }
-  100% { left: 100%; opacity: 0; transform: translateY(-50%); }
+  100% { left: 100%; opacity: 0; transform: translateY(-50%) scaleX(-1); }
 }
 
 /* 📦 conveyor belt */
