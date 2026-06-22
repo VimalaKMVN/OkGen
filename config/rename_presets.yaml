@@ -4,9 +4,13 @@
 # Each preset has:
 #   name       -> shown in the preset dropdown
 #   separator  -> how the parts are joined ("_", "-", ".", "" for none)
-#   parts      -> ordered list. Each entry is a TOKEN NAME (a custom token from
-#                 rename_tokens.yaml, a derived token, or a header field). For
-#                 literal text, either define a custom token, or use {text: "..."}.
+#   parts      -> ordered list. Each entry is one of:
+#                   * a TOKEN NAME  (a custom token from rename_tokens.yaml,
+#                                    a derived token, or a header field)
+#                   * {text: "..."} for inline literal text
+#                   * no_delim      a "glue" marker: the parts on either side
+#                                   join with NO separator (everything else
+#                                   still uses `separator`). {glue: true} works too.
 #
 # Easy to edit — add/remove presets and reorder parts freely.
 presets:
@@ -26,6 +30,12 @@ presets:
     separator: ""
     parts: [chain, format, key]
 
+  # Glue example: FMT joins directly to the format value, the rest use "_".
+  #   -> Homegoods_FMTA_550000.OK
+  - name: "FMT glued to format"
+    separator: "_"
+    parts: [brand, FMT, no_delim, format, keytrol]
+
   # Labelled full tag, e.g.
   #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
   # (custom label token, then its header value, repeated)
@@ -36,9 +46,12 @@ presets:
       - layout         # StyleHeader
       - FMT            # label "FMT"
       - format         #   value A
+      - KEY
+      - keytrol
+      - suffix
       - T              # label "T"
       - type           #   value 2
-      - DEPT           # label "D"
+      - DEPT           # label "DEPT"
       - dept           #   value 78
       - CP             # label "CP"
       - comp_price     #   value 000000

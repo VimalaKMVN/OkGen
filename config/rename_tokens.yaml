@@ -16,7 +16,7 @@ rename_tokens:
   custom:
     FMT: "FMT"
     KEY: "KEY"
-    DEPT: "D"
+    DEPT: "DEPT"
     CP: "CP"
     CU: "CU"
     RP: "RP"
