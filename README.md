@@ -49,6 +49,21 @@ reuses it afterwards, so later launches are fast.
 > Click **More info → Run anyway**. (It's a plain text script — you can open it in
 > Notepad to see exactly what it does.)
 
+> **If `run.bat` is missing after you copy the folder:** corporate antivirus,
+> email/file-share security (DLP), or Windows may **strip or quarantine `.bat`
+> files** in transit — the GitHub zip *does* contain it, so it was removed on the
+> way to your machine, not missing from the download. Three ways to fix it:
+> 1. Double-click **`run.cmd`** instead — it's an identical launcher with a
+>    different extension that often slips past `.bat`-specific filters.
+> 2. Or recreate it: open **Notepad**, paste the contents of `run.cmd` (or
+>    `run.bat` from another copy), and **Save As** `run.bat` with *Save as type:*
+>    **All Files**.
+> 3. Or just use **Manual start** below — no launcher needed.
+>
+> To avoid it next time: copy the zip via an internal share/USB (not email),
+> right-click the zip → **Properties → Unblock** before extracting, or add the
+> OkGen folder to your antivirus exclusions.
+
 ---
 
 ## Manual start (if you prefer the command line)

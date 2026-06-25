@@ -52,7 +52,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | `src/okgen/web/app.py` | Flask routes (`/api/*`) |
 | `src/okgen/web/static/app.js` | The whole SPA (tree, editor, bulk, rename, send animation) |
 | `src/okgen/cli.py` | `okgen compile|detect|parse|serve` |
-| `run.bat` / `run.sh` | One-click launch; offline install from `vendor/wheels` |
+| `run.bat` / `run.cmd` / `run.sh` | One-click launch; offline install from `vendor/wheels`. `run.cmd` is an identical copy of `run.bat` for environments that strip `.bat` files in transit (AV/DLP) — see README |
 
 ### Domain facts
 - **Banners (chains):** 01 TJMAXX · 02 Marshalls · 03 HomeGoods · 04 Winners · 06 HomeSense (`config/chains.yaml`).
