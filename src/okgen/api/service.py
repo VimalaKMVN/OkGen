@@ -196,6 +196,15 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
 
     chain_info = config.chain(chain)
     chain_info_dict = chain_info.to_dict() if chain_info else None
+    # Raw verify tab: NA files show the byte-exact Latin-1 view; delimited (EU)
+    # files are UTF-8, so decode them as UTF-8 and drop the BOM — otherwise the
+    # marker shows as Latin-1 mojibake ("ï»¿Â¦" instead of "¦"). The on-disk
+    # bytes are untouched; this only affects what the verify tab displays.
+    raw_bytes = path.read_bytes()
+    if getattr(okf.layout, "delimited", False):
+        raw_text = raw_bytes.decode("utf-8-sig", errors="replace")
+    else:
+        raw_text = raw_bytes.decode(ENCODING)
     return {
         "path": str(path),
         "name": path.name,
@@ -205,7 +214,7 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
         "chain_info": chain_info_dict,
         "roundtrip_ok": roundtrip_ok,
         "key_field": config.unique_field(layout_name),  # unique field for this layout
-        "raw_text": path.read_bytes().decode(ENCODING),  # for the Raw verify tab
+        "raw_text": raw_text,  # for the Raw verify tab
         "sections": sections_out,
     }
 

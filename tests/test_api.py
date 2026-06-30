@@ -662,6 +662,20 @@ def test_browse_folder_parses_dialog_output(monkeypatch):
     assert service.browse_folder()["path"] is None
 
 
+def test_eu_raw_view_hides_bom_but_bytes_untouched(registry, config):
+    """Raw verify tab shows EU files as clean UTF-8 (no BOM / no Latin-1 mojibake);
+    the on-disk bytes and round-trip are unaffected."""
+    view = service.parse_file_view(DATA_DIR / "EUPreticket.OK", registry, config)
+    raw = view["raw_text"]
+    assert raw.splitlines()[0].startswith("¦")   # clean broken-bar marker
+    assert "﻿" not in raw                          # BOM hidden
+    assert "\xef\xbb\xbf" not in raw and "\xc2\xa6" not in raw  # no Latin-1 mojibake
+    assert view["roundtrip_ok"] is True                # file itself still byte-exact
+    # NA files keep the byte-exact Latin-1 view unchanged.
+    na = service.parse_file_view(DATA_DIR / "Preticket.OK", registry, config)
+    assert na["roundtrip_ok"] is True
+
+
 def test_eu_file_node_banner_is_europe(registry, config):
     """The EU (delimited) file reads chain '05' from its tokens -> Europe/EU badge."""
     tree = service.build_tree(DATA_DIR, config, registry)

@@ -6,7 +6,7 @@ are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
 > Baseline: this reflects the **"Golden" release** = tag
-> `v0.17.0-eu-preticket-layout`, which is the top of `main`.
+> `v0.17.2-eu-raw-view-hide-bom`, which is the top of `main`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -72,7 +72,8 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D7 | **Delimited layout mode** (5th layout, EU/EWMS `EUPreticket`): pipe-delimited + UTF-8 BOM. Read as Latin-1 (byte-exact preserved); `Record.field_spans` located by walking the actual `\|` delimiters instead of fixed start/size; header strips BOM+`¦` marker, detail lines have none; trailing `\` terminator + CRLF left untouched. `Layout.delimited` flag set by the `TJXEWMS_` filename prefix. Chain is read from a delimited token (chain `05` = **Europe**, badge **`EU`**, `config/chains.yaml`) — config-driven like every other banner. | New vendor format needed a parse mode the fixed-width engine couldn't handle; span-walking keeps the byte-exact round-trip guarantee and lets all existing ops (edit, bulk, make-unique, add/delete) work unchanged |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.17.0-eu-preticket-layout`** (the "Golden" baseline). **Tests: 86 passing.**
+- **Top of `main` = tag `v0.17.2-eu-raw-view-hide-bom`** (the "Golden" baseline). **Tests: 87 passing.**
+  - Recent EU increments since the layout landed: trimmed unused detail fields (lookup_id 18–24) from `TJXEWMS_PreticketLayout.xlsx` via targeted XML row-delete (preserves the remaining fields' formula-derived sample values) → `v0.17.1`; fixed row-action buttons (↑↓＋✕) stacking vertically on wide tables (`.del-cell` `white-space:nowrap`) → `v0.17.1`; Raw verify tab now decodes delimited (EU) files as UTF-8 so the marker shows as a clean `¦` instead of `ï»¿Â¦` (display-only; bytes/round-trip unchanged, BOM still preserved on save/copy) → `v0.17.2`.
 - **Feature set:** tree (lazy, per-banner icons, .OK only) · section editor with friendly labels + width validation + raw verify view (grid + amber line numbers) · Save/Save As · record add/move/delete + row-level controls + reorder · multi-select + bulk delete/copy (paste auto-uniquify) · **Bulk Edit** (header + detail ops, random/unique with range) · **Bulk Rename** (guided token builder + presets + glue + detail fields) · **Make Unique** (per-layout key) · unified **Bulk Actions** menu · **Send to NiceLabel** (warning + checkbox + animations + quips) · OS-native folder dialog · TJX branding (logo chip + favicon) · **5th layout EUPreticket** (EU/EWMS pipe-delimited + UTF-8 BOM, blue **EU** tree badge — all ops work via the delimited engine mode, see D7).
 - See full tag history with `git tag --sort=creatordate`.
 
