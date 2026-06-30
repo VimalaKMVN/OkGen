@@ -5,8 +5,8 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: this reflects the **"Golden" GitHub release** = tag
-> `v0.16.3-quips-wording`, which is the top of `main`.
+> Baseline: this reflects the **"Golden" release** = tag
+> `v0.16.5-remove-checkpoint-skill`, which is the top of `main`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -71,7 +71,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D6 | **Send to NiceLabel** = one-click copy to `config/nicelabel.yaml` hot folder; confirm modal has a **yellow warning + acknowledgement checkbox** gating Send; randomized fun animations + rotating configurable quips | Outward-facing/production action — keep an explicit, hard-to-miss confirmation |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.16.3-quips-wording`** (the "Golden" GitHub release). **Tests: 77 passing.**
+- **Top of `main` = tag `v0.16.5-remove-checkpoint-skill`** (the "Golden" baseline). **Tests: 77 passing.**
 - **Feature set:** tree (lazy, per-banner icons, .OK only) · section editor with friendly labels + width validation + raw verify view (grid + amber line numbers) · Save/Save As · record add/move/delete + row-level controls + reorder · multi-select + bulk delete/copy (paste auto-uniquify) · **Bulk Edit** (header + detail ops, random/unique with range) · **Bulk Rename** (guided token builder + presets + glue + detail fields) · **Make Unique** (per-layout key) · unified **Bulk Actions** menu · **Send to NiceLabel** (warning + checkbox + animations + quips) · OS-native folder dialog · TJX branding (logo chip + favicon).
 - See full tag history with `git tag --sort=creatordate`.
 
