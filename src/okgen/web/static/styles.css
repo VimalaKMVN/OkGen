@@ -240,7 +240,9 @@ input.cell { min-width: 60px; }
 input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .field-coded { color: var(--ok); }
 
-.del-cell { text-align: center; }
+/* Keep the row actions (↑ ↓ ＋ ✕) on one line — a wide table must scroll
+   rather than squeeze this cell and stack the buttons vertically. */
+.del-cell { text-align: center; white-space: nowrap; }
 .row-del {
   background: transparent;
   color: var(--err);

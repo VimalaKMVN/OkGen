@@ -174,7 +174,7 @@
     {
       "name": "Lane",
       "tab": "Detail",
-      "record_length": 186,
+      "record_length": 80,
       "sample_record": "00100135217504401XL    N01                  003500N99999800003000000000000000014",
       "ignored_fields": [],
       "issues": [],
@@ -364,83 +364,6 @@
           "declared_position": null,
           "sample_value": "14",
           "field_id": "field017",
-          "issues": []
-        },
-        {
-          "name": "frdesc",
-          "field_name": "frdesc",
-          "size": 20,
-          "start": 81,
-          "field_type": "char",
-          "declared_position": null,
-          "sample_value": null,
-          "field_id": "field018",
-          "issues": []
-        },
-        {
-          "name": "engnoun",
-          "field_name": "engnoun",
-          "size": 3,
-          "start": 101,
-          "field_type": "char",
-          "declared_position": null,
-          "sample_value": null,
-          "field_id": "field019",
-          "issues": []
-        },
-        {
-          "name": "frnoun",
-          "field_name": "frnoun",
-          "size": 3,
-          "start": 104,
-          "field_type": "char",
-          "declared_position": null,
-          "sample_value": null,
-          "field_id": "field020",
-          "issues": []
-        },
-        {
-          "name": "item",
-          "field_name": "item",
-          "size": 20,
-          "start": 107,
-          "field_type": "char",
-          "declared_position": null,
-          "sample_value": null,
-          "field_id": "field021",
-          "issues": []
-        },
-        {
-          "name": "fact1",
-          "field_name": "fact1",
-          "size": 20,
-          "start": 127,
-          "field_type": "char",
-          "declared_position": null,
-          "sample_value": null,
-          "field_id": "field022",
-          "issues": []
-        },
-        {
-          "name": "fact2",
-          "field_name": "fact2",
-          "size": 20,
-          "start": 147,
-          "field_type": "char",
-          "declared_position": null,
-          "sample_value": null,
-          "field_id": "field023",
-          "issues": []
-        },
-        {
-          "name": "fact3",
-          "field_name": "fact3",
-          "size": 20,
-          "start": 167,
-          "field_type": "char",
-          "declared_position": null,
-          "sample_value": null,
-          "field_id": "field024",
           "issues": []
         }
       ]
