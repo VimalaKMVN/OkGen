@@ -2,6 +2,9 @@
   "name": "CartonLabel",
   "source_file": "TJXNA_CartonLabelLayout.xlsx",
   "ticket_process": "Carton Label",
+  "delimited": false,
+  "delimiter": "|",
+  "record_terminator": "\\",
   "issues": [],
   "sections": [
     {

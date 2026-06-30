@@ -28,6 +28,11 @@ chains:
     short: WN
     color: "#5A2D81"
     icon: null
+  "05":
+    name: Europe
+    short: EU
+    color: "#003399"
+    icon: null
   "06":
     name: HomeSense
     short: HS

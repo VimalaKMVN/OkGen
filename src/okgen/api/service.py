@@ -90,6 +90,32 @@ def _key_from_header(header: str, layout, field) -> Optional[str]:
     return header[start:start + field.size]
 
 
+def _delim_header_value(header: str, layout, field_name) -> Optional[str]:
+    """Value of a named header field from a delimited header line.
+
+    Strips the BOM + broken-bar marker, then indexes the pipe-delimited tokens
+    by the field's position in the header section.
+    """
+    if layout is None or not layout.sections or not field_name:
+        return None
+    fields = layout.sections[0].fields
+    idx = next((i for i, f in enumerate(fields) if f.name == field_name), None)
+    if idx is None:
+        return None
+    h = header
+    if h.startswith("\xef\xbb\xbf"):       # UTF-8 BOM (read as Latin-1)
+        h = h[3:]
+    if h.startswith("\xc2\xa6"):           # ¦ marker (UTF-8)
+        h = h[2:]
+    elif h.startswith("\xa6"):             # ¦ marker (single Latin-1 byte)
+        h = h[1:]
+    h = h.rstrip("\r")
+    if h.endswith("\\"):                    # record terminator
+        h = h[:-1]
+    toks = h.split("|")
+    return toks[idx] if idx < len(toks) else None
+
+
 def _file_node(path: Path, config: Config, registry=None) -> dict:
     chain = ""
     layout = None
@@ -97,22 +123,28 @@ def _file_node(path: Path, config: Config, registry=None) -> dict:
     key_value = None
     try:
         header = read_header_line(path)
-        chain = header[1:3]
         layout = detect_from_header(header).layout
-        if layout and registry is not None:
+        reg_layout = registry.get(layout) if (layout and registry is not None) else None
+        delimited = bool(reg_layout is not None and getattr(reg_layout, "delimited", False))
+        # Delimited (EU) headers carry the chain in a token, not a fixed slice.
+        chain = (_delim_header_value(header, reg_layout, "chain") if delimited
+                 else header[1:3]) or ""
+        if reg_layout is not None:
             key_field = config.unique_field(layout)
             if key_field:
-                f = _header_field(registry.get(layout), key_field)
-                key_value = _key_from_header(header, registry.get(layout), f)
+                key_value = (_delim_header_value(header, reg_layout, key_field) if delimited
+                             else _key_from_header(header, reg_layout,
+                                                   _header_field(reg_layout, key_field)))
     except Exception:
         pass
     info = config.chain(chain)
+    chain_info = info.to_dict() if info else None
     return {
         "type": "file",
         "name": path.name,
         "path": str(path),
         "chain": chain,
-        "chain_info": info.to_dict() if info else None,
+        "chain_info": chain_info,
         "layout": layout,
         "key_field": key_field,
         "key_value": key_value,
@@ -163,13 +195,14 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
         })
 
     chain_info = config.chain(chain)
+    chain_info_dict = chain_info.to_dict() if chain_info else None
     return {
         "path": str(path),
         "name": path.name,
         "layout": layout_name,
         "chain": chain,
         "format": fmt,
-        "chain_info": chain_info.to_dict() if chain_info else None,
+        "chain_info": chain_info_dict,
         "roundtrip_ok": roundtrip_ok,
         "key_field": config.unique_field(layout_name),  # unique field for this layout
         "raw_text": path.read_bytes().decode(ENCODING),  # for the Raw verify tab
@@ -617,12 +650,25 @@ def _read_key_int(path: Path, registry, config):
     kf = config.unique_field(layout)
     if not kf:
         return (layout, None, None)
-    f = _header_field(registry.get(layout), kf)
-    raw = _key_from_header(header, registry.get(layout), f)
+    reg_layout = registry.get(layout)
+    if getattr(reg_layout, "delimited", False):
+        raw = _delim_header_value(header, reg_layout, kf)
+    else:
+        f = _header_field(reg_layout, kf)
+        raw = _key_from_header(header, reg_layout, f)
     try:
         return (layout, kf, int(raw))
     except (TypeError, ValueError):
         return (layout, kf, None)
+
+
+def _next_key_int(maxv: Dict[str, int], layout: str) -> int:
+    """Next free key value for a layout: max-seen + 1, but never 0.
+
+    Keys are always assigned a non-zero value (an all-zero key reads as a blank
+    sentinel), so the first key handed out in an empty/keyless folder is 1.
+    """
+    return max(maxv.get(layout, -1) + 1, 1)
 
 
 def _set_key(path: Path, registry, key_field: str, new_int: int, size: int, backup: bool):
@@ -666,7 +712,7 @@ def _uniquify_new_files(folder: Path, new_files: List[Path], registry, config) -
             maxv[layout] = max(maxv.get(layout, -1), val)
             continue
         f = _header_field(registry.get(layout), kf)
-        new_int = maxv.get(layout, -1) + 1
+        new_int = _next_key_int(maxv, layout)
         try:
             new_str = _set_key(p, registry, kf, new_int, f.size, backup=False)
         except (EditError, Exception) as exc:  # noqa: BLE001
@@ -698,7 +744,7 @@ def make_unique_in_folder(folder, registry, config, backup=True) -> dict:
             maxv[layout] = max(maxv.get(layout, -1), val)
             continue
         f = _header_field(registry.get(layout), kf)
-        new_int = maxv.get(layout, -1) + 1
+        new_int = _next_key_int(maxv, layout)
         try:
             new_str = _set_key(p, registry, kf, new_int, f.size, backup=backup)
         except (EditError, Exception) as exc:  # noqa: BLE001

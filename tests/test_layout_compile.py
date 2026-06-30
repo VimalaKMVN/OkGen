@@ -25,9 +25,19 @@ def layouts():
     return compile_dir(DATA_DIR)
 
 
-def test_all_four_layouts_compile(layouts):
+def test_all_layouts_compile(layouts):
     names = {l.name for l in layouts}
-    assert names == {"CartonLabel", "DistLabels", "Preticket", "StyleHeader"}
+    assert names == {"CartonLabel", "DistLabels", "Preticket", "StyleHeader",
+                     "EUPreticket"}
+
+
+def test_eu_layout_is_delimited(layouts):
+    eu = next(l for l in layouts if l.name == "EUPreticket")
+    assert eu.delimited is True
+    assert eu.delimiter == "|"
+    # NA layouts stay fixed-width.
+    na = next(l for l in layouts if l.name == "Preticket")
+    assert na.delimited is False
 
 
 def test_no_sample_mismatches(layouts):

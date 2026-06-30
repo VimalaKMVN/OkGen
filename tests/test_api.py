@@ -662,6 +662,36 @@ def test_browse_folder_parses_dialog_output(monkeypatch):
     assert service.browse_folder()["path"] is None
 
 
+def test_eu_file_node_banner_is_europe(registry, config):
+    """The EU (delimited) file reads chain '05' from its tokens -> Europe/EU badge."""
+    tree = service.build_tree(DATA_DIR, config, registry)
+    eu = next(f for f in tree["children"] if f["name"] == "EUPreticket.OK")
+    assert eu["layout"] == "EUPreticket"
+    assert eu["chain"] == "05"
+    assert eu["chain_info"]["name"] == "Europe"
+    assert eu["chain_info"]["short"] == "EU"
+
+
+def test_make_unique_eu_reads_key_and_stays_nonzero(registry, config, tmp_path):
+    """Make Unique on duplicate EU (delimited) files keeps the first file's real
+    po, continues from it, and never assigns an all-zero key."""
+    import shutil as _sh
+
+    for n in ("a", "b", "c"):
+        _sh.copy2(DATA_DIR / "EUPreticket.OK", tmp_path / f"{n}.OK")
+
+    res = service.make_unique_in_folder(tmp_path, registry, config, backup=False)
+    tree = service.build_tree(tmp_path, config, registry)
+    by_name = {c["name"]: c for c in tree["children"] if c["type"] == "file"}
+
+    # First file keeps its actual po; the others get distinct, non-zero keys.
+    assert by_name["a.OK"]["key_value"] == "10021888"
+    pos = {by_name[n]["key_value"] for n in ("a.OK", "b.OK", "c.OK")}
+    assert len(pos) == 3, "all keys must be unique"
+    assert all(int(p) != 0 for p in pos), "no key may be all-zero"
+    assert all(not by_name[n]["duplicate"] for n in by_name)
+
+
 def test_flask_save_endpoint(tmp_path):
     import shutil as _sh
 

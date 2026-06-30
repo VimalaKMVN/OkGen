@@ -72,12 +72,21 @@ class Layout:
     ticket_process: Optional[str] = None   # e.g. "Carton Label"
     sections: List[Section] = field(default_factory=list)
     issues: List[str] = field(default_factory=list)
+    # Delimited layouts (e.g. EU/EWMS pretickets) store fields as
+    # ``delimiter``-separated tokens terminated by ``record_terminator``,
+    # rather than fixed-width slices. Fixed-width layouts leave this False.
+    delimited: bool = False
+    delimiter: str = "|"
+    record_terminator: str = "\\"
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "source_file": self.source_file,
             "ticket_process": self.ticket_process,
+            "delimited": self.delimited,
+            "delimiter": self.delimiter,
+            "record_terminator": self.record_terminator,
             "issues": self.issues,
             "sections": [s.to_dict() for s in self.sections],
         }

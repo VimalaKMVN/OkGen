@@ -19,6 +19,7 @@ EXPECTED = {
     "DistLabels.OK": "DistLabels",
     "Preticket.OK": "Preticket",
     "StyleHeader.OK": "StyleHeader",
+    "EUPreticket.OK": "EUPreticket",
 }
 
 pytestmark = pytest.mark.skipif(
@@ -40,3 +41,11 @@ def test_rule_from_synthetic_headers():
     assert detect_from_header("|019...").layout == "DistLabels"
     assert detect_from_header("|011C:...").layout == "CartonLabel"
     assert detect_from_header("|01X...").layout is None
+
+
+def test_eu_delimited_header_detection():
+    # UTF-8 BOM + '¦P|' (read as Latin-1) -> EU delimited preticket.
+    eu = "\xef\xbb\xbf\xc2\xa6P|05|A|10021888|"
+    assert detect_from_header(eu).layout == "EUPreticket"
+    # A BOM without the '¦P|' signature must NOT match.
+    assert detect_from_header("\xef\xbb\xbf|02Y...").layout != "EUPreticket"

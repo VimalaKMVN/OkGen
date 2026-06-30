@@ -15,7 +15,8 @@ DATA_DIR = Path(
     )
 )
 
-OK_FILES = ["CartonLabel.OK", "DistLabels.OK", "Preticket.OK", "StyleHeader.OK"]
+OK_FILES = ["CartonLabel.OK", "DistLabels.OK", "Preticket.OK", "StyleHeader.OK",
+            "EUPreticket.OK"]
 
 pytestmark = pytest.mark.skipif(
     not DATA_DIR.is_dir(), reason=f"sample data dir not present: {DATA_DIR}"
@@ -84,3 +85,38 @@ def test_detection_drives_parse(registry):
     """parse_okfile with no explicit layout uses detection + registry."""
     okf = parse_okfile(DATA_DIR / "Preticket.OK", registry=registry)
     assert okf.layout.name == "Preticket"
+
+
+def test_eu_delimited_header_fields(registry):
+    """The EU (pipe-delimited) preticket parses its header tokens by name."""
+    okf = parse_okfile(DATA_DIR / "EUPreticket.OK", registry=registry)
+    assert okf.layout.name == "EUPreticket"
+    assert okf.layout.delimited is True
+    h = okf.records[0]
+    assert h.get("Indicator") == "P"
+    assert h.get("chain") == "05"
+    assert h.get("format") == "A"
+    assert h.get("po") == "10021888"
+    assert h.get("Zone") == "10"
+    # A detail line maps its delimited tokens too.
+    detail = okf.records[1]
+    assert detail.get("style") == "750440"
+    assert detail.get("size") == "XL    "
+
+
+def test_eu_delimited_edit_preserves_delimiters_and_roundtrips(registry):
+    """Editing a delimited field keeps token width, pipes, terminator and BOM."""
+    path = DATA_DIR / "EUPreticket.OK"
+    original = path.read_bytes()
+    okf = parse_okfile(path, registry=registry)
+    h = okf.records[0]
+
+    old_len = len(h.raw)
+    old_po = h.get("po")
+    h.set("po", "99999999")
+    assert h.get("po") == "99999999"
+    assert len(h.raw) == old_len, "delimited edit must not change line length"
+    assert okf.to_bytes() != original
+
+    h.set("po", old_po)
+    assert okf.to_bytes() == original, "reverting must restore exact bytes (incl. BOM)"

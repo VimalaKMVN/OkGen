@@ -2,6 +2,9 @@
   "name": "StyleHeader",
   "source_file": "TJXNA_StyleHeaderLayout.xlsx",
   "ticket_process": "Style Header",
+  "delimited": false,
+  "delimiter": "|",
+  "record_terminator": "\\",
   "issues": [],
   "sections": [
     {

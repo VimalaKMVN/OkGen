@@ -6,7 +6,7 @@ are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
 > Baseline: this reflects the **"Golden" release** = tag
-> `v0.16.5-remove-checkpoint-skill`, which is the top of `main`.
+> `v0.17.0-eu-preticket-layout`, which is the top of `main`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -55,9 +55,9 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | `run.bat` / `run.cmd` / `run.sh` | One-click launch; offline install from `vendor/wheels`. `run.cmd` is an identical copy of `run.bat` for environments that strip `.bat` files in transit (AV/DLP) — see README |
 
 ### Domain facts
-- **Banners (chains):** 01 TJMAXX · 02 Marshalls · 03 HomeGoods · 04 Winners · 06 HomeSense (`config/chains.yaml`).
-- **Layouts:** CartonLabel · DistLabels · Preticket · StyleHeader. Detection keys off the char at the marker-adjusted header position (`|`/`#`/`&` first char shifts xls Position +1): `N`→StyleHeader, `Y`→Preticket, `C:`→CartonLabel, `7`/`9`→DistLabels.
-- **Unique key per layout:** CartonLabel=`picklist_id` · DistLabels=`keytrol` · Preticket=`po` · StyleHeader=`keytrol` (`config/keys.yaml`).
+- **Banners (chains):** 01 TJMAXX · 02 Marshalls · 03 HomeGoods · 04 Winners · 05 Europe (EU) · 06 HomeSense (`config/chains.yaml`).
+- **Layouts:** CartonLabel · DistLabels · Preticket · StyleHeader (NA, fixed-width) · **EUPreticket** (EU/EWMS, **pipe-delimited + UTF-8 BOM**). Detection keys off the char at the marker-adjusted header position (`|`/`#`/`&` first char shifts xls Position +1): `N`→StyleHeader, `Y`→Preticket, `C:`→CartonLabel, `7`/`9`→DistLabels; **UTF-8 BOM + `¦P|`→EUPreticket** (checked first).
+- **Unique key per layout:** CartonLabel=`picklist_id` · DistLabels=`keytrol` · Preticket=`po` · StyleHeader=`keytrol` · EUPreticket=`po` (`config/keys.yaml`).
 - **Config-driven:** `config/*.yaml` — chains, display (coded→label rules), field_colors, keys, limits, section_counts, nicelabel (hot-folder path + warning + quips/done_quips), rename_tokens, rename_presets. Tests use decoupled `tests/fixtures/config/`.
 
 ## 3. Decision log (durable — the "why")
@@ -69,10 +69,11 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D4 | **Offline Windows distribution** via `vendor/wheels` (+ `run.bat` `pip --no-index`, run from source `PYTHONPATH=src`) | Locked-down DC boxes, no internet/PyPI |
 | D5 | **Open Folder = OS-native folder dialog** (Windows `OpenFileDialog` folder mode via PowerShell · macOS `osascript` · Linux `zenity`), launched server-side (`service.browse_folder`) | Familiar Explorer UI incl. Quick Access; works because the app runs on the same machine as the browser (local use) |
 | D6 | **Send to NiceLabel** = one-click copy to `config/nicelabel.yaml` hot folder; confirm modal has a **yellow warning + acknowledgement checkbox** gating Send; randomized fun animations + rotating configurable quips | Outward-facing/production action — keep an explicit, hard-to-miss confirmation |
+| D7 | **Delimited layout mode** (5th layout, EU/EWMS `EUPreticket`): pipe-delimited + UTF-8 BOM. Read as Latin-1 (byte-exact preserved); `Record.field_spans` located by walking the actual `\|` delimiters instead of fixed start/size; header strips BOM+`¦` marker, detail lines have none; trailing `\` terminator + CRLF left untouched. `Layout.delimited` flag set by the `TJXEWMS_` filename prefix. Chain is read from a delimited token (chain `05` = **Europe**, badge **`EU`**, `config/chains.yaml`) — config-driven like every other banner. | New vendor format needed a parse mode the fixed-width engine couldn't handle; span-walking keeps the byte-exact round-trip guarantee and lets all existing ops (edit, bulk, make-unique, add/delete) work unchanged |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.16.5-remove-checkpoint-skill`** (the "Golden" baseline). **Tests: 77 passing.**
-- **Feature set:** tree (lazy, per-banner icons, .OK only) · section editor with friendly labels + width validation + raw verify view (grid + amber line numbers) · Save/Save As · record add/move/delete + row-level controls + reorder · multi-select + bulk delete/copy (paste auto-uniquify) · **Bulk Edit** (header + detail ops, random/unique with range) · **Bulk Rename** (guided token builder + presets + glue + detail fields) · **Make Unique** (per-layout key) · unified **Bulk Actions** menu · **Send to NiceLabel** (warning + checkbox + animations + quips) · OS-native folder dialog · TJX branding (logo chip + favicon).
+- **Top of `main` = tag `v0.17.0-eu-preticket-layout`** (the "Golden" baseline). **Tests: 86 passing.**
+- **Feature set:** tree (lazy, per-banner icons, .OK only) · section editor with friendly labels + width validation + raw verify view (grid + amber line numbers) · Save/Save As · record add/move/delete + row-level controls + reorder · multi-select + bulk delete/copy (paste auto-uniquify) · **Bulk Edit** (header + detail ops, random/unique with range) · **Bulk Rename** (guided token builder + presets + glue + detail fields) · **Make Unique** (per-layout key) · unified **Bulk Actions** menu · **Send to NiceLabel** (warning + checkbox + animations + quips) · OS-native folder dialog · TJX branding (logo chip + favicon) · **5th layout EUPreticket** (EU/EWMS pipe-delimited + UTF-8 BOM, blue **EU** tree badge — all ops work via the delimited engine mode, see D7).
 - See full tag history with `git tag --sort=creatordate`.
 
 ## 5. Run / test (quick reference)

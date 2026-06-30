@@ -2,6 +2,9 @@
   "name": "DistLabels",
   "source_file": "TJXNA_DistLabelsLayout.xlsx",
   "ticket_process": "Distribution Label",
+  "delimited": false,
+  "delimiter": "|",
+  "record_terminator": "\\",
   "issues": [],
   "sections": [
     {

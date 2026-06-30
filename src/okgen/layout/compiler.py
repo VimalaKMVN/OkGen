@@ -50,12 +50,23 @@ def _clean_int(value) -> Optional[int]:
         return None
 
 
+# Filename prefixes whose layouts use a delimited (not fixed-width) record
+# format. EU/EWMS pretickets are pipe-delimited; NA layouts are fixed-width.
+_DELIMITED_PREFIXES = ("TJXEWMS_",)
+
+
 def _layout_name_from_filename(filename: str) -> str:
-    """'TJXNA_CartonLabelLayout.xlsx' -> 'CartonLabel'."""
+    """'TJXNA_CartonLabelLayout.xlsx' -> 'CartonLabel';
+    'TJXEWMS_PreticketLayout.xlsx' -> 'EUPreticket'."""
     stem = Path(filename).stem
     stem = re.sub(r"^TJXNA_", "", stem)
+    stem = re.sub(r"^TJXEWMS_", "EU", stem)   # EU/EWMS layouts keep an EU prefix
     stem = re.sub(r"Layout$", "", stem)
     return stem or stem
+
+
+def _is_delimited_filename(filename: str) -> bool:
+    return Path(filename).name.startswith(_DELIMITED_PREFIXES)
 
 
 def _find_header_row(rows: List[List]) -> Optional[int]:
@@ -205,6 +216,7 @@ def compile_layout(xlsx_path: Path) -> Layout:
         layout = Layout(
             name=_layout_name_from_filename(xlsx_path.name),
             source_file=xlsx_path.name,
+            delimited=_is_delimited_filename(xlsx_path.name),
         )
         for ws in wb.worksheets:
             rows = [list(r) for r in ws.iter_rows(values_only=True)]

@@ -23,6 +23,11 @@ from typing import Optional
 # Known record markers (informational; detection does not depend on which one).
 RECORD_MARKERS = {"|", "#", "&"}
 
+# EU/EWMS pipe-delimited pretickets are UTF-8 with a BOM and a broken-bar
+# marker; read as Latin-1 the header begins with these byte sequences.
+_UTF8_BOM = "\xef\xbb\xbf"          # EF BB BF
+_EU_HEADER_SIG = "\xc2\xa6P|"      # ¦ (UTF-8 C2 A6) + 'P|' (Indicator='P', delimited)
+
 
 @dataclass
 class DetectionResult:
@@ -45,6 +50,13 @@ def read_header_line(path: Path, encoding: str = "latin-1") -> str:
 
 def detect_from_header(header: str) -> DetectionResult:
     """Apply the detection rule to an already-read header line."""
+    # EU/EWMS delimited preticket: UTF-8 BOM + broken-bar '¦P|' header.
+    # Checked first because its bytes don't fit the positional rules below.
+    if header.startswith(_UTF8_BOM) and header[3:3 + len(_EU_HEADER_SIG)] == _EU_HEADER_SIG:
+        return DetectionResult(
+            "EUPreticket", "UTF-8 BOM + '¦P|' delimited header", "¦", header
+        )
+
     marker = header[0] if header else ""
 
     def raw(pos: int) -> str:

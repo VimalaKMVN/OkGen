@@ -39,6 +39,10 @@ class Record:
     section: Optional[Section]
     index: int                     # 0-based line index in the file
     issues: List[str] = dfield(default_factory=list)
+    # For delimited records: field name -> (start, end) span into ``raw``,
+    # computed by walking the actual delimiters. None for fixed-width records,
+    # which derive spans from the layout's start/size instead.
+    field_spans: Optional[Dict[str, tuple]] = None
 
     @property
     def marker(self) -> str:
@@ -54,6 +58,9 @@ class Record:
 
     def _span(self, f: Field):
         """(start, end) raw-string indices for a field, or None if unsized."""
+        if self.field_spans is not None:
+            # Delimited record: span was located by walking the delimiters.
+            return self.field_spans.get(f.name)
         if f.start is None or f.size is None:
             return None
         start = self.offset + f.start - 1
@@ -87,12 +94,18 @@ class Record:
             raise ValueError(
                 f"field {name!r} span {start}:{end} exceeds record length {len(self.raw)}"
             )
-        self.raw = self.raw[:start] + _fit(value, f) + self.raw[end:]
+        # Pad to the span's own width so a delimited token keeps its exact
+        # width (and the surrounding delimiters/terminator stay in place).
+        self.raw = self.raw[:start] + _fit(value, f, end - start) + self.raw[end:]
 
 
-def _fit(value: str, f: Field) -> str:
-    """Fit a value to the field width using justification inferred from the sample."""
-    size = f.size
+def _fit(value: str, f: Field, width: Optional[int] = None) -> str:
+    """Fit a value to a field width using justification inferred from the sample.
+
+    ``width`` overrides the field's declared size (used for delimited records,
+    whose span width is authoritative); defaults to ``f.size``.
+    """
+    size = width if width is not None else f.size
     if len(value) > size:
         raise ValueError(f"value {value!r} too long for field {f.name!r} (size {size})")
     justify, pad = _infer_format(f)
@@ -146,7 +159,66 @@ class OkFile:
         return out
 
 
+# UTF-8 byte sequences as seen when an EU file is read as Latin-1 (byte-exact).
+_BOM_LATIN1 = "\xef\xbb\xbf"        # EF BB BF
+_BROKEN_BAR_UTF8 = "\xc2\xa6"      # ¦ encoded UTF-8 (C2 A6)
+_BROKEN_BAR_LATIN1 = "\xa6"        # ¦ as a single Latin-1 byte (NA layouts)
+
+
+def _delim_spans(raw: str, section: Section, delimiter: str,
+                 terminator: str, is_header: bool) -> Dict[str, tuple]:
+    """Locate each field's (start, end) span in a delimited record line.
+
+    Walks the actual ``delimiter`` positions so spans are exact regardless of
+    token width. The header carries a leading BOM + broken-bar marker; detail
+    lines have no marker. The trailing ``terminator`` and any ``\\r`` are left
+    outside every span so edits never disturb them.
+    """
+    start = 0
+    if is_header:
+        if raw[start:start + 3] == _BOM_LATIN1:
+            start += 3
+        if raw[start:start + 2] == _BROKEN_BAR_UTF8:
+            start += 2
+        elif raw[start:start + 1] == _BROKEN_BAR_LATIN1:
+            start += 1
+
+    body_end = len(raw)
+    while body_end > start and raw[body_end - 1] == "\r":
+        body_end -= 1
+    if body_end > start and raw[body_end - 1:body_end] == terminator:
+        body_end -= 1
+
+    spans: Dict[str, tuple] = {}
+    pos = start
+    parts = raw[start:body_end].split(delimiter)
+    for f, part in zip(section.fields, parts):
+        spans[f.name] = (pos, pos + len(part))
+        pos += len(part) + len(delimiter)
+    return spans
+
+
+def _assign_delimited(raws: List[str], layout: Layout) -> List[Record]:
+    """Assign records for a delimited layout (header = line 0, rest = detail)."""
+    header_sec = layout.sections[0] if layout.sections else None
+    detail_secs = layout.sections[1:]
+    records: List[Record] = []
+    for i, raw in enumerate(raws):
+        is_header = i == 0
+        sec = header_sec if is_header else (detail_secs[0] if detail_secs else None)
+        rec = Record(raw=raw, offset=0, section=sec, index=i)
+        if sec is not None:
+            rec.field_spans = _delim_spans(
+                raw, sec, layout.delimiter, layout.record_terminator, is_header
+            )
+        records.append(rec)
+    return records
+
+
 def _assign_records(raws: List[str], layout: Layout) -> List[Record]:
+    if getattr(layout, "delimited", False):
+        return _assign_delimited(raws, layout)
+
     header_sec = layout.sections[0] if layout.sections else None
     detail_secs = layout.sections[1:]
     marker_to_sec: Dict[str, Optional[Section]] = {}

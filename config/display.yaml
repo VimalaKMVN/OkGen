@@ -225,3 +225,21 @@ rules:
       3: "Coordinate Carton Label"
       4: "Masterpack Label"
       5: "AD Masterpack Label"
+
+
+  # (7) LISTS — one rule covering several chains AND several layouts at once.
+  # Europe TJXE formats
+  - match:
+      chain: ["05"]
+      layout: [EUPreticket]
+      field: format
+    values:
+      A: "Standard White Swift"
+      B: "Single Gum"
+      C: "Beige Coordinate"
+      F: "High Adhesive"
+      J: "Small Merchandise Ticket"
+      L: "Water Soluble"
+      Q: "Small Merch UPP Ticket"
+      R: "Age Restriction"
+      U: "Standard UPP"
