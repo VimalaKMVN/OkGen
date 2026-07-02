@@ -15,3 +15,6 @@ node_modules/
 
 # OS
 .DS_Store
+
+# Claude Code (personal, machine-local — the project skill IS tracked)
+.claude/settings.local.json
