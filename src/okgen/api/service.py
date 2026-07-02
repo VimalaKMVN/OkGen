@@ -1069,7 +1069,7 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
 # --------------------------------------------------------------------------- #
 # Bulk rename
 # --------------------------------------------------------------------------- #
-DERIVED_TOKENS = ["brand", "format_label", "layout", "key", "seq", "orig"]
+DERIVED_TOKENS = ["brand", "format_label", "region", "layout", "key", "seq", "orig"]
 _INVALID_NAME = set('\\/:*?"<>|')
 
 
@@ -1107,6 +1107,7 @@ def _file_tokens(path: Path, registry, config, custom: dict) -> dict:
     toks["format_label"] = config.label("format", fmt, chain=chain, layout=layout, fmt=fmt) if fmt else ""
     kf = config.unique_field(layout)
     toks["key"] = toks.get(kf, "") if kf else ""
+    toks["region"] = config.region(toks.get("zone", ""))
     toks["orig"] = path.stem
     for cname, cval in (custom or {}).items():
         toks[cname] = cval

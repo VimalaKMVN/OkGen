@@ -88,11 +88,14 @@ class Config:
         nicelabel_warning: Optional[str] = None,
         send_quips: Optional[List[str]] = None,
         send_done_quips: Optional[List[str]] = None,
+        regions: Optional[Dict[str, str]] = None,
     ):
         self._chains = chains
         self._rules = rules
         self._limits = limits or {}
         self._unique_fields = unique_fields or {}
+        # {zone_value: region_label}, inverted from the region->zones config.
+        self._regions = regions or {}
         self._field_colors = field_colors or {}
         self._section_counts = section_counts or {}
         self._nicelabel_path = nicelabel_path
@@ -212,6 +215,17 @@ class Config:
         """Saved rename patterns: [{name, separator, parts:[{type,name|value}]}]."""
         return [dict(p, parts=list(p["parts"])) for p in self._rename_presets]
 
+    # ----- zone -> region mapping -----
+    def region(self, zone: Optional[str]) -> str:
+        """Region label for a zone value, or '' if unmapped/blank."""
+        if zone is None:
+            return ""
+        return self._regions.get(str(zone).strip(), "")
+
+    def regions(self) -> Dict[str, str]:
+        """The full {zone: region} map (copy)."""
+        return dict(self._regions)
+
     # ----- unique key field -----
     def unique_field(self, layout: Optional[str]) -> Optional[str]:
         """Field that must be unique within a folder for this layout, or None."""
@@ -320,6 +334,14 @@ class Config:
             elif isinstance(rt, list):   # back-compat: a flat list = header fields
                 rename_tokens = {"derived": [], "header_fields": [str(t) for t in rt], "custom": {}}
 
+        regions: Dict[str, str] = {}
+        regions_path = cdir / "regions.yaml"
+        if regions_path.is_file():
+            data = yaml.safe_load(regions_path.read_text(encoding="utf-8")) or {}
+            for region, zones in (data.get("regions") or {}).items():
+                for z in (zones or []):
+                    regions[str(z).strip()] = str(region)
+
         rename_presets: List[dict] = []
         rp_path = cdir / "rename_presets.yaml"
         if rp_path.is_file():
@@ -341,4 +363,4 @@ class Config:
 
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
-                   nicelabel_warning, send_quips, send_done_quips)
+                   nicelabel_warning, send_quips, send_done_quips, regions)

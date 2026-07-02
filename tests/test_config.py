@@ -74,6 +74,20 @@ def test_list_matching(cfg):
     assert cfg.label("type", "1", chain="03", layout="CartonLabel") == "1"
 
 
+def test_region_mapping(cfg):
+    # Zones map to their configured region label.
+    assert cfg.region("01") == "Reg1"
+    assert cfg.region("33") == "Reg1"
+    assert cfg.region("10") == "Reg2"
+    assert cfg.region("07") == "Reg2"
+    # Padding is stripped before lookup.
+    assert cfg.region(" 05 ") == "Reg1"
+    # Unmapped zone / blank / None -> empty string (no region).
+    assert cfg.region("99") == ""
+    assert cfg.region("") == ""
+    assert cfg.region(None) == ""
+
+
 @pytest.mark.skipif(not DATA_DIR.is_dir(), reason="sample data not present")
 def test_read_chain(cfg):
     assert read_chain(DATA_DIR / "StyleHeader.OK") == "03"

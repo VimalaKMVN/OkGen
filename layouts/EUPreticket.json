@@ -16,8 +16,8 @@
       "issues": [],
       "fields": [
         {
-          "name": "Indicator",
-          "field_name": "Indicator",
+          "name": "indicator",
+          "field_name": "indicator",
           "size": 1,
           "start": 1,
           "field_type": "char",
@@ -159,8 +159,8 @@
           "issues": []
         },
         {
-          "name": "Zone",
-          "field_name": "Zone",
+          "name": "zone",
+          "field_name": "zone",
           "size": 2,
           "start": 52,
           "field_type": "char",

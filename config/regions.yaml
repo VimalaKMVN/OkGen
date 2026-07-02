@@ -1,0 +1,12 @@
+# Region grouping for the `region` rename token.
+#
+# Maps each region label to the list of `zone` values that belong to it. The
+# `region` derived token looks up a file's `zone` value here and resolves to
+# the matching region label (blank if the zone isn't listed / the layout has
+# no zone field, e.g. non-EU layouts).
+#
+# Zone values must match what's in the file (EUPreticket zones are 2-char,
+# zero-padded: "01".."10", "33", ...). Edit freely — add regions, move zones.
+regions:
+  Reg1: ["01", "03", "05", "33"]
+  Reg2: ["02", "04", "06", "07", "08", "10"]

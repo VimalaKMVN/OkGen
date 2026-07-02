@@ -22,6 +22,7 @@ rename_tokens:
     RP: "RP"
     T: "T"
     C: "C"
+    Z: "Z"
     # PROD: "PROD"
     # REPRINT: "RP"
 
@@ -29,6 +30,7 @@ rename_tokens:
   derived:
     - brand          # chain name from chains.yaml (e.g. Homegoods)
     - format_label   # friendly format from display.yaml (e.g. Regular Tag)
+    - region         # region label from regions.yaml, keyed off `zone` (e.g. Reg2)
     - layout         # CartonLabel / DistLabels / Preticket / StyleHeader
     - key            # the layout's unique key value (keytrol / po / picklist_id)
     - seq            # running counter 0001, 0002, ...
@@ -100,3 +102,10 @@ rename_tokens:
     - fact1
     - fact2
     - fact3
+    # ---- EU/EWMS (EUPreticket) fields ----
+    - zone           # header zone (e.g. '10')
+    - page           # detail: page number
+    - line           # detail: line number
+    - size           # detail: size code (e.g. 'XL')
+    - qty            # detail: quantity
+    - ladder         # detail: ladder

@@ -93,11 +93,11 @@ def test_eu_delimited_header_fields(registry):
     assert okf.layout.name == "EUPreticket"
     assert okf.layout.delimited is True
     h = okf.records[0]
-    assert h.get("Indicator") == "P"
+    assert h.get("indicator") == "P"
     assert h.get("chain") == "05"
     assert h.get("format") == "A"
     assert h.get("po") == "10021888"
-    assert h.get("Zone") == "10"
+    assert h.get("zone") == "10"
     # A detail line maps its delimited tokens too.
     detail = okf.records[1]
     assert detail.get("style") == "750440"
