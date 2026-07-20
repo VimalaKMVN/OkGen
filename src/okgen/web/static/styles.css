@@ -237,6 +237,14 @@ input.cell, select.cell, input.fval, select.fval {
   padding: 3px 5px;
 }
 input.cell { min-width: 60px; }
+/* Read-only field: a static, locked-looking label (no input chrome). */
+span.fval-ro {
+  display: inline-block;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted, #aaa);
+  font-style: italic;
+}
 input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .field-coded { color: var(--ok); }
 

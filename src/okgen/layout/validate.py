@@ -83,6 +83,19 @@ def _check_section(section: Section) -> List[FieldCheck]:
 
 
 def validate_layout(layout: Layout) -> LayoutReport:
+    # Delimited layouts locate fields by walking delimiters, not by fixed
+    # start/size, so the fixed-width slice cross-check doesn't apply — every
+    # field is reported as skipped rather than a spurious mismatch.
+    if getattr(layout, "delimited", False):
+        checks = [
+            FieldCheck(
+                s.name, f.name, f.start, f.size, f.sample_value, None, "skipped",
+                note="delimited layout — fields are delimiter-walked, not fixed-width",
+            )
+            for s in layout.sections for f in s.fields
+        ]
+        return LayoutReport(layout=layout.name, checks=checks)
+
     checks: List[FieldCheck] = []
     for section in layout.sections:
         checks.extend(_check_section(section))

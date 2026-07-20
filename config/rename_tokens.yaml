@@ -109,3 +109,24 @@ rename_tokens:
     - size           # detail: size code (e.g. 'XL')
     - qty            # detail: quantity
     - ladder         # detail: ladder
+    # ---- EU/EWMS GTA (EUStyleHeader / EUCartonLabel) fields ----
+    - process             # header: D/H format-code field (renamed from `format`)
+    - distribution_type   # header: distribution type (e.g. 'RG', 'AD')
+    - pack_type           # header: pack type ('CL'/'C'/'MP') — note: shared name above
+    - description         # header: item description
+    - distro_date         # header: distro date
+    - quantity            # header: quantity
+    - c_distro            # header: C:… distro id
+    - universal_item      # header: universal item
+    - wave                # header: wave
+    - header_asn_id       # header: ASN id
+    - carton_nbr          # header: carton number
+    - store               # detail: store / DC number
+    - size_code           # detail: size code
+    - ad_date             # detail: ad date (shared name above)
+    - message_code_1      # detail: message code 1
+    - message_code_2      # detail: message code 2
+    - zone_retail         # detail: zone retail price
+    - zone_compare_at     # detail: zone compare-at price
+    # NOTE: EUCartonLabel `format` is a DERIVED token (config/derived_fields.yaml),
+    # computed from distribution_type + pack_type — offered via the `format` token.

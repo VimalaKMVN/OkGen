@@ -121,6 +121,60 @@ presets:
   # Labelled full tag, e.g.
   #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
   # (custom label token, then its header value, repeated)
+  # EU / EWMS pipe-delimited preticket, e.g.
+  #   Europe_EUPreticket_FMT_A_Z10_Reg2_KEY_10021888_T_1_DEPT_87_CP_003500_CU_N_RP_999998.OK
+  # (key = po; region from regions.yaml via zone; type/comp_price/comp_up/ret_price
+  #  come from the detail line)
+  - name: "EUCartonLabel naming convension"
+    separator: "_"
+    parts:
+      - brand          # Europe
+      - layout         # EUPreticket
+      - FMT            # label "FMT"
+      - format         #   value A
+      - KEY            # label "KEY"
+      - keytrol             #   value 10021888
+      - T              # label "T"
+      - type           #   value 1  (from the detail line)
+      - DEPT           # label "DEPT"
+      - dept           #   value 87
+      - CP             # label "CP"
+      - zone_compare_at     #   value 003500  (from the detail line)
+      - RP             # label "RP"
+      - zone_retail      #   value 999998  (from the detail line)
+
+  # Labelled full tag, e.g.
+  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
+  # (custom label token, then its header value, repeated)
+  # EU / EWMS pipe-delimited preticket, e.g.
+  #   Europe_EUPreticket_FMT_A_Z10_Reg2_KEY_10021888_T_1_DEPT_87_CP_003500_CU_N_RP_999998.OK
+  # (key = po; region from regions.yaml via zone; type/comp_price/comp_up/ret_price
+  #  come from the detail line)
+  - name: "EUStyle Header naming convension"
+    separator: "_"
+    parts:
+      - brand          # Europe
+      - layout         # EUPreticket
+      - FMT            # label "FMT"
+      - ticket_format         #   value A
+      - KEY            # label "KEY"
+      - keytrol             #   value 10021888
+      - T              # label "T"
+      - type           #   value 1  (from the detail line)
+      - DEPT           # label "DEPT"
+      - dept           #   value 87
+      - CP             # label "CP"
+      - zone_compare_at     #   value 003500  (from the detail line)
+      - RP             # label "RP"
+      - zone_retail      #   value 999998  (from the detail line)
+
+
+
+
+
+  # Labelled full tag, e.g.
+  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
+  # (custom label token, then its header value, repeated)
   - name: "Carton Label naming convension"
     separator: "_"
     parts:

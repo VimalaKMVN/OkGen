@@ -20,6 +20,8 @@ EXPECTED = {
     "Preticket.OK": "Preticket",
     "StyleHeader.OK": "StyleHeader",
     "EUPreticket.OK": "EUPreticket",
+    "EUStyleHeader.OK": "EUStyleHeader",
+    "EUCartonLabel.OK": "EUCartonLabel",
 }
 
 pytestmark = pytest.mark.skipif(
@@ -49,3 +51,11 @@ def test_eu_delimited_header_detection():
     assert detect_from_header(eu).layout == "EUPreticket"
     # A BOM without the '¦P|' signature must NOT match.
     assert detect_from_header("\xef\xbb\xbf|02Y...").layout != "EUPreticket"
+
+
+def test_eu_delimited_styleheader_cartonlabel_detection():
+    # Pipe-delimited, no BOM; format letter at raw pos 2 picks the layout.
+    assert detect_from_header("|D|Q|05|N|126539Q|").layout == "EUStyleHeader"
+    assert detect_from_header("|H|F|05|N|8881333|").layout == "EUCartonLabel"
+    # NA headers keep their numeric chain code at pos 2 and must not match.
+    assert detect_from_header("|03N...").layout == "StyleHeader"

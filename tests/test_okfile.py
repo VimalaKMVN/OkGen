@@ -16,7 +16,7 @@ DATA_DIR = Path(
 )
 
 OK_FILES = ["CartonLabel.OK", "DistLabels.OK", "Preticket.OK", "StyleHeader.OK",
-            "EUPreticket.OK"]
+            "EUPreticket.OK", "EUStyleHeader.OK", "EUCartonLabel.OK"]
 
 pytestmark = pytest.mark.skipif(
     not DATA_DIR.is_dir(), reason=f"sample data dir not present: {DATA_DIR}"
@@ -120,3 +120,50 @@ def test_eu_delimited_edit_preserves_delimiters_and_roundtrips(registry):
 
     h.set("po", old_po)
     assert okf.to_bytes() == original, "reverting must restore exact bytes (incl. BOM)"
+
+
+def test_eu_styleheader_sections_and_markers(registry):
+    """EUStyleHeader (format D) splits its '|'-led records into Header/Lane/Detail."""
+    okf = parse_okfile(DATA_DIR / "EUStyleHeader.OK", registry=registry)
+    assert okf.layout.name == "EUStyleHeader"
+    assert okf.layout.delimited is True
+    secs = okf.sections()
+    assert {"Header", "Lane", "Detail"} == set(secs)
+    h = okf.records[0]
+    assert h.get("process") == "D"
+    assert h.get("chain") == "05"
+    assert h.get("keytrol") == "126539Q    "
+    # '&' record -> Lane, '#' records -> Detail (marker-routed).
+    assert secs["Lane"][0].get("lane_location") == "STM 201    "
+    assert len(secs["Detail"]) == 10
+    assert secs["Detail"][0].get("store") == "3110601"
+
+
+def test_eu_cartonlabel_header_and_detail(registry):
+    """EUCartonLabel (format H) parses header tokens and '#' detail records."""
+    okf = parse_okfile(DATA_DIR / "EUCartonLabel.OK", registry=registry)
+    assert okf.layout.name == "EUCartonLabel"
+    secs = okf.sections()
+    assert {"Header", "Detail"} == set(secs)
+    h = okf.records[0]
+    assert h.get("process") == "H"
+    assert h.get("chain") == "05"
+    assert h.get("c_distro") == "C:1234567  "
+    assert len(secs["Detail"]) == 4
+
+
+@pytest.mark.parametrize("filename", ["EUStyleHeader.OK", "EUCartonLabel.OK"])
+def test_eu_delimited_edit_roundtrips(registry, filename):
+    """Editing the keytrol (unique key) on the new EU layouts round-trips exactly."""
+    path = DATA_DIR / filename
+    original = path.read_bytes()
+    okf = parse_okfile(path, registry=registry)
+    h = okf.records[0]
+
+    old_len, old_key = len(h.raw), h.get("keytrol")
+    h.set("keytrol", "0000000000X")   # 11 chars = field width
+    assert len(h.raw) == old_len, "delimited edit must not change line length"
+    assert okf.to_bytes() != original
+
+    h.set("keytrol", old_key)
+    assert okf.to_bytes() == original, "reverting must restore exact bytes"

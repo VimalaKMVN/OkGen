@@ -28,13 +28,16 @@ def layouts():
 def test_all_layouts_compile(layouts):
     names = {l.name for l in layouts}
     assert names == {"CartonLabel", "DistLabels", "Preticket", "StyleHeader",
-                     "EUPreticket"}
+                     "EUPreticket", "EUStyleHeader", "EUCartonLabel"}
 
 
 def test_eu_layout_is_delimited(layouts):
     eu = next(l for l in layouts if l.name == "EUPreticket")
     assert eu.delimited is True
     assert eu.delimiter == "|"
+    # The EU StyleHeader / CartonLabel (EWMS) layouts are delimited too.
+    for name in ("EUStyleHeader", "EUCartonLabel"):
+        assert next(l for l in layouts if l.name == name).delimited is True
     # NA layouts stay fixed-width.
     na = next(l for l in layouts if l.name == "Preticket")
     assert na.delimited is False

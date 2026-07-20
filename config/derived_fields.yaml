@@ -1,0 +1,36 @@
+# Derived (computed) fields — shown in the section editor but NOT present in
+# the raw OK file. The value is recomputed from other fields of the same record
+# via the FIRST matching rule. Derived fields are read-only; when the user edits
+# one of the driving `inputs`, the value updates live (and again server-side on
+# reload). Nothing is written for a derived field on save.
+#
+#   layout -> [ { name, section, after, inputs, rules: [ {when, value} ], default } ]
+#     name     the derived field's display name (need not exist in the layout)
+#     section  which record section it appears in (default: Header)
+#     after    place it right after this field in the form (optional)
+#     inputs   the driving field names (used to know when to recompute live)
+#     rules    evaluated top-to-bottom; first whose `when` matches wins
+#     default  value when no rule matches (optional, default "")
+#
+# `when` is a map of field-name -> condition; ALL must hold (AND). Values are
+# compared trimmed. Condition operators:
+#     eq: X        equals X
+#     neq: X       does not equal X
+#     in: [A, B]   is one of the list
+#     nin: [A, B]  is none of the list
+derived_fields:
+  EUCartonLabel:
+    - name: format
+      section: Header
+      after: process
+      inputs: [distribution_type, pack_type]
+      rules:
+        - when: {distribution_type: {neq: AD}, pack_type: {in: [CL, C]}}
+          value: "1 - Carton Label"
+        - when: {distribution_type: {eq: AD}, pack_type: {in: [CL, C]}}
+          value: "2 - AD Carton Label"
+        - when: {distribution_type: {neq: AD}, pack_type: {eq: MP}}
+          value: "4 - Masterpack"
+        - when: {distribution_type: {eq: AD}, pack_type: {eq: MP}}
+          value: "5 - AD Masterpack"
+      default: ""

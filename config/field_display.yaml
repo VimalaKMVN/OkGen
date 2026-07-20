@@ -1,0 +1,19 @@
+# Per-layout editor-field display rules.
+#
+#   hidden    field names never shown in the section editor — structural /
+#             marker tokens the user doesn't need to see (the leading-'|'
+#             placeholder, the '#'/'&' record-type chars). The bytes are still
+#             parsed and preserved on save; this only hides them from the form.
+#
+#   readonly  field names shown but NOT editable — rendered as a static label.
+#             A coded value uses its display.yaml label (e.g. format H ->
+#             "CartonLabels"), so the user sees the friendly value locked.
+#
+#   layout name -> [output_field_name, ...]
+hidden:
+  EUStyleHeader: [marker, detail_marker, lane_marker]
+  EUCartonLabel: [marker, detail_marker]
+
+readonly:
+  EUStyleHeader: [process]
+  EUCartonLabel: [process]

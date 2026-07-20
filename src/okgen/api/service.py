@@ -160,7 +160,9 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
     okf = parse_okfile(path, registry=registry)
     layout_name = okf.layout.name
     chain = okf.records[0].get("chain") if okf.records else ""
-    fmt = _header_value(okf, "format")
+    # NA layouts name the format-code field "format"; the EU GTA layouts call
+    # it "process" (D/H). Fall back so the display context stays populated.
+    fmt = _header_value(okf, "format") or _header_value(okf, "process")
     roundtrip_ok = okf.to_bytes() == path.read_bytes()
 
     sections_out: List[dict] = []
@@ -169,19 +171,63 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
         sec = recs[0].section if recs and recs[0].section else None
         field_meta = []
         if sec:
+            hidden = config.hidden_fields(layout_name)
+            readonly = config.readonly_fields(layout_name)
             for f in sec.fields:
                 opts = config.options(f.name, chain=chain, layout=layout_name, fmt=fmt)
+                editable = f.name not in readonly
+                # Chain edits can't cross an isolation boundary (e.g. Europe):
+                # offer only chains the current one may become; lock it when the
+                # only option is itself.
+                if f.name == "chain" and opts:
+                    opts = {c: n for c, n in opts.items() if config.can_change_chain(chain, c)}
+                    if len(opts) <= 1:
+                        editable = False
                 field_meta.append({
                     "name": f.name,
                     "start": f.start,
                     "size": f.size,
                     "type": f.field_type,
                     "options": opts or None,
+                    "hidden": f.name in hidden,
+                    "editable": editable,
                 })
-        records_out = [
-            {"index": r.index, "marker": r.marker, "values": r.values()}
-            for r in recs
+        # Derived (computed) fields: not in the raw file — inject their meta
+        # (read-only, carrying the rules so the client can recompute live) and
+        # their computed value into each record.
+        derived_specs = [
+            s for s in config.derived_fields(layout_name)
+            if s.get("section", "Header") == sec_name
         ]
+        for spec in derived_specs:
+            meta = {
+                "name": spec["name"],
+                "start": None,
+                "size": None,
+                "type": "derived",
+                "options": None,
+                "hidden": False,
+                "editable": False,
+                "derived": True,
+                "inputs": list(spec.get("inputs", [])),
+                "rules": spec.get("rules", []),
+                "default": spec.get("default", ""),
+            }
+            after = spec.get("after")
+            pos = next((i for i, m in enumerate(field_meta) if m["name"] == after), None)
+            if pos is None:
+                field_meta.append(meta)
+            else:
+                field_meta.insert(pos + 1, meta)
+
+        records_out = []
+        for r in recs:
+            vals = r.values()
+            if derived_specs:
+                vals = dict(vals)
+                for spec in derived_specs:
+                    vals[spec["name"]] = config.eval_derived(spec, vals)
+            records_out.append({"index": r.index, "marker": r.marker, "values": vals})
         sections_out.append({
             "index": sec_index,
             "name": sec_name,
@@ -242,6 +288,7 @@ def apply_edits(
     registry: LayoutRegistry,
     target_path=None,
     backup: bool = True,
+    config: Config = None,
 ) -> dict:
     """Apply field edits and write the file (byte-exact for untouched spans).
 
@@ -251,7 +298,7 @@ def apply_edits(
     """
     src = Path(path)
     okf = parse_okfile(src, registry=registry)
-    _apply_edits_to_okf(okf, edits)
+    _apply_edits_to_okf(okf, edits, config)
 
     out = Path(target_path) if target_path else src
     if backup and out.exists() and target_path is None:
@@ -266,7 +313,7 @@ def apply_edits(
     }
 
 
-def _apply_edits_to_okf(okf, edits: List[dict]) -> None:
+def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
     """Validate field widths, then apply edits in place. Raises EditError."""
     by_index = {r.index: r for r in okf.records}
     errors: List[dict] = []
@@ -285,6 +332,16 @@ def _apply_edits_to_okf(okf, edits: List[dict]) -> None:
                 "edit": e,
                 "error": f"value '{e['value']}' exceeds field '{e['field']}' size {f.size}",
             })
+        # Chain edits cannot cross an isolation boundary (e.g. Europe <-> NA).
+        if config is not None and e["field"] == "chain":
+            old = (rec.get("chain") or "").strip()
+            new = (e["value"] or "").strip()
+            if old and new and new != old and not config.can_change_chain(old, new):
+                errors.append({
+                    "edit": e,
+                    "error": (f"chain cannot change from {old} to {new}: "
+                              f"Europe is isolated from the other chains"),
+                })
     if errors:
         raise EditError(str(errors))
     for e in edits:
@@ -311,7 +368,7 @@ def add_record(
     """
     src = Path(path)
     okf = parse_okfile(src, registry=registry)
-    _apply_edits_to_okf(okf, edits or [])
+    _apply_edits_to_okf(okf, edits or [], config)
 
     if after_index is not None:
         anchor = next((r for r in okf.records if r.index == after_index), None)
@@ -364,7 +421,7 @@ def delete_record(
     """
     src = Path(path)
     okf = parse_okfile(src, registry=registry)
-    _apply_edits_to_okf(okf, edits)
+    _apply_edits_to_okf(okf, edits, config)
 
     target = next((r for r in okf.records if r.index == record_index), None)
     if target is None:
@@ -387,7 +444,7 @@ def move_record(path, record_index, direction, edits, registry, config, backup=T
     """
     src = Path(path)
     okf = parse_okfile(src, registry=registry)
-    _apply_edits_to_okf(okf, edits)
+    _apply_edits_to_okf(okf, edits, config)
     recs = okf.records
     idx = next((i for i, r in enumerate(recs) if r.index == record_index), None)
     if idx is None:
@@ -1109,14 +1166,22 @@ def _file_tokens(path: Path, registry, config, custom: dict) -> dict:
     toks["key"] = toks.get(kf, "") if kf else ""
     toks["region"] = config.region(toks.get("zone", ""))
     toks["orig"] = path.stem
+    # Derived (computed) fields — e.g. EUCartonLabel's `format` — aren't in the
+    # raw record; resolve them from the driving fields already in ``toks``.
+    for spec in config.derived_fields(layout):
+        toks[spec["name"]] = config.eval_derived(spec, toks)
     for cname, cval in (custom or {}).items():
         toks[cname] = cval
     return toks
 
 
-def _build_name(parts, toks, separator, seq, seq_pad=4) -> str:
+def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None) -> str:
     """Join ordered parts into a filename stem. A {'type': 'glue'} part means the
-    next value attaches with NO separator. Empty values are skipped."""
+    next value attaches with NO separator. Empty values are skipped.
+
+    ``label_names`` are tokens whose values may contain spaces (brand,
+    format_label, derived fields) and so are space-to-underscore sanitized."""
+    label_names = label_names or {"brand", "format_label"}
     out = ""
     glue = False
     for part in parts or []:
@@ -1130,7 +1195,7 @@ def _build_name(parts, toks, separator, seq, seq_pad=4) -> str:
             name = part.get("name") or part.get("value", "")
             if name == "seq":
                 v = str(seq).zfill(seq_pad)
-            elif name in ("brand", "format_label"):
+            elif name in label_names:
                 v = _sanitize_label(toks.get(name, ""))
             else:
                 v = _strip_invalid(toks.get(name, ""))
@@ -1166,6 +1231,12 @@ def rename_scope(paths, registry, config) -> dict:
                 if f.name not in seen:
                     seen.add(f.name)
                     header_union.append(f.name)
+        # Derived fields (e.g. EUCartonLabel `format`) aren't layout fields but
+        # are valid rename tokens — offer them in the palette too.
+        for spec in config.derived_fields(lay):
+            if spec.get("name") and spec["name"] not in seen:
+                seen.add(spec["name"])
+                header_union.append(spec["name"])
 
     groups = config.rename_token_groups()
     if groups is None:
@@ -1197,6 +1268,7 @@ def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:
     for p in paths or []:
         by_folder[str(Path(p).parent)].append(Path(p))
 
+    label_names = {"brand", "format_label"} | config.all_derived_names()
     results = []
     for folder, files in by_folder.items():
         folder = Path(folder)
@@ -1210,7 +1282,7 @@ def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:
             except Exception as exc:
                 results.append({"path": str(f), "old": f.name, "new": None, "status": "error", "error": str(exc)})
                 continue
-            base = _build_name(parts, toks, separator, seq)
+            base = _build_name(parts, toks, separator, seq, label_names=label_names)
             if not base:
                 results.append({"path": str(f), "old": f.name, "new": None, "status": "empty"})
                 continue

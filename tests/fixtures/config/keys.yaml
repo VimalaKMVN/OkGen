@@ -5,3 +5,5 @@ unique_fields:
   Preticket: po
   StyleHeader: keytrol
   EUPreticket: po
+  EUStyleHeader: keytrol
+  EUCartonLabel: keytrol

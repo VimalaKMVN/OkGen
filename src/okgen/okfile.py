@@ -198,14 +198,43 @@ def _delim_spans(raw: str, section: Section, delimiter: str,
     return spans
 
 
+def _delim_record_marker(raw: str, delimiter: str) -> str:
+    """Record-type marker of a delimited line, or '' if it has none.
+
+    Files whose lines lead with the delimiter (e.g. ``|#|...`` / ``|&|...``)
+    carry a one-char record type right after it; return that char. Marker-less
+    delimited details (e.g. EUPreticket, whose lines start with data) return ''.
+    """
+    if raw[:1] == delimiter:
+        return raw[1:2]
+    return ""
+
+
 def _assign_delimited(raws: List[str], layout: Layout) -> List[Record]:
-    """Assign records for a delimited layout (header = line 0, rest = detail)."""
+    """Assign records for a delimited layout.
+
+    Line 0 is the Header. Later lines map to the non-header sections by their
+    record-type marker in order of first appearance (``&`` -> first detail
+    section, ``#`` -> next, ...), mirroring the fixed-width assigner. A layout
+    whose detail lines carry no marker collapses to a single detail section.
+    """
     header_sec = layout.sections[0] if layout.sections else None
     detail_secs = layout.sections[1:]
+    marker_to_sec: Dict[str, Optional[Section]] = {}
     records: List[Record] = []
     for i, raw in enumerate(raws):
         is_header = i == 0
-        sec = header_sec if is_header else (detail_secs[0] if detail_secs else None)
+        if is_header:
+            sec = header_sec
+        else:
+            mk = _delim_record_marker(raw, layout.delimiter)
+            if mk not in marker_to_sec:
+                idx = len(marker_to_sec)
+                marker_to_sec[mk] = (
+                    detail_secs[idx] if idx < len(detail_secs)
+                    else (detail_secs[0] if detail_secs else None)
+                )
+            sec = marker_to_sec[mk]
         rec = Record(raw=raw, offset=0, section=sec, index=i)
         if sec is not None:
             rec.field_spans = _delim_spans(

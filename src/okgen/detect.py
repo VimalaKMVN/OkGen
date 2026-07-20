@@ -57,6 +57,16 @@ def detect_from_header(header: str) -> DetectionResult:
             "EUPreticket", "UTF-8 BOM + '¦P|' delimited header", "¦", header
         )
 
+    # EU/EWMS pipe-delimited StyleHeader / CartonLabel: Latin-1 (no BOM), the
+    # line leads with the '|' delimiter and carries the file format letter at
+    # raw pos 2 -> 'D' = StyleHeader (layup), 'H' = CartonLabel (holdings).
+    # NA chain codes at that position are always digits, so there's no clash.
+    if header[:1] in RECORD_MARKERS and header[1:2] in ("D", "H"):
+        name = "EUStyleHeader" if header[1] == "D" else "EUCartonLabel"
+        return DetectionResult(
+            name, f"raw pos2 == {header[1]!r} (EU delimited)", header[0], header
+        )
+
     marker = header[0] if header else ""
 
     def raw(pos: int) -> str:

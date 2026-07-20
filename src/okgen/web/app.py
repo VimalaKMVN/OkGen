@@ -82,6 +82,7 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
                 registry,
                 target_path=body.get("target_path"),
                 backup=body.get("backup", True),
+                config=config,
             ))
         except service.EditError as exc:
             return _err(str(exc), 422)

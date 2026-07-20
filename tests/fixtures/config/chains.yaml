@@ -6,3 +6,6 @@ chains:
   "04": {name: Winners, short: WIN, color: "#5A2D81"}
   "05": {name: Europe, short: EU, color: "#003399"}
   "06": {name: HomeSense, short: HS, color: "#E87722"}
+
+isolated_chain_groups:
+  - ["05"]   # Europe — isolated from the North-America chains

@@ -18,3 +18,9 @@ rename_tokens:
     - picklist_id
     - size_rec
     - lane_rec
+    # EU/EWMS GTA fields
+    - process
+    - distribution_type
+    - pack_type
+    - zone_retail
+    - zone_compare_at

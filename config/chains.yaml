@@ -38,3 +38,11 @@ chains:
     short: HS
     color: "#E87722"
     icon: null
+
+# Chain-edit isolation. You cannot change a file's chain INTO or OUT OF an
+# isolated group — so a Europe file can't become North America, and vice versa.
+# Chains within one group may swap among themselves; chains not listed here are
+# freely interchangeable (the North-America banners 01/02/03/04/06). Add more
+# groups later if another region needs to be locked off.
+isolated_chain_groups:
+  - ["05"]   # Europe (TJXE) — isolated from the North-America chains

@@ -998,8 +998,69 @@ async function addRowAfter(recordIndex) {
 
 function editKey(s, r, f) { return `${s}|${r}|${f}`; }
 
+// ----- derived (computed) fields: mirror config/derived_fields.yaml logic ---
+function derivedCondMatch(v, cond) {
+  const t = String(v == null ? "" : v).trim();
+  if (cond && typeof cond === "object") {
+    if ("eq" in cond) return t === String(cond.eq).trim();
+    if ("neq" in cond) return t !== String(cond.neq).trim();
+    if ("in" in cond) return (cond.in || []).map((x) => String(x).trim()).includes(t);
+    if ("nin" in cond) return !(cond.nin || []).map((x) => String(x).trim()).includes(t);
+    return false;
+  }
+  return t === String(cond).trim();
+}
+
+function evalDerived(spec, getVal) {
+  for (const rule of spec.rules || []) {
+    const when = rule.when || {};
+    if (Object.keys(when).every((f) => derivedCondMatch(getVal(f), when[f]))) return rule.value;
+  }
+  return spec.default || "";
+}
+
+// Recompute every derived field in a section/record from the live control
+// values (falling back to parsed values for unrendered inputs).
+function refreshDerived(si, ri) {
+  if (!state.view) return;
+  const sec = state.view.sections[Number(si)];
+  if (!sec) return;
+  const derived = sec.fields.filter((f) => f.derived);
+  if (!derived.length) return;
+  const host = $("#editor");
+  const getVal = (f) => {
+    const ctrl = host.querySelector(
+      `.fval[data-section="${si}"][data-record="${ri}"][data-field="${CSS.escape(f)}"]`);
+    if (ctrl) return ctrl.value;
+    const rec = sec.records.find((r) => String(r.index) === String(ri));
+    return rec ? (rec.values[f] != null ? rec.values[f] : "") : "";
+  };
+  derived.forEach((spec) => {
+    const span = host.querySelector(
+      `.fval-ro[data-derived="${CSS.escape(spec.name)}"][data-section="${si}"][data-record="${ri}"]`);
+    if (!span) return;
+    const val = evalDerived(spec, getVal);
+    span.textContent = val;
+    span.title = val;
+  });
+}
+
 function makeControl(sec, rec, field) {
   const value = (rec.values[field.name] != null) ? rec.values[field.name] : "";
+  // Read-only field: show a static label (coded values use their friendly
+  // label) with no input, so it can never be edited or collected as an edit.
+  if (field.editable === false) {
+    const shown = (field.options && field.options[value] != null) ? field.options[value] : value;
+    const ro = el("span", "cell fval fval-ro");
+    ro.textContent = shown;
+    ro.title = value;
+    if (field.derived) {   // recompute target: tag so edits to inputs can update it
+      ro.dataset.section = sec.index;
+      ro.dataset.record = rec.index;
+      ro.dataset.derived = field.name;
+    }
+    return ro;
+  }
   let ctrl;
   if (field.options) {
     ctrl = el("select", "cell fval");
@@ -1030,11 +1091,14 @@ function renderForm(sec) {
   const keyField = state.view && state.view.key_field;
   const colors = window.OKGEN_FIELD_COLORS || {};
   sec.fields.forEach((field) => {
+    if (field.hidden) return;   // structural/marker field — never shown
     const isKey = field.name === keyField;
     const f = el("div", "field" + (isKey ? " field-key" : ""));
     const color = colors[field.name];
     const label = el("label", "field-label" + (!color && field.options ? " field-coded" : ""));
-    label.textContent = `${field.name}  ·  ${field.size != null ? field.size : "?"}ch`;
+    label.textContent = field.derived
+      ? `${field.name}  ·  derived`
+      : `${field.name}  ·  ${field.size != null ? field.size : "?"}ch`;
     if (color) { label.style.color = color; label.style.fontWeight = "700"; }  // configured field color
     if (isKey) label.appendChild(el("span", "key-tag", "🔑 unique"));
     f.appendChild(label);
@@ -1050,7 +1114,10 @@ function renderTable(sec) {
   const thead = el("thead");
   const htr = el("tr");
   htr.appendChild(el("th", null, "#"));
-  sec.fields.forEach((f) => htr.appendChild(el("th", null, `${f.name} (${f.size != null ? f.size : "?"})`)));
+  sec.fields.forEach((f) => {
+    if (f.hidden) return;   // structural/marker field — never shown
+    htr.appendChild(el("th", null, `${f.name} (${f.size != null ? f.size : "?"})`));
+  });
   htr.appendChild(el("th", null, ""));   // row actions column
   thead.appendChild(htr);
   table.appendChild(thead);
@@ -1060,6 +1127,7 @@ function renderTable(sec) {
     const tr = el("tr");
     const num = el("td"); num.appendChild(el("span", "rownum", String(i + 1))); tr.appendChild(num);  // per-section row #
     sec.fields.forEach((field) => {
+      if (field.hidden) return;   // structural/marker field — never shown
       const td = el("td");
       td.appendChild(makeControl(sec, rec, field));
       tr.appendChild(td);
@@ -1140,6 +1208,7 @@ function onEdit(e) {
     delete state.edits[key];
     c.classList.remove("dirty");
   }
+  refreshDerived(c.dataset.section, c.dataset.record);   // driving field may feed a derived one
   updateSaveButtons();
 }
 

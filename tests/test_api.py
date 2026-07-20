@@ -706,6 +706,120 @@ def test_make_unique_eu_reads_key_and_stays_nonzero(registry, config, tmp_path):
     assert all(not by_name[n]["duplicate"] for n in by_name)
 
 
+def test_eu_gta_hidden_and_readonly_process(registry, config):
+    """EU GTA layouts hide marker fields and lock `process` to a friendly label."""
+    for fn, letter, want_label in [
+        ("EUStyleHeader.OK", "D", "(D) StyleHeader"),
+        ("EUCartonLabel.OK", "H", "(H) Holdings/CartonLabels"),
+    ]:
+        view = service.parse_file_view(DATA_DIR / fn, registry, config)
+        by_sec = {s["name"]: s for s in view["sections"]}
+
+        # The leading-'|' placeholder is hidden in every section; the record-type
+        # markers ('#'/'&') are hidden in their detail/lane sections.
+        for sec in view["sections"]:
+            hidden = {f["name"] for f in sec["fields"] if f["hidden"]}
+            assert "marker" in hidden
+        assert "detail_marker" in {f["name"] for f in by_sec["Detail"]["fields"] if f["hidden"]}
+        if "Lane" in by_sec:
+            assert "lane_marker" in {f["name"] for f in by_sec["Lane"]["fields"] if f["hidden"]}
+
+        # `process` is shown but not editable, and carries its layout-name label.
+        proc = next(f for f in by_sec["Header"]["fields"] if f["name"] == "process")
+        assert proc["editable"] is False
+        assert proc["options"][letter] == want_label
+
+
+def test_eu_cartonlabel_derived_format(registry, config):
+    """EUCartonLabel gets a read-only, computed `format` field (not in the raw)."""
+    view = service.parse_file_view(DATA_DIR / "EUCartonLabel.OK", registry, config)
+    header = next(s for s in view["sections"] if s["name"] == "Header")
+    names = [f["name"] for f in header["fields"]]
+
+    # Present, derived, read-only, and placed right after `process`.
+    fmt = next(f for f in header["fields"] if f["name"] == "format")
+    assert fmt["derived"] is True and fmt["editable"] is False
+    assert set(fmt["inputs"]) == {"distribution_type", "pack_type"}
+    assert names[names.index("process") + 1] == "format"
+
+    # Sample file is distribution_type=RG, pack_type=CL -> "1 - Carton Label".
+    assert header["records"][0]["values"]["format"] == "1 - Carton Label"
+
+    # It is NOT a real field of the layout (absent from the raw record).
+    real_names = {f.name for sec in registry["EUCartonLabel"].sections for f in sec.fields}
+    assert "format" not in real_names
+    # ...and StyleHeader has no derived format field at all.
+    sh = service.parse_file_view(DATA_DIR / "EUStyleHeader.OK", registry, config)
+    assert not any(f.get("derived") for s in sh["sections"] for f in s["fields"])
+
+
+def test_derived_format_rules_cover_all_cases(config):
+    """The four documented distribution_type/pack_type combinations resolve."""
+    spec = config.derived_fields("EUCartonLabel")[0]
+    cases = {
+        ("RG", "CL"): "1 - Carton Label",
+        ("AD", "CL"): "2 - AD Carton Label",
+        ("AD", "C "): "2 - AD Carton Label",   # padded, trimmed
+        ("RG", "MP"): "4 - Masterpack",
+        ("AD", "MP"): "5 - AD Masterpack",
+        ("XX", "ZZ"): "",                      # no rule -> default
+    }
+    for (dt, pt), want in cases.items():
+        got = config.eval_derived(spec, {"distribution_type": dt, "pack_type": pt})
+        assert got == want, f"{dt}/{pt} -> {got!r} (want {want!r})"
+
+
+def test_rename_resolves_derived_format_token(registry, config):
+    """The rename `format` token resolves via the derived rule for EUCartonLabel."""
+    toks = service._file_tokens(DATA_DIR / "EUCartonLabel.OK", registry, config, {})
+    assert toks["format"] == "1 - Carton Label"   # derived from RG + CL
+
+    # It's offered in the rename palette, alongside the new EU GTA fields.
+    scope = service.rename_scope([str(DATA_DIR / "EUCartonLabel.OK")], registry, config)
+    hf = scope["palette"]["header_fields"]
+    assert "format" in hf
+    assert {"distribution_type", "pack_type", "zone_retail"} <= set(hf)
+
+    # A rename using `format` sanitizes the spaces (like format_label).
+    parts = [{"type": "token", "name": "format"}]
+    name = service._build_name(parts, toks, "_", 1,
+                               label_names={"brand", "format_label"} | config.all_derived_names())
+    assert name == "1_-_Carton_Label"
+
+
+def test_chain_isolation_rules(config):
+    """Europe is isolated; NA chains interchange freely."""
+    assert config.can_change_chain("05", "01") is False   # Europe -> NA blocked
+    assert config.can_change_chain("01", "05") is False   # NA -> Europe blocked
+    assert config.can_change_chain("03", "02") is True     # NA <-> NA allowed
+    assert config.can_change_chain("05", "05") is True     # unchanged is fine
+
+
+def test_chain_field_options_restricted(registry, config):
+    """The editor offers only same-group chains; Europe is locked read-only."""
+    eu = service.parse_file_view(DATA_DIR / "EUCartonLabel.OK", registry, config)
+    ch = next(f for f in eu["sections"][0]["fields"] if f["name"] == "chain")
+    assert ch["editable"] is False and list(ch["options"]) == ["05"]
+
+    na = service.parse_file_view(DATA_DIR / "CartonLabel.OK", registry, config)
+    ch = next(f for f in na["sections"][0]["fields"] if f["name"] == "chain")
+    assert ch["editable"] is True
+    assert "05" not in ch["options"] and "02" in ch["options"]
+
+
+def test_save_blocks_cross_region_chain_change(tmp_path, registry, config):
+    """Saving a chain edit across the Europe boundary is rejected."""
+    import shutil as _sh
+    work = tmp_path / "EUCartonLabel.OK"
+    _sh.copy2(DATA_DIR / "EUCartonLabel.OK", work)
+    with pytest.raises(service.EditError):
+        service.apply_edits(
+            str(work),
+            [{"section_index": 0, "record_index": 0, "field": "chain", "value": "01"}],
+            registry, config=config,
+        )
+
+
 def test_flask_save_endpoint(tmp_path):
     import shutil as _sh
 

@@ -71,6 +71,26 @@ def _crit_matches(criterion, value: Optional[str]) -> bool:
     return criterion == value
 
 
+def _cond_ok(value, cond) -> bool:
+    """Evaluate a single derived-field condition against a (trimmed) value.
+
+    ``cond`` is a dict with one operator key (``eq``/``neq``/``in``/``nin``);
+    a bare scalar is treated as ``eq``. Comparisons are trimmed on both sides.
+    """
+    v = (value or "").strip()
+    if not isinstance(cond, dict):
+        return v == str(cond).strip()
+    if "eq" in cond:
+        return v == str(cond["eq"]).strip()
+    if "neq" in cond:
+        return v != str(cond["neq"]).strip()
+    if "in" in cond:
+        return v in [str(x).strip() for x in (cond["in"] or [])]
+    if "nin" in cond:
+        return v not in [str(x).strip() for x in (cond["nin"] or [])]
+    return False
+
+
 class Config:
     """Chain registry plus display-label rules, with specificity resolution."""
 
@@ -89,6 +109,10 @@ class Config:
         send_quips: Optional[List[str]] = None,
         send_done_quips: Optional[List[str]] = None,
         regions: Optional[Dict[str, str]] = None,
+        hidden_fields: Optional[Dict[str, set]] = None,
+        readonly_fields: Optional[Dict[str, set]] = None,
+        derived_fields: Optional[Dict[str, list]] = None,
+        isolated_chain_groups: Optional[List[set]] = None,
     ):
         self._chains = chains
         self._rules = rules
@@ -105,6 +129,14 @@ class Config:
         self._nicelabel_warning = nicelabel_warning
         self._send_quips = send_quips
         self._send_done_quips = send_done_quips
+        # {layout: {field_name, ...}} for editor hide / read-only display.
+        self._hidden_fields = hidden_fields or {}
+        self._readonly_fields = readonly_fields or {}
+        # {layout: [spec, ...]} computed fields not present in the raw file.
+        self._derived_fields = derived_fields or {}
+        # Groups of chains isolated for editing — you cannot change a chain
+        # into or out of an isolated group (e.g. Europe <-> North America).
+        self._isolated_chain_groups = [set(g) for g in (isolated_chain_groups or [])]
 
     # ----- chains -----
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
@@ -118,6 +150,23 @@ class Config:
     def chain_name(self, code: Optional[str]) -> str:
         info = self.chain(code)
         return info.name if info else (code or "")
+
+    def _chain_group_of(self, code: Optional[str]):
+        """Index of the isolated group containing ``code``, or None if free."""
+        c = (code or "").strip()
+        for i, group in enumerate(self._isolated_chain_groups):
+            if c in group:
+                return i
+        return None
+
+    def can_change_chain(self, old: Optional[str], new: Optional[str]) -> bool:
+        """True if a file's chain may change from ``old`` to ``new``.
+
+        Blocked only across an isolation boundary: you cannot move a chain into
+        or out of an isolated group (e.g. Europe). Chains sharing the same group
+        — or both ungrouped (the North-America chains) — may swap freely.
+        """
+        return self._chain_group_of(old) == self._chain_group_of(new)
 
     # ----- display labels -----
     def options(
@@ -226,6 +275,35 @@ class Config:
         """The full {zone: region} map (copy)."""
         return dict(self._regions)
 
+    # ----- editor field display (hide / read-only) -----
+    def hidden_fields(self, layout: Optional[str]) -> set:
+        """Field names hidden from the section editor for this layout."""
+        return set(self._hidden_fields.get(layout, set())) if layout else set()
+
+    def readonly_fields(self, layout: Optional[str]) -> set:
+        """Field names shown but not editable for this layout."""
+        return set(self._readonly_fields.get(layout, set())) if layout else set()
+
+    # ----- derived (computed) fields -----
+    def derived_fields(self, layout: Optional[str]) -> list:
+        """Derived-field specs for this layout (list of dicts), or []."""
+        return list(self._derived_fields.get(layout, [])) if layout else []
+
+    def all_derived_names(self) -> set:
+        """Every derived field name across all layouts (for token handling)."""
+        return {s.get("name") for specs in self._derived_fields.values() for s in specs if s.get("name")}
+
+    def eval_derived(self, spec: dict, values: Dict[str, Optional[str]]) -> str:
+        """Value of a derived field: first rule whose ``when`` fully matches.
+
+        ``values`` maps field name -> raw slice (padding is trimmed per rule).
+        """
+        for rule in spec.get("rules", []):
+            when = rule.get("when") or {}
+            if all(_cond_ok(values.get(k), c) for k, c in when.items()):
+                return str(rule.get("value", ""))
+        return str(spec.get("default", ""))
+
     # ----- unique key field -----
     def unique_field(self, layout: Optional[str]) -> Optional[str]:
         """Field that must be unique within a folder for this layout, or None."""
@@ -252,6 +330,7 @@ class Config:
     def load(cls, config_dir=None) -> "Config":
         cdir = Path(config_dir) if config_dir is not None else _DEFAULT_CONFIG_DIR
         chains: Dict[str, ChainInfo] = {}
+        isolated_chain_groups: List[set] = []
         chains_path = cdir / "chains.yaml"
         if chains_path.is_file():
             data = yaml.safe_load(chains_path.read_text(encoding="utf-8")) or {}
@@ -265,6 +344,10 @@ class Config:
                     color=c.get("color", "#666666"),
                     icon=c.get("icon"),
                 )
+            isolated_chain_groups = [
+                {str(x) for x in (g or [])}
+                for g in (data.get("isolated_chain_groups") or [])
+            ]
 
         rules: List[dict] = []
         display_path = cdir / "display.yaml"
@@ -342,6 +425,27 @@ class Config:
                 for z in (zones or []):
                     regions[str(z).strip()] = str(region)
 
+        hidden_fields: Dict[str, set] = {}
+        readonly_fields: Dict[str, set] = {}
+        fd_path = cdir / "field_display.yaml"
+        if fd_path.is_file():
+            data = yaml.safe_load(fd_path.read_text(encoding="utf-8")) or {}
+            hidden_fields = {
+                str(l): {str(f) for f in (fs or [])}
+                for l, fs in (data.get("hidden") or {}).items()
+            }
+            readonly_fields = {
+                str(l): {str(f) for f in (fs or [])}
+                for l, fs in (data.get("readonly") or {}).items()
+            }
+
+        derived_fields: Dict[str, list] = {}
+        df2_path = cdir / "derived_fields.yaml"
+        if df2_path.is_file():
+            data = yaml.safe_load(df2_path.read_text(encoding="utf-8")) or {}
+            raw = data.get("derived_fields") or {}
+            derived_fields = {str(l): list(specs or []) for l, specs in raw.items()}
+
         rename_presets: List[dict] = []
         rp_path = cdir / "rename_presets.yaml"
         if rp_path.is_file():
@@ -363,4 +467,6 @@ class Config:
 
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
-                   nicelabel_warning, send_quips, send_done_quips, regions)
+                   nicelabel_warning, send_quips, send_done_quips, regions,
+                   hidden_fields, readonly_fields, derived_fields,
+                   isolated_chain_groups)

@@ -13,3 +13,7 @@ rules:
   # list-matching coverage
   - match: {chain: ["03", "04"], layout: [StyleHeader, Preticket], field: type}
     values: {"1": "Type One", "2": "Type Two"}
+
+  # EU GTA: the read-only `process` field is labeled by layout name.
+  - match: {layout: [EUStyleHeader, EUCartonLabel], field: process}
+    values: {D: "(D) StyleHeader", H: "(H) Holdings/CartonLabels"}

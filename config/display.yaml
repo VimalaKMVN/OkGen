@@ -227,6 +227,36 @@ rules:
       5: "AD Masterpack Label"
 
 
+  # Europe TJXE GTA — the `process` letter names the layout itself and is shown
+  # locked (read-only, see config/field_display.yaml): D = layup style header,
+  # H = holdings carton labels.
+  - match:
+      layout: [EUStyleHeader, EUCartonLabel]
+      field: process
+    values:
+      D: "(D) StyleHeader"
+      H: "(H) Holdings/CartonLabels"
+      
+      
+  # Europe TJXE GTA — the `ticket_format` letter maps to the physical ticket
+  # type (editable dropdown; saving writes the underlying code).
+  - match:
+      layout: [EUStyleHeader, EUCartonLabel]
+      field: ticket_format
+    values:
+      A: "Standard White Swift"
+      B: "Single Gum"
+      C: "Beige Coordinate"
+      F: "High Adhesive"
+      J: "Small Merchandise Ticket"
+      L: "Water Soluble"
+      O: "Pre-Ticket Tag"
+      Q: "Small Merch UPP Ticket"
+      R: "Age Restriction"
+      U: "Standard UPP"
+      X: "Large Overgum"
+      Y: "Small Overgum"
+
   # (7) LISTS — one rule covering several chains AND several layouts at once.
   # Europe TJXE formats
   - match:
