@@ -64,9 +64,19 @@ body {
   cursor: pointer;
 }
 .btn:hover:not(:disabled) { background: #45494e; }
-.btn:disabled { opacity: 0.45; cursor: default; }
+/* Enabled vs disabled must be obvious at a glance. A secondary button sitting
+   next to the blue primary one used to read as "greyed out" even when it was
+   live (Save As is enabled whenever a file is open) — so an enabled button now
+   keeps a bright label and a visible border, and a disabled one is clearly
+   flatter and dimmer. */
+.btn:not(:disabled) { color: var(--text); border-color: #5a6068; }
+.btn:disabled { opacity: 0.35; cursor: default; background: #2c2f33; border-color: #3a3d41; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-primary:not(:disabled) { border-color: var(--accent); }
+/* The secondary action next to a primary one: same brightness, outlined. */
+#saveAsBtn:not(:disabled) { background: #3f444a; border-color: var(--accent); color: #fff; }
+#saveAsBtn:hover:not(:disabled) { background: #4a5058; }
 
 .layout { flex: 1; display: flex; min-height: 0; }
 .tree-pane {
