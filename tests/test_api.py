@@ -886,3 +886,117 @@ def test_flask_save_endpoint(tmp_path):
     })
     assert res.status_code == 200
     assert res.get_json()["edits_applied"] == 1
+
+
+# --------------------------------------------------------------------------- #
+# Staged row ops — nothing is written until Save/Save As
+# --------------------------------------------------------------------------- #
+def test_row_op_preview_writes_nothing(tmp_path, registry, config):
+    """A previewed row op shows the result but leaves the file on disk alone."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    original = work.read_bytes()
+
+    before = service.parse_file_view(work, registry, config)
+    lane = next(s for s in before["sections"] if s["name"] == "Lane")
+    n_before = len(lane["records"])
+
+    view = service.delete_record(
+        work, lane["records"][0]["index"], [], registry, config, preview=True)
+
+    lane_after = next(s for s in view["sections"] if s["name"] == "Lane")
+    assert len(lane_after["records"]) == n_before - 1   # preview reflects the delete
+    assert work.read_bytes() == original                # ...but disk is untouched
+    assert not (tmp_path / "StyleHeader.OK.bak").exists()
+
+
+def test_save_as_with_staged_ops_leaves_original_untouched(tmp_path, registry, config):
+    """The reported bug: row deletions + edits must land ONLY in the Save As file."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    original = work.read_bytes()
+    other = tmp_path / "copy.OK"
+
+    before = service.parse_file_view(work, registry, config)
+    lane = next(s for s in before["sections"] if s["name"] == "Lane")
+    n_lanes = len(lane["records"])
+
+    ops = [
+        {"type": "edit", "edits": [
+            {"section_index": 0, "record_index": 0, "field": "keytrol", "value": "551234"}]},
+        {"type": "delete", "record_index": lane["records"][0]["index"]},
+    ]
+    res = service.apply_edits(work, [], registry, target_path=str(other),
+                              config=config, ops=ops)
+
+    assert res["ops_applied"] == 2
+    assert work.read_bytes() == original          # source file untouched
+    saved = service.parse_file_view(other, registry, config)
+    assert len(next(s for s in saved["sections"] if s["name"] == "Lane")["records"]) == n_lanes - 1
+    assert saved["sections"][0]["records"][0]["values"]["keytrol"].strip() == "551234"
+
+
+def test_save_applies_staged_ops_in_place(tmp_path, registry, config):
+    """Plain Save replays the same journal into the file that was opened."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    before = service.parse_file_view(work, registry, config)
+    lane = next(s for s in before["sections"] if s["name"] == "Lane")
+    n_lanes = len(lane["records"])
+
+    service.apply_edits(work, [], registry, backup=False, config=config,
+                        ops=[{"type": "delete", "record_index": lane["records"][0]["index"]}])
+
+    after = service.parse_file_view(work, registry, config)
+    assert len(next(s for s in after["sections"] if s["name"] == "Lane")["records"]) == n_lanes - 1
+    assert after["roundtrip_ok"]
+
+
+def test_staged_ops_replay_in_order_with_shifting_indices(tmp_path, registry, config):
+    """Each op's indices are relative to the view the previous ops produced."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    before = service.parse_file_view(work, registry, config)
+    size = next(s for s in before["sections"] if s["name"] == "Size")
+    n_size = len(size["records"])
+
+    # Delete the first Size row, then add one back after what is NOW the first
+    # row (an index that only exists post-delete).
+    first = size["records"][0]["index"]
+    view = service.add_record(
+        work, None, [], registry, config, after_index=first, preview=True,
+        ops=[{"type": "delete", "record_index": first}])
+
+    size_after = next(s for s in view["sections"] if s["name"] == "Size")
+    assert len(size_after["records"]) == n_size      # -1 then +1
+    assert work.read_bytes() == (DATA_DIR / "StyleHeader.OK").read_bytes()
+
+
+def test_rejected_staged_op_writes_nothing(tmp_path, registry, config):
+    """A bad op aborts the whole save — neither file is written."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    original = work.read_bytes()
+    other = tmp_path / "copy.OK"
+
+    with pytest.raises(service.EditError):
+        service.apply_edits(work, [], registry, target_path=str(other), config=config,
+                            ops=[{"type": "delete", "record_index": 0}])  # header row
+
+    assert work.read_bytes() == original
+    assert not other.exists()
+
+
+def test_flask_record_delete_preview_does_not_write(tmp_path):
+    from okgen.web.app import create_app
+
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    original = work.read_bytes()
+
+    client = create_app(data_dir=DATA_DIR).test_client()
+    res = client.post("/api/record/delete", json={
+        "path": str(work), "record_index": 1, "preview": True,
+    })
+    assert res.status_code == 200
+    assert work.read_bytes() == original

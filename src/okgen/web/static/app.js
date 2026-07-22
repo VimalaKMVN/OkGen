@@ -6,6 +6,7 @@ const state = {
   file: null,          // current file path
   view: null,          // parsed view
   edits: {},           // key -> value
+  ops: [],             // staged row-op journal, replayed on Save/Save As
   clipboard: [],       // array of paths copied for paste
   treeToken: 0,        // increments per Open; guards against stale renders
   treeAbort: null,     // AbortController for the in-flight root load
@@ -78,7 +79,28 @@ function activityResult(msg, kind) {
 function hideActivity() { $("#activity").classList.add("hidden"); }
 
 // ---- dirty state ----
-function isDirty() { return Object.keys(state.edits).length > 0; }
+// Two kinds of pending change, both unsaved until Save/Save As:
+//   state.edits — field edits keyed section|record|field
+//   state.ops   — the ordered row-op journal (add/delete/move + the field edits
+//                 that were pending when each row op was made). The server
+//                 replays it against the file on disk; nothing is written until
+//                 a Save button, so Save As leaves the original untouched.
+function isDirty() { return Object.keys(state.edits).length > 0 || pendingOps().length > 0; }
+function pendingOps() { return state.ops || (state.ops = []); }
+function dirtyCount() { return Object.keys(state.edits).length + pendingOps().length; }
+// The journal the server should replay if `op` is accepted: everything staged
+// so far, then the field edits pending right now (so they replay in the order
+// the user made them), then the op itself. Returned as a NEW array — it is only
+// committed to state.ops once the server accepts it, so a rejected op (e.g. a
+// section at its record limit) leaves the pending state exactly as it was.
+function journalWith(op) {
+  const edits = collectEdits();
+  return pendingOps().concat(edits.length ? [{ type: "edit", edits }] : [], [op]);
+}
+function commitJournal(journal) {
+  state.ops = journal;
+  state.edits = {};   // now folded into the journal
+}
 function confirmDiscardIfDirty() {
   return !isDirty() || confirm("You have unsaved changes. Discard them?");
 }
@@ -265,7 +287,7 @@ function isRenameOpen() {
 async function enterBulkMode() {
   if (state.selection.size < 1) return;
   if (!confirmDiscardIfDirty()) return;
-  state.file = null; state.view = null; state.edits = {};
+  state.file = null; state.view = null; state.edits = {}; state.ops = [];
   $("#editorTabs").classList.add("hidden");
   $("#editor").classList.add("hidden");
   $("#rawView").classList.add("hidden");
@@ -542,7 +564,7 @@ function renderBulkTable(host, results, applied) {
 async function enterRenameMode() {
   if (!state.selection.size) return;
   if (!confirmDiscardIfDirty()) return;
-  state.file = null; state.view = null; state.edits = {};
+  state.file = null; state.view = null; state.edits = {}; state.ops = [];
   $("#editorTabs").classList.add("hidden");
   $("#editor").classList.add("hidden");
   $("#rawView").classList.add("hidden");
@@ -848,6 +870,7 @@ async function loadFile(path) {
     state.file = path;
     state.view = view;
     state.edits = {};
+    state.ops = [];   // staged rows belong to the file we just left
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
@@ -935,8 +958,17 @@ function renderRaw(view) {
 function updateRawBanner() {
   const banner = $("#rawView .raw-banner");
   if (!banner) return;
-  if (isDirty()) {
-    banner.textContent = "⚠ Showing the last saved file — you have unsaved edits. Save to refresh this view.";
+  const fieldEdits = Object.keys(state.edits).length;
+  const ops = pendingOps().length;
+  if (fieldEdits) {
+    // Staged row ops ARE rendered here (the preview is built from them), but
+    // field edits typed since the last one are still only in the form.
+    banner.textContent = ops
+      ? "⚠ Includes unsaved row changes, but not the field edits you just typed. Save to refresh this view."
+      : "⚠ Showing the last saved file — you have unsaved edits. Save to refresh this view.";
+    banner.className = "raw-banner warn";
+  } else if (ops) {
+    banner.textContent = "⚠ Preview of unsaved row changes — nothing has been written to disk yet.";
     banner.className = "raw-banner warn";
   } else {
     banner.textContent = "Read-only view of the file on disk (use the ruler to verify character positions).";
@@ -981,17 +1013,20 @@ async function addRowAfter(recordIndex) {
   if (!state.file) return;
   if (!beginBusy("Adding row…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
+    const journal = journalWith({ type: "add", after_index: recordIndex });
     const view = await postJSON("/api/record/add", {
       path: state.file,
       after_index: recordIndex,
+      ops: pendingOps(),
       edits: collectEdits(),
+      preview: true,
     });
+    commitJournal(journal);
     state.view = view;
-    state.edits = {};
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
-    setStatus("Row added — copied below (saved)", "ok");
+    setStatus("Row added — copied below (unsaved)", "dirty");
   } catch (e) {
     setStatus("Add failed: " + e.message, "err");
   } finally {
@@ -1005,17 +1040,20 @@ async function addRowToSection(sectionIndex) {
   if (!state.file) return;
   if (!beginBusy("Adding row…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
+    const journal = journalWith({ type: "add", section_index: sectionIndex });
     const view = await postJSON("/api/record/add", {
       path: state.file,
       section_index: sectionIndex,
+      ops: pendingOps(),
       edits: collectEdits(),
+      preview: true,
     });
+    commitJournal(journal);
     state.view = view;
-    state.edits = {};
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
-    setStatus("First row added to section (saved)", "ok");
+    setStatus("First row added to section (unsaved)", "dirty");
   } catch (e) {
     setStatus("Add failed: " + e.message, "err");
   } finally {
@@ -1210,15 +1248,17 @@ async function moveRow(recordIndex, direction) {
     setStatus("Please wait — an operation is already running…", "dirty"); return;
   }
   try {
+    const journal = journalWith({ type: "move", record_index: recordIndex, direction });
     const view = await postJSON("/api/record/move", {
-      path: state.file, record_index: recordIndex, direction, edits: collectEdits(),
+      path: state.file, record_index: recordIndex, direction,
+      ops: pendingOps(), edits: collectEdits(), preview: true,
     });
+    commitJournal(journal);
     state.view = view;
-    state.edits = {};
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
-    setStatus("Row moved (saved)", "ok");
+    setStatus("Row moved (unsaved)", "dirty");
   } catch (e) {
     setStatus("Move failed: " + e.message, "err");
   } finally {
@@ -1231,17 +1271,20 @@ async function deleteRow(recordIndex) {
   if (!confirm("Delete this row?")) return;
   if (!beginBusy("Deleting row…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
+    const journal = journalWith({ type: "delete", record_index: recordIndex });
     const view = await postJSON("/api/record/delete", {
       path: state.file,
       record_index: recordIndex,
+      ops: pendingOps(),
       edits: collectEdits(),
+      preview: true,
     });
+    commitJournal(journal);
     state.view = view;
-    state.edits = {};
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
-    setStatus("Row deleted (saved)", "ok");
+    setStatus("Row deleted (unsaved)", "dirty");
   } catch (e) {
     setStatus("Delete failed: " + e.message, "err");
   } finally {
@@ -1264,7 +1307,7 @@ function onEdit(e) {
 }
 
 function updateSaveButtons() {
-  const dirty = Object.keys(state.edits).length;
+  const dirty = dirtyCount();   // field edits + staged row ops
   $("#saveBtn").disabled = !state.file || dirty === 0;
   $("#saveAsBtn").disabled = !state.file;
   updateDirtyIndicator();
@@ -1283,14 +1326,21 @@ async function save(targetPath) {
   if (!state.file) return;
   if (!beginBusy("Saving…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   const edits = collectEdits();
+  const ops = pendingOps();
   try {
+    // Save As sends the same staged work to a NEW path — the file we opened is
+    // never written to, so it keeps the rows/values it had on disk.
     const res = await postJSON("/api/save", {
       path: state.file,
       edits,
+      ops,
       target_path: targetPath || null,
     });
     state.edits = {};  // persisted — clear so refresh isn't treated as dirty
-    setStatus(`Saved ${res.edits_applied} edit(s)` + (res.roundtrip_ok ? "" : " (round-trip DIFFERS!)"),
+    state.ops = [];
+    const changes = res.edits_applied + (res.ops_applied || 0);
+    setStatus(`Saved ${changes} change(s) to ${baseName(res.path)}` +
+              (res.roundtrip_ok ? "" : " (round-trip DIFFERS!)"),
               res.roundtrip_ok ? "ok" : "err");
     const openPath = targetPath || state.file;
     if (targetPath) await refreshFolder(folderOf(targetPath));
@@ -1340,6 +1390,7 @@ function copySelection() {
 }
 function hideCtxMenu() { $("#ctxMenu").classList.add("hidden"); }
 function folderOf(p) { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return p.slice(0, i); }
+function baseName(p) { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return p.slice(i + 1); }
 
 function showFolderCtxMenu(e, node) {
   e.preventDefault();

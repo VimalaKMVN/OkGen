@@ -83,6 +83,7 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
                 target_path=body.get("target_path"),
                 backup=body.get("backup", True),
                 config=config,
+                ops=body.get("ops"),
             ))
         except service.EditError as exc:
             return _err(str(exc), 422)
@@ -102,6 +103,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
                 config,
                 backup=body.get("backup", True),
                 after_index=body.get("after_index"),
+                ops=body.get("ops"),
+                preview=bool(body.get("preview")),
             ))
         except service.EditError as exc:
             return _err(str(exc), 422)
@@ -114,7 +117,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         try:
             return jsonify(service.move_record(
                 body.get("path"), int(body.get("record_index")), body.get("direction"),
-                body.get("edits", []), registry, config, backup=body.get("backup", True)))
+                body.get("edits", []), registry, config, backup=body.get("backup", True),
+                ops=body.get("ops"), preview=bool(body.get("preview"))))
         except service.EditError as exc:
             return _err(str(exc), 422)
         except FileNotFoundError:
@@ -131,6 +135,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
                 registry,
                 config,
                 backup=body.get("backup", True),
+                ops=body.get("ops"),
+                preview=bool(body.get("preview")),
             ))
         except service.EditError as exc:
             return _err(str(exc), 422)

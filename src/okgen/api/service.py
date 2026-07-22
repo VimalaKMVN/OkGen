@@ -156,14 +156,28 @@ def _file_node(path: Path, config: Config, registry=None) -> dict:
 # Parse a file into an editor view
 # --------------------------------------------------------------------------- #
 def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
+    """The editor view of a file **as it is on disk**."""
     path = Path(path)
     okf = parse_okfile(path, registry=registry)
+    return _build_file_view(okf, path, config, disk_bytes=path.read_bytes())
+
+
+def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None) -> dict:
+    """Render the editor view for a parsed file.
+
+    ``disk_bytes`` is the on-disk content when the view reflects a saved file.
+    Omit it to render an **unsaved, in-memory** file (a staged-op preview): the
+    view is then built from ``okf.to_bytes()``, so the editor and the Raw verify
+    tab show what a Save would write without anything having been written yet.
+    """
+    path = Path(path)
     layout_name = okf.layout.name
     chain = okf.records[0].get("chain") if okf.records else ""
     # NA layouts name the format-code field "format"; the EU GTA layouts call
     # it "process" (D/H). Fall back so the display context stays populated.
     fmt = _header_value(okf, "format") or _header_value(okf, "process")
-    roundtrip_ok = okf.to_bytes() == path.read_bytes()
+    content = okf.to_bytes()
+    roundtrip_ok = content == disk_bytes if disk_bytes is not None else True
 
     sections_out: List[dict] = []
     grouped = okf.sections()
@@ -249,7 +263,7 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
     # files are UTF-8, so decode them as UTF-8 and drop the BOM — otherwise the
     # marker shows as Latin-1 mojibake ("ï»¿Â¦" instead of "¦"). The on-disk
     # bytes are untouched; this only affects what the verify tab displays.
-    raw_bytes = path.read_bytes()
+    raw_bytes = content
     if getattr(okf.layout, "delimited", False):
         raw_text = raw_bytes.decode("utf-8-sig", errors="replace")
     else:
@@ -292,15 +306,23 @@ def apply_edits(
     target_path=None,
     backup: bool = True,
     config: Config = None,
+    ops: List[dict] = None,
 ) -> dict:
-    """Apply field edits and write the file (byte-exact for untouched spans).
+    """Apply staged row ops + field edits and write the file.
 
-    ``edits``: list of {section_index, record_index, field, value}.
-    ``target_path``: if given, writes there (Save As); else overwrites ``path``.
-    Validates each value against its field width before writing anything.
+    ``ops``: the staged journal (see :func:`replay_ops`) — row add/delete/move
+    plus the field edits that were pending when each row op was made, in the
+    order the user made them. ``edits``: the still-pending field edits
+    {section_index, record_index, field, value}, applied last.
+
+    ``target_path``: if given, everything is written **there** (Save As) and the
+    source file is left untouched; else ``path`` is overwritten (Save). Nothing
+    is written until every op and edit has validated, so a failure leaves both
+    files as they were.
     """
     src = Path(path)
     okf = parse_okfile(src, registry=registry)
+    replay_ops(okf, ops, config)
     _apply_edits_to_okf(okf, edits, config)
 
     out = Path(target_path) if target_path else src
@@ -312,8 +334,56 @@ def apply_edits(
         "path": str(out),
         "written": True,
         "edits_applied": len(edits),
+        "ops_applied": len(ops or []),
         "roundtrip_ok": okf.to_bytes() == out.read_bytes(),
     }
+
+
+def replay_ops(okf: OkFile, ops: List[dict], config: Config = None) -> Optional[str]:
+    """Replay a staged op journal onto a parsed file, in order, in memory.
+
+    Row edits stay *pending* in the browser until Save/Save As, so the client
+    keeps an ordered journal instead of the server writing each row op straight
+    to disk (which used to mutate the original file even when the user went on
+    to Save As). Entry shapes:
+
+    - ``{"type": "edit", "edits": [...]}`` — field edits pending at that moment
+    - ``{"type": "add", "after_index": i}`` / ``{"type": "add", "section_index": s}``
+    - ``{"type": "delete", "record_index": i}``
+    - ``{"type": "move", "record_index": i, "direction": "up"|"down"}``
+
+    Each entry's indices are relative to the view produced by the entries before
+    it, so records are renumbered after every row op exactly as a reparse would
+    (:func:`_reindex`). Returns the section name of the last ``add``, if any.
+    """
+    added = None
+    for op in ops or []:
+        kind = op.get("type")
+        if kind == "edit":
+            _apply_edits_to_okf(okf, op.get("edits") or [], config)
+            continue
+        if kind == "add":
+            si = op.get("section_index")
+            added = _op_add(
+                okf, config,
+                section_index=None if si is None else int(si),
+                after_index=op.get("after_index"),
+            )
+        elif kind == "delete":
+            _op_delete(okf, int(op["record_index"]))
+        elif kind == "move":
+            _op_move(okf, int(op["record_index"]), op.get("direction"))
+        else:
+            raise EditError(f"unknown pending op type {kind!r}")
+        _normalize_eols(okf)
+        _reindex(okf)
+    return added
+
+
+def _reindex(okf: OkFile) -> None:
+    """Renumber records by position — what a save-then-reparse would produce."""
+    for i, rec in enumerate(okf.records):
+        rec.index = i
 
 
 def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
@@ -362,17 +432,88 @@ def add_record(
     config: Config = None,
     backup: bool = True,
     after_index=None,
+    ops: List[dict] = None,
+    preview: bool = False,
 ) -> dict:
-    """Apply pending edits, add a copy of a record, and save.
+    """Replay staged ops + pending edits, add a copy of a record, return the view.
 
     If ``after_index`` is given, a copy of THAT row is inserted right below it
     (row-level "duplicate here"). Otherwise a copy of the section's last record
     is appended (``section_index``). Enforces the section's ``max_records`` limit.
+
+    With ``preview`` (what the editor uses) nothing is written — the caller
+    stages the op and the file changes only on Save/Save As. Without it the
+    result is saved straight to ``path``.
+    """
+    view, added = _record_op(
+        path, registry, config, ops, edits, backup, preview,
+        lambda okf: _op_add(okf, config, section_index=section_index, after_index=after_index),
+    )
+    view["added_section"] = added
+    return view
+
+
+def delete_record(
+    path,
+    record_index: int,
+    edits: List[dict],
+    registry: LayoutRegistry,
+    config: Config,
+    backup: bool = True,
+    ops: List[dict] = None,
+    preview: bool = False,
+) -> dict:
+    """Replay staged ops + pending edits, delete one record by its line index.
+
+    The header record (index 0) cannot be deleted. See :func:`add_record` for
+    ``preview`` semantics.
+    """
+    view, _ = _record_op(
+        path, registry, config, ops, edits, backup, preview,
+        lambda okf: _op_delete(okf, record_index),
+    )
+    return view
+
+
+def move_record(path, record_index, direction, edits, registry, config, backup=True,
+                ops: List[dict] = None, preview: bool = False) -> dict:
+    """Replay staged ops + pending edits, move one record up/down in its section.
+
+    Reordering stays inside the record's own section (it can't jump into the
+    header or another section). The header record can't be moved. See
+    :func:`add_record` for ``preview`` semantics.
+    """
+    view, _ = _record_op(
+        path, registry, config, ops, edits, backup, preview,
+        lambda okf: _op_move(okf, record_index, direction),
+    )
+    return view
+
+
+def _record_op(path, registry, config, ops, edits, backup, preview, mutate) -> tuple:
+    """Shared plumbing for the three row ops.
+
+    Parses the file **as it is on disk**, replays the staged journal, applies the
+    still-pending field edits, then runs ``mutate``. Previews render the result
+    from memory; otherwise it is saved to the source path.
     """
     src = Path(path)
     okf = parse_okfile(src, registry=registry)
+    replay_ops(okf, ops, config)
     _apply_edits_to_okf(okf, edits or [], config)
 
+    result = mutate(okf)
+    _normalize_eols(okf)
+    _reindex(okf)
+
+    if preview:
+        return _build_file_view(okf, src, config), result
+    _backup_and_save(okf, src, backup)
+    return parse_file_view(src, registry, config), result
+
+
+def _op_add(okf: OkFile, config: Config, section_index=None, after_index=None) -> str:
+    """Insert a copy of a record in memory. Returns the section name added to."""
     seeded = False
     if after_index is not None:
         anchor = next((r for r in okf.records if r.index == after_index), None)
@@ -403,7 +544,7 @@ def add_record(
 
     sec = template.section
     sec_count = sum(1 for r in okf.records if r.section is sec)
-    limit = config.max_records(okf.layout.name, sec.name)
+    limit = config.max_records(okf.layout.name, sec.name) if config else None
     if limit is not None and sec_count >= limit:
         raise EditError(f"section '{sec.name}' is at its limit of {limit} records")
 
@@ -417,52 +558,22 @@ def add_record(
         _insert_in_section_order(okf, clone, sec)
     else:
         okf.records.insert(okf.records.index(template) + 1, clone)
-    _normalize_eols(okf)
-
-    _backup_and_save(okf, src, backup)
-    view = parse_file_view(src, registry, config)
-    view["added_section"] = sec.name
-    return view
+    return sec.name
 
 
-def delete_record(
-    path,
-    record_index: int,
-    edits: List[dict],
-    registry: LayoutRegistry,
-    config: Config,
-    backup: bool = True,
-) -> dict:
-    """Apply pending edits, delete one record by its line index, and save.
-
-    The header record (index 0) cannot be deleted.
-    """
-    src = Path(path)
-    okf = parse_okfile(src, registry=registry)
-    _apply_edits_to_okf(okf, edits, config)
-
+def _op_delete(okf: OkFile, record_index: int) -> None:
+    """Remove one record by its line index, in memory."""
     target = next((r for r in okf.records if r.index == record_index), None)
     if target is None:
         raise EditError(f"record_index {record_index} not found")
     if target.index == 0:
         raise EditError("the header record cannot be deleted")
-
     okf.records.remove(target)
-    _normalize_eols(okf)
-
-    _backup_and_save(okf, src, backup)
-    return parse_file_view(src, registry, config)
 
 
-def move_record(path, record_index, direction, edits, registry, config, backup=True) -> dict:
-    """Apply pending edits, move one record up/down within its section, save.
-
-    Reordering stays inside the record's own section (it can't jump into the
-    header or another section). The header record can't be moved.
-    """
-    src = Path(path)
-    okf = parse_okfile(src, registry=registry)
-    _apply_edits_to_okf(okf, edits, config)
+def _op_move(okf: OkFile, record_index, direction) -> None:
+    """Swap one record with its neighbour inside its own section, in memory."""
+    record_index = int(record_index)
     recs = okf.records
     idx = next((i for i, r in enumerate(recs) if r.index == record_index), None)
     if idx is None:
@@ -479,9 +590,6 @@ def move_record(path, record_index, direction, edits, registry, config, backup=T
     if j < 0 or j >= len(recs) or recs[j].section is not target.section:
         raise EditError("row is already at the edge of its section")
     recs[idx], recs[j] = recs[j], recs[idx]
-    _normalize_eols(okf)
-    _backup_and_save(okf, src, backup)
-    return parse_file_view(src, registry, config)
 
 
 def _backup_and_save(okf, out: Path, backup: bool) -> None:
