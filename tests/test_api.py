@@ -1308,3 +1308,49 @@ def test_bulk_preview_flags_partial_signature_value(tmp_path, registry, config):
                             backup=False)
     assert ap["results"][0]["status"] == "error"
     assert work.read_bytes() == original
+
+
+def test_derived_field_survives_staged_preview_and_is_never_written(tmp_path, registry, config):
+    """Derived values must be computed on the in-memory preview path too.
+
+    ``_build_file_view`` renders staged (unsaved) state without touching disk;
+    this checks the derived `format` is still computed there, recomputes when a
+    driving input changes, and is never persisted into the file's bytes.
+    """
+    work = tmp_path / "EUCartonLabel.OK"
+    shutil.copy2(DATA_DIR / "EUCartonLabel.OK", work)
+    original = work.read_bytes()
+
+    def fmt_of(view):
+        return view["sections"][0]["records"][0]["values"]["format"]
+
+    assert fmt_of(service.parse_file_view(work, registry, config)) == "1 - Carton Label"
+
+    # Preview a staged row delete: derived still resolves, nothing written.
+    detail = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                  if s["name"] == "Detail")
+    preview = service.delete_record(work, detail["records"][0]["index"], [],
+                                    registry, config, preview=True)
+    assert fmt_of(preview) == "1 - Carton Label"
+    assert work.read_bytes() == original
+
+    # Preview with a pending edit to a driving input -> recomputed live.
+    preview2 = service.delete_record(
+        work, detail["records"][0]["index"],
+        [{"section_index": 0, "record_index": 0, "field": "distribution_type", "value": "AD"}],
+        registry, config, preview=True)
+    assert fmt_of(preview2) == "2 - AD Carton Label"
+    assert work.read_bytes() == original
+
+    # Save As with that edit staged: the copy stores the INPUT, never the
+    # derived string, and the source is untouched.
+    other = tmp_path / "copy.OK"
+    service.apply_edits(
+        work, [], registry, target_path=str(other), config=config,
+        ops=[{"type": "edit", "edits": [
+            {"section_index": 0, "record_index": 0, "field": "distribution_type", "value": "AD"}]}])
+    assert work.read_bytes() == original
+    assert b"AD Carton Label" not in other.read_bytes()      # derived not persisted
+    saved = service.parse_file_view(other, registry, config)
+    assert saved["sections"][0]["records"][0]["values"]["distribution_type"].strip() == "AD"
+    assert fmt_of(saved) == "2 - AD Carton Label"            # recomputed on reload

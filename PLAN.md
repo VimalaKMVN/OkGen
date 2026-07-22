@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.23.0-v020-per-layout-coverage`.
+> Baseline: top of `main` = tag `v0.23.1-derived-preview-coverage`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -76,7 +76,9 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.23.0-v020-per-layout-coverage`.** **Tests: 191 passing, 0 skipped.**
+- **Top of `main` = tag `v0.23.1-derived-preview-coverage`.** **Tests: 192 passing, 0 skipped.**
+  Derived (computed) fields verified unchanged by this session's work: `config/derived_fields.yaml`, `Config.eval_derived` and the client's `evalDerived`/`refreshDerived` are **byte-identical to the pre-session baseline** (`git diff v0.20.1..HEAD` is empty for all three). Only **EUCartonLabel** declares a derived field (`format`); all 4 rules + default, placement after `process`, read-only flag, absence from the raw bytes, absence from bulk, and the rename-token path all still behave. New test covers the one path this session created: derived values on the **in-memory preview** (`_build_file_view` with no disk bytes) — computed there, recomputed when a staged edit changes a driving input, and never persisted on Save As.
+- **Prior top of `main` = tag `v0.23.0-v020-per-layout-coverage`** (was 191 passing).
   Verified the **v0.20.0** features (empty sections, padding UX, single-file bulk) across all 7 layouts — they were only tested on StyleHeader (+ EUStyleHeader for routing). All now parametrized: empty-section survival/canonical order, reseeding an emptied section, short-value re-padding, and single-file bulk. Two real findings:
   - **`DistLabels.TSticker` cannot be seeded** — the reference `DistLabels.OK` contains **zero** TSticker rows, so the compiler learned no `marker` and no `sample_raw` for it (every other layout/section has both). Adding its first row fails with `no template to seed a row`. **Blocked on a real DistLabels sample containing TSticker rows**; pinned by a test that documents the gap so it surfaces the day the data arrives.
   - **Partial detection signatures** — the D12 audit was value-dependent and missed these: `CartonLabel.format` set to `N`/`Y`/`7`/`9` re-detects as StyleHeader/Preticket/DistLabels, and `chain` on the NA layouts set to `DD`/`HH` reads as an EU layout. Both are legitimate editable fields, so they are *not* config-locked — `_assert_layout_stable` already blocked the write, and `_bulk_eval` now runs the same check so the **preview** reports it per file instead of the user applying and hitting an error.
@@ -116,7 +118,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 191
+.venv/bin/python -m pytest tests/ -q              # currently 192
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```
