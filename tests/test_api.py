@@ -1100,3 +1100,75 @@ def test_bulk_apply_reports_signature_break_per_file(tmp_path, registry, config)
     assert [r["status"] for r in res["results"]] == ["error", "error"]
     assert all("detection signature" in r["error"] for r in res["results"])
     assert a.read_bytes() == original and b.read_bytes() == original
+
+
+ALL_SAMPLES = ["StyleHeader.OK", "Preticket.OK", "DistLabels.OK", "CartonLabel.OK",
+               "EUPreticket.OK", "EUStyleHeader.OK", "EUCartonLabel.OK"]
+
+
+def _detail_count(view, section):
+    return len(next(s for s in view["sections"] if s["name"] == section)["records"])
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_staged_add_every_layout(tmp_path, registry, config, sample):
+    """Add-row staged: preview writes nothing, Save As adds only to the copy."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    original = work.read_bytes()
+
+    before = service.parse_file_view(work, registry, config)
+    # First populated section with room to grow (StyleHeader's Lane sits at its
+    # 10-record limit, so fall through to Size rather than skipping the layout).
+    detail = next((s for s in before["sections"]
+                   if not s["is_header"] and s["records"]
+                   and (s["max_records"] is None or len(s["records"]) < s["max_records"])), None)
+    assert detail, f"{sample}: every populated section is at its max_records limit"
+    anchor = detail["records"][0]["index"]
+
+    view = service.add_record(work, None, [], registry, config,
+                              after_index=anchor, preview=True)
+    assert _detail_count(view, detail["name"]) == len(detail["records"]) + 1
+    assert work.read_bytes() == original            # preview wrote nothing
+
+    other = tmp_path / f"copy_{sample}"
+    service.apply_edits(work, [], registry, target_path=str(other), config=config,
+                        ops=[{"type": "add", "after_index": anchor}])
+    assert work.read_bytes() == original            # source untouched
+    saved = service.parse_file_view(other, registry, config)
+    assert _detail_count(saved, detail["name"]) == len(detail["records"]) + 1
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_staged_move_every_layout(tmp_path, registry, config, sample):
+    """Move-row staged: preview writes nothing, Save As reorders only the copy."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    original = work.read_bytes()
+
+    before = service.parse_file_view(work, registry, config)
+    detail = next((s for s in before["sections"]
+                   if not s["is_header"] and len(s["records"]) >= 2), None)
+    if detail is None:
+        pytest.skip(f"{sample} has no section with 2+ rows to reorder")
+    first, second = detail["records"][0], detail["records"][1]
+    field = next(f["name"] for f in detail["fields"]
+                 if not f.get("hidden") and first["values"].get(f["name"]) is not None)
+    v0, v1 = first["values"][field], second["values"][field]
+
+    view = service.move_record(work, first["index"], "down", [], registry, config, preview=True)
+    moved = next(s for s in view["sections"] if s["name"] == detail["name"])["records"]
+    assert (moved[0]["values"][field], moved[1]["values"][field]) == (v1, v0)
+    assert work.read_bytes() == original            # preview wrote nothing
+
+    other = tmp_path / f"copy_{sample}"
+    service.apply_edits(work, [], registry, target_path=str(other), config=config,
+                        ops=[{"type": "move", "record_index": first["index"], "direction": "down"}])
+    assert work.read_bytes() == original            # source untouched
+    saved = service.parse_file_view(other, registry, config)
+    srows = next(s for s in saved["sections"] if s["name"] == detail["name"])["records"]
+    assert (srows[0]["values"][field], srows[1]["values"][field]) == (v1, v0)

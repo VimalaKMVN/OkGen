@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.22.0-detection-signature-lock`.
+> Baseline: top of `main` = tag `v0.22.1-per-layout-coverage`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -76,7 +76,9 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.22.0-detection-signature-lock`.** **Tests: 147 passing.**
+- **Top of `main` = tag `v0.22.1-per-layout-coverage`.** **Tests: 161 passing.**
+  Coverage gap closed: the staged-row-ops work was only parametrized for **delete**; **add** and **move** were tested on StyleHeader alone. Both are now parametrized across all 7 layouts (preview writes nothing → Save As changes only the copy → source byte-identical), so every layout × every row op is covered. The add case picks the first section with headroom (StyleHeader's Lane sits at its 10-record limit) rather than skipping the layout.
+- **Prior top of `main` = tag `v0.22.0-detection-signature-lock`** (was 147 passing).
   **Detection-signature fields locked** (see D12). An audit of all 7 layouts found every one has a header field that *is* its detection signature, all editable in the section editor and all offered by Bulk Edit. Fixed in three layers: (1) `config/field_display.yaml` marks each one `readonly` (shown as a static label, still visible); (2) bulk scope drops read-only/hidden fields, so Bulk Edit can no longer reach them — this was the mass-brick path; (3) `service._assert_layout_stable` re-detects from the serialized header before every write (save, Save As, row ops, bulk, make-unique) and rejects anything that would change the detected layout, leaving no `.bak` behind. Bulk reports it per file as an `error` status instead of throwing. `tests/fixtures/config/field_display.yaml` mirrors the production locks.
   - *Severity note:* StyleHeader/Preticket `indicator` failed **silently** — changing it to a digit re-detected the file as **DistLabels**, so fields parsed at the wrong offsets with no error. The other five became cleanly undetectable.
 - **Prior top of `main` = tag `v0.21.1-staged-row-ops-all-layouts`** (was 125 passing).
@@ -110,7 +112,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 147
+.venv/bin/python -m pytest tests/ -q              # currently 161
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```
