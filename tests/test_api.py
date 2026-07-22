@@ -1672,3 +1672,108 @@ def test_no_direct_record_construction_outside_okfile():
                     and not stripped.startswith("#"):
                 offenders.append(f"{py.name}:{i}: {stripped}")
     assert not offenders, "build rows with okfile.new_record():\n" + "\n".join(offenders)
+
+
+# --------------------------------------------------------------------------- #
+# Keys with a literal prefix (e.g. EUCartonLabel keytrol "C:88813")
+# --------------------------------------------------------------------------- #
+def _set_keytrol(path, value, registry, config):
+    service.apply_edits(path, [{"section_index": 0, "record_index": 0,
+                                "field": "keytrol", "value": value}],
+                        registry, config=config, backup=False)
+    return path
+
+
+def _keytrol(path, registry, config):
+    return service.parse_file_view(path, registry, config)["sections"][0]["records"][0]["values"]["keytrol"]
+
+
+def test_split_key_prefix_and_number():
+    """A leading non-digit run is a prefix; digits-then-letters is left alone."""
+    assert service._split_key("C:88813   ") == ("C:", 88813)
+    assert service._split_key("0008881334") == ("", 8881334)
+    assert service._split_key("C:") == ("C:", None)
+    assert service._split_key("33001P3A") == ("", None)      # Preticket po — unchanged
+    assert service._split_key("   ") == ("", None)
+    assert service._split_key(None) == ("", None)
+
+
+def test_make_unique_keeps_key_prefix(tmp_path, registry, config):
+    """Duplicate C: keys: the prefix stays, only the number is bumped."""
+    def make(name, key):
+        shutil.copy2(DATA_DIR / "EUCartonLabel.OK", tmp_path / name)
+        return _set_keytrol(tmp_path / name, key, registry, config)
+
+    a = make("a.OK", "C:88813")
+    b = make("b.OK", "C:88813")        # duplicate of a
+    c = make("c.OK", "0000123")        # different prefix space
+
+    service.make_unique_in_folder(tmp_path, registry, config, backup=False)
+
+    ka, kb, kc = (_keytrol(p, registry, config) for p in (a, b, c))
+    assert ka.startswith("C:") and kb.startswith("C:"), "the C: prefix must survive"
+    assert ka.strip() != kb.strip(), "the numbers must differ"
+    assert kc.strip() == "0000123", "a plain key in another prefix space is untouched"
+
+
+def test_prefixed_and_plain_keys_are_separate_numbering_spaces(tmp_path, registry, config):
+    """'C:00007' and '00007' are different keys — neither forces the other to move."""
+    shutil.copy2(DATA_DIR / "EUCartonLabel.OK", tmp_path / "p.OK")
+    plain = _set_keytrol(tmp_path / "p.OK", "0000007", registry, config)
+    shutil.copy2(DATA_DIR / "EUCartonLabel.OK", tmp_path / "q.OK")
+    pref = _set_keytrol(tmp_path / "q.OK", "C:7", registry, config)
+
+    service.make_unique_in_folder(tmp_path, registry, config, backup=False)
+
+    assert _keytrol(plain, registry, config).strip() == "0000007"
+    assert _keytrol(pref, registry, config).strip().startswith("C:")
+    assert _keytrol(pref, registry, config).strip().endswith("7")
+
+
+def test_save_as_does_not_touch_a_prefixed_key(tmp_path, registry, config):
+    """Editing another field and saving a copy leaves the C: key exactly as-is."""
+    shutil.copy2(DATA_DIR / "EUCartonLabel.OK", tmp_path / "src.OK")
+    src = _set_keytrol(tmp_path / "src.OK", "C:88813", registry, config)
+    before = _keytrol(src, registry, config)
+
+    other = tmp_path / "copy.OK"
+    service.apply_edits(src, [{"section_index": 0, "record_index": 0,
+                               "field": "dept", "value": "77"}],
+                        registry, target_path=str(other), config=config)
+
+    assert _keytrol(src, registry, config) == before
+    assert _keytrol(other, registry, config) == before
+
+
+def test_paste_rekey_keeps_prefix(tmp_path, registry, config):
+    """Auto-uniquify on paste renumbers within the prefix, keeping it."""
+    src_dir = tmp_path / "src"; src_dir.mkdir()
+    dst = tmp_path / "dst"; dst.mkdir()
+    shutil.copy2(DATA_DIR / "EUCartonLabel.OK", src_dir / "s.OK")
+    _set_keytrol(src_dir / "s.OK", "C:88813", registry, config)
+    shutil.copy2(DATA_DIR / "EUCartonLabel.OK", dst / "existing.OK")
+    _set_keytrol(dst / "existing.OK", "C:88813", registry, config)
+
+    service.copy_files([str(src_dir / "s.OK")], dst, registry, config)
+
+    pasted = _keytrol(dst / "s.OK", registry, config)
+    assert pasted.startswith("C:")
+    assert pasted.strip() != _keytrol(dst / "existing.OK", registry, config).strip()
+
+
+def test_generate_inherits_template_key_prefix(tmp_path, registry, config):
+    """Volume files generated from a C: template all keep C: and stay unique."""
+    shutil.copy2(DATA_DIR / "EUCartonLabel.OK", tmp_path / "tmpl.OK")
+    template = _set_keytrol(tmp_path / "tmpl.OK", "C:88813", registry, config)
+    before = _keytrol(template, registry, config)
+
+    res = service.generate_apply(template, {
+        "count": 5,
+        "name_parts": [{"type": "token", "name": "orig"}, {"type": "token", "name": "seq"}],
+        "separator": "_"}, registry, config)
+
+    keys = [_keytrol(f, registry, config) for f in Path(res["folder"]).glob("*.OK")]
+    assert len(keys) == 5
+    assert all(k.startswith("C:") for k in keys), keys
+    assert len({k.strip() for k in keys}) == 5
+    assert _keytrol(template, registry, config) == before      # template untouched
