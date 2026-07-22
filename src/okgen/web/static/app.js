@@ -1842,6 +1842,9 @@ function showBulkMenu() {
   add(`Bulk Edit (${n})`, () => enterBulkMode());
   add(`Bulk Rename (${n})`, () => enterRenameMode());
   add(`Make keys unique (${n})`, () => makeUniqueSelection());
+  // Volume generation works from exactly ONE template file.
+  add(n === 1 ? "Generate volume files…" : "Generate volume files… (select 1 file)",
+      () => enterGenerateMode(), n !== 1);
   menu.appendChild(el("div", "ctx-sep"));
   add(`🏷️  Send ${n} to NiceLabel`, () => sendToNiceLabel());
   const r = $("#bulkBtn").getBoundingClientRect();
@@ -1901,3 +1904,286 @@ window.addEventListener("beforeunload", (e) => {
 
 const last = localStorage.getItem("okgen.dir");
 if (last) { $("#folderPath").value = last; $("#folderPath").title = last; openFolder(last); }
+
+
+// ---- Generate volume files (from ONE template file) --------------------------
+// Produces N copies of a template, each with a fresh unique key plus optional
+// randomized header/detail fields and varying row counts. Names are built from
+// the same token model as Bulk Rename.
+function exitGenerateMode() {
+  const p = $("#generatePanel");
+  p.classList.add("hidden");
+  p.innerHTML = "";
+  $("#editorEmpty").style.display = "";
+}
+
+async function enterGenerateMode() {
+  if (state.selection.size !== 1) return;
+  if (!confirmDiscardIfDirty()) return;
+  const path = [...state.selection][0];
+  state.file = null; state.view = null; state.edits = {}; state.ops = [];
+  $("#editorTabs").classList.add("hidden");
+  $("#editor").classList.add("hidden");
+  $("#rawView").classList.add("hidden");
+  $("#editorEmpty").style.display = "none";
+  $("#bulkPanel").classList.add("hidden");
+  $("#renamePanel").classList.add("hidden");
+  $("#fileTitle").textContent = "";
+  updateSaveButtons();
+
+  const panel = $("#generatePanel");
+  panel.classList.remove("hidden");
+  panel.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Reading template…</div>";
+
+  let scope;
+  try {
+    scope = await postJSON("/api/generate/scope", { path });
+  } catch (e) {
+    panel.innerHTML = "";
+    panel.appendChild(el("div", "bulk-note", "Could not read the template: " + e.message));
+    return;
+  }
+  renderGeneratePanel(panel, path, scope);
+}
+
+function renderGeneratePanel(panel, path, scope) {
+  panel.innerHTML = "";
+  const head = el("div", "bulk-head");
+  head.appendChild(el("h3", null, `Generate volume files — ${scope.name}`));
+  head.appendChild(el("span", "bulk-label",
+    `${scope.layout} · key ${scope.key_field} is assigned uniquely to every file`));
+  const close = el("button", "btn", "Close");
+  close.addEventListener("click", exitGenerateMode);
+  head.appendChild(close);
+  panel.appendChild(head);
+
+  // --- how many -------------------------------------------------------------
+  const countRow = el("div", "bulk-edit-row");
+  countRow.appendChild(el("span", "bulk-label", "How many files"));
+  const countInput = el("input", "bulk-value");
+  countInput.type = "number"; countInput.min = "1"; countInput.max = String(scope.max_count);
+  countInput.value = "100"; countInput.style.width = "90px";
+  [100, 200, 500, 1000].forEach((n) => {
+    const b = el("button", "btn", String(n));
+    b.addEventListener("click", () => { countInput.value = String(n); refresh(); });
+    countRow.appendChild(b);
+  });
+  countRow.appendChild(countInput);
+  countRow.appendChild(el("span", "bulk-label", `max ${scope.max_count}`));
+  panel.appendChild(countRow);
+
+  // --- randomized fields ----------------------------------------------------
+  // One builder used for the header and for each detail section.
+  function fieldPicker(title, fields, hostClass) {
+    const box = el("div", "gen-group");
+    box.appendChild(el("div", "bulk-label", title));
+    if (!fields.length) {
+      box.appendChild(el("div", "bulk-note", "No numeric fields available here."));
+      return box;
+    }
+    fields.forEach((f) => {
+      const row = el("label", "gen-field");
+      const cb = el("input", "gen-on"); cb.type = "checkbox";
+      cb.dataset.field = f.name; cb.dataset.size = f.size;
+      const min = el("input", "gen-min"); min.type = "number"; min.placeholder = "min"; min.disabled = true;
+      const max = el("input", "gen-max"); max.type = "number"; max.placeholder = "max"; max.disabled = true;
+      cb.addEventListener("change", () => {
+        min.disabled = max.disabled = !cb.checked;
+        if (cb.checked && min.value === "") { min.value = "1"; max.value = String(Math.pow(10, f.size) - 1); }
+        refresh();
+      });
+      min.addEventListener("input", refresh);
+      max.addEventListener("input", refresh);
+      row.appendChild(cb);
+      row.appendChild(el("span", "gen-name", `${f.name} (${f.size})`));
+      row.appendChild(min); row.appendChild(max);
+      box.appendChild(row);
+    });
+    box.classList.add(hostClass);
+    return box;
+  }
+
+  const fieldsWrap = el("div", "gen-cols");
+  const headerBox = fieldPicker("Randomize header fields", scope.header_fields, "gen-header");
+  fieldsWrap.appendChild(headerBox);
+
+  scope.sections.forEach((sec) => {
+    const box = fieldPicker(`Randomize “${sec.name}” row fields`, sec.fields, "gen-detail");
+    box.dataset.section = sec.name;
+    // per-section row-count variation
+    const rc = el("div", "gen-rows");
+    const on = el("input"); on.type = "checkbox"; on.className = "gen-rows-on";
+    const lo = el("input", "gen-rows-min"); lo.type = "number"; lo.placeholder = "min rows"; lo.disabled = true;
+    const hi = el("input", "gen-rows-max"); hi.type = "number"; hi.placeholder = "max rows"; hi.disabled = true;
+    on.addEventListener("change", () => {
+      lo.disabled = hi.disabled = !on.checked;
+      if (on.checked && lo.value === "") {
+        lo.value = "1";
+        hi.value = String(sec.max_records || Math.max(sec.rows, 1));
+      }
+      refresh();
+    });
+    lo.addEventListener("input", refresh); hi.addEventListener("input", refresh);
+    rc.appendChild(on);
+    rc.appendChild(el("span", "gen-name",
+      `Vary row count (now ${sec.rows}${sec.max_records ? `, max ${sec.max_records}` : ""})`));
+    rc.appendChild(lo); rc.appendChild(hi);
+    box.insertBefore(rc, box.children[1] || null);
+    fieldsWrap.appendChild(box);
+  });
+  panel.appendChild(fieldsWrap);
+
+  // --- filename pattern (same token model as Bulk Rename) -------------------
+  const nameRow = el("div", "bulk-edit-row");
+  nameRow.appendChild(el("span", "bulk-label", "File name"));
+  const partsBox = el("div", "gen-parts");
+  nameRow.appendChild(partsBox);
+  const tokenSel = el("select", "bulk-field");
+  const palette = scope.palette || {};
+  const tokenNames = []
+    .concat(palette.derived || [])
+    .concat(palette.header_fields || []);
+  ["layout", "chain", "brand", "key", "seq", "orig"].forEach((t) => {
+    if (!tokenNames.includes(t)) tokenNames.unshift(t);
+  });
+  tokenSel.appendChild(new Option("+ add token…", ""));
+  tokenNames.forEach((t) => tokenSel.appendChild(new Option(t, t)));
+  tokenSel.addEventListener("change", () => {
+    if (!tokenSel.value) return;
+    addPart(tokenSel.value);
+    tokenSel.value = "";
+  });
+  nameRow.appendChild(tokenSel);
+  const sepSel = el("select", "bulk-field");
+  [["_", "_ underscore"], ["-", "- hyphen"], ["", "(none)"]].forEach(([v, label]) =>
+    sepSel.appendChild(new Option(label, v)));
+  sepSel.addEventListener("change", refresh);
+  nameRow.appendChild(el("span", "bulk-label", "separator"));
+  nameRow.appendChild(sepSel);
+  panel.appendChild(nameRow);
+
+  function addPart(name) {
+    const chip = el("span", "gen-chip");
+    chip.appendChild(el("span", null, name));
+    const x = el("button", "gen-chip-x", "✕");
+    x.title = "remove";
+    x.addEventListener("click", () => { chip.remove(); refresh(); });
+    chip.appendChild(x);
+    chip.dataset.token = name;
+    partsBox.appendChild(chip);
+    refresh();
+  }
+  ["layout", "key", "seq"].forEach(addPart);        // sensible default pattern
+
+  // --- preview + generate ---------------------------------------------------
+  const actions = el("div", "bulk-actions");
+  const genBtn = el("button", "btn btn-primary", "Generate");
+  actions.appendChild(genBtn);
+  const folderNote = el("span", "bulk-label", "");
+  actions.appendChild(folderNote);
+  panel.appendChild(actions);
+  const results = el("div"); panel.appendChild(results);
+
+  function buildSpec() {
+    const spec = {
+      count: Number(countInput.value) || 0,
+      header_fields: [], detail_fields: [], row_counts: [],
+      name_parts: [...partsBox.querySelectorAll(".gen-chip")]
+        .map((c) => ({ type: "token", name: c.dataset.token })),
+      separator: sepSel.value,
+    };
+    headerBox.querySelectorAll(".gen-on:checked").forEach((cb) => {
+      const row = cb.closest(".gen-field");
+      spec.header_fields.push({
+        name: cb.dataset.field,
+        min: row.querySelector(".gen-min").value,
+        max: row.querySelector(".gen-max").value,
+      });
+    });
+    panel.querySelectorAll(".gen-detail").forEach((box) => {
+      const section = box.dataset.section;
+      box.querySelectorAll(".gen-on:checked").forEach((cb) => {
+        const row = cb.closest(".gen-field");
+        spec.detail_fields.push({
+          section, name: cb.dataset.field,
+          min: row.querySelector(".gen-min").value,
+          max: row.querySelector(".gen-max").value,
+        });
+      });
+      const on = box.querySelector(".gen-rows-on");
+      if (on && on.checked) {
+        spec.row_counts.push({
+          section,
+          min: box.querySelector(".gen-rows-min").value,
+          max: box.querySelector(".gen-rows-max").value,
+        });
+      }
+    });
+    return spec;
+  }
+
+  let timer = null;
+  function refresh() { clearTimeout(timer); timer = setTimeout(doPreview, 250); }
+
+  async function doPreview() {
+    const spec = buildSpec();
+    if (!spec.count) { results.innerHTML = ""; return; }
+    let pv;
+    try {
+      pv = await postJSON("/api/generate/preview", { path, spec });
+    } catch (e) {
+      results.innerHTML = "";
+      results.appendChild(el("div", "bulk-note", "Preview failed: " + e.message));
+      return;
+    }
+    folderNote.textContent = `→ ${pv.folder.split(/[\\/]/).pop()}/`;
+    results.innerHTML = "";
+    results.appendChild(el("div", "bulk-summary",
+      `Preview of the first ${pv.sample.length} of ${pv.count} files — nothing written yet`));
+    const table = el("table", "bulk-table");
+    const cols = ["file name", "key"].concat(
+      Object.keys(pv.sample[0] ? pv.sample[0].values : {}),
+      Object.keys(pv.sample[0] ? pv.sample[0].rows : {}).map((s) => s + " rows"));
+    const thead = el("thead"); const htr = el("tr");
+    cols.forEach((c) => htr.appendChild(el("th", null, c)));
+    thead.appendChild(htr); table.appendChild(thead);
+    const tb = el("tbody");
+    pv.sample.forEach((r) => {
+      const tr = el("tr", "st-change");
+      tr.appendChild(el("td", "mono", r.name));
+      tr.appendChild(el("td", "mono", r.key));
+      Object.keys(r.values).forEach((k) => tr.appendChild(el("td", "mono", r.values[k])));
+      Object.keys(r.rows).forEach((k) => tr.appendChild(el("td", null, String(r.rows[k]))));
+      tb.appendChild(tr);
+    });
+    table.appendChild(tb);
+    results.appendChild(table);
+  }
+
+  genBtn.addEventListener("click", async () => {
+    const spec = buildSpec();
+    if (!spec.count) { setStatus("Enter how many files to generate", "err"); return; }
+    if (!confirm(`Generate ${spec.count} file(s) from ${scope.name}?\n\n` +
+                 `They will be written to a new folder beside the template.`)) return;
+    if (!beginBusy(`Generating ${spec.count} files…`)) {
+      setStatus("Please wait — an operation is already running…", "dirty"); return;
+    }
+    genBtn.disabled = true;
+    try {
+      const res = await postJSON("/api/generate/apply", { path, spec });
+      setStatus(`Generated ${res.written} file(s)`, "ok");
+      activityResult(`Generated ${res.written} files`, "ok");
+      results.innerHTML = "";
+      results.appendChild(el("div", "bulk-summary",
+        `Wrote ${res.written} file(s) into ${res.folder}`));
+      await refreshFolder(folderOf(path));
+    } catch (e) {
+      setStatus("Generate failed: " + e.message, "err");
+      results.appendChild(el("div", "bulk-note", "Generate failed: " + e.message));
+    } finally {
+      state.busy = false; genBtn.disabled = false;
+    }
+  });
+
+  refresh();
+}

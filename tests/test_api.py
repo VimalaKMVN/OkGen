@@ -1494,3 +1494,39 @@ def test_generate_rejects_bad_counts(tmp_path, registry, config):
     with pytest.raises(service.EditError):
         service.generate_apply(work, _gen_spec(scope, service.GENERATE_MAX + 1), registry, config)
     assert not list(tmp_path.glob("generated_*"))
+
+
+def test_flask_generate_endpoints(tmp_path):
+    """The three /api/generate/* routes: scope, preview (no write), apply."""
+    from okgen.web.app import create_app
+
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    client = create_app(data_dir=DATA_DIR).test_client()
+
+    sc = client.post("/api/generate/scope", json={"path": str(work)})
+    assert sc.status_code == 200
+    scope = sc.get_json()
+    assert scope["layout"] == "StyleHeader" and scope["palette"]
+
+    spec = {"count": 6,
+            "header_fields": [{"name": "dept", "min": 1, "max": 99}],
+            "name_parts": [{"type": "token", "name": "layout"},
+                           {"type": "token", "name": "key"}],
+            "separator": "_"}
+
+    pv = client.post("/api/generate/preview", json={"path": str(work), "spec": spec})
+    assert pv.status_code == 200
+    assert len(pv.get_json()["sample"]) == 5          # capped sample
+    assert not list(tmp_path.glob("generated_*"))     # preview wrote nothing
+
+    ap = client.post("/api/generate/apply", json={"path": str(work), "spec": spec})
+    assert ap.status_code == 200
+    body = ap.get_json()
+    assert body["written"] == 6
+    assert len(list(Path(body["folder"]).glob("*.OK"))) == 6
+
+    over = client.post("/api/generate/apply",
+                       json={"path": str(work), "spec": dict(spec, count=99999)})
+    assert over.status_code == 422
+    assert "limit" in over.get_json()["error"]

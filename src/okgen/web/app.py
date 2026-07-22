@@ -143,6 +143,40 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except FileNotFoundError:
             return _err(f"not found: {body.get('path')}", 404)
 
+    @app.post("/api/generate/scope")
+    def generate_scope():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.generate_scope(body.get("path"), registry, config))
+        except FileNotFoundError:
+            return _err(f"not found: {body.get('path')}", 404)
+        except ValueError as exc:
+            return _err(str(exc), 400)
+
+    @app.post("/api/generate/preview")
+    def generate_preview():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.generate_preview(
+                body.get("path"), body.get("spec") or {}, registry, config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+        except FileNotFoundError:
+            return _err(f"not found: {body.get('path')}", 404)
+
+    @app.post("/api/generate/apply")
+    def generate_apply():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.generate_apply(
+                body.get("path"), body.get("spec") or {}, registry, config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+        except FileNotFoundError:
+            return _err(f"not found: {body.get('path')}", 404)
+        except OSError as exc:
+            return _err(str(exc), 500)
+
     @app.post("/api/browse-folder")
     def browse_folder():
         body = request.get_json(force=True, silent=True) or {}
