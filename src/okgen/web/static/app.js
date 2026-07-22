@@ -2110,7 +2110,7 @@ function renderGeneratePanel(panel, path, scope) {
   panel.appendChild(actions);
   const results = el("div"); panel.appendChild(results);
   // Both Generate buttons (header + sticky bar) do the same thing.
-  topGen.addEventListener("click", () => genBtn.click());
+  topGen.addEventListener("click", () => runGenerate());
 
   function buildSpec() {
     const spec = {
@@ -2166,8 +2166,10 @@ function renderGeneratePanel(panel, path, scope) {
     }
     folderNote.textContent =
       `${pv.count} file(s) → ${pv.folder.split(/[\\/]/).pop()}/`;
-    genBtn.textContent = `Generate ${pv.count} files`;
-    topGen.textContent = `Generate ${pv.count} files`;
+    if (!armed) {
+      genBtn.textContent = `Generate ${pv.count} files`;
+      topGen.textContent = `Generate ${pv.count} files`;
+    }
     results.innerHTML = "";
     results.appendChild(el("div", "bulk-summary",
       `Preview of the first ${pv.sample.length} of ${pv.count} files — nothing written yet`));
@@ -2191,30 +2193,74 @@ function renderGeneratePanel(panel, path, scope) {
     results.appendChild(table);
   }
 
-  genBtn.addEventListener("click", async () => {
+  // Confirmation is INLINE, not a native confirm(): browsers let a user tick
+  // "prevent this page from creating additional dialogs", after which every
+  // confirm() returns false instantly and the click silently does nothing.
+  const cancelBtn = el("button", "btn", "Cancel");
+  cancelBtn.classList.add("hidden");
+  actions.insertBefore(cancelBtn, folderNote);
+  let armed = false, armTimer = null;
+
+  function disarm() {
+    armed = false;
+    clearTimeout(armTimer);
+    cancelBtn.classList.add("hidden");
+    actions.classList.remove("armed");
+    const label = `Generate ${Number(countInput.value) || 0} files`;
+    genBtn.textContent = label;
+    topGen.textContent = label;
+  }
+  cancelBtn.addEventListener("click", disarm);
+
+  // A refusal must be visible where the user is looking, not only in the
+  // top-right status text.
+  function panelMessage(text, kind) {
+    results.innerHTML = "";
+    const box = el("div", kind === "err" ? "bulk-note gen-err" : "bulk-summary", text);
+    results.appendChild(box);
+  }
+
+  async function runGenerate() {
     const spec = buildSpec();
-    if (!spec.count) { setStatus("Enter how many files to generate", "err"); return; }
-    if (!confirm(`Generate ${spec.count} file(s) from ${scope.name}?\n\n` +
-                 `They will be written to a new folder beside the template.`)) return;
-    if (!beginBusy(`Generating ${spec.count} files…`)) {
-      setStatus("Please wait — an operation is already running…", "dirty"); return;
+    if (!spec.count) {
+      panelMessage("Enter how many files to generate.", "err");
+      setStatus("Enter how many files to generate", "err");
+      return;
     }
-    genBtn.disabled = true; topGen.disabled = true;
+    if (!armed) {                       // first click: arm, don't write yet
+      armed = true;
+      actions.classList.add("armed");
+      cancelBtn.classList.remove("hidden");
+      genBtn.textContent = `Click again to write ${spec.count} files`;
+      topGen.textContent = `Click again to write ${spec.count} files`;
+      armTimer = setTimeout(disarm, 10000);
+      return;
+    }
+    clearTimeout(armTimer);
+    if (!beginBusy(`Generating ${spec.count} files…`)) {
+      panelMessage("Another operation is still running — wait for it to finish, "
+                   + "then click Generate again.", "err");
+      setStatus("Please wait — an operation is already running…", "dirty");
+      disarm();
+      return;
+    }
+    genBtn.disabled = true; topGen.disabled = true; cancelBtn.disabled = true;
     try {
       const res = await postJSON("/api/generate/apply", { path, spec });
       setStatus(`Generated ${res.written} file(s)`, "ok");
       activityResult(`Generated ${res.written} files`, "ok");
-      results.innerHTML = "";
-      results.appendChild(el("div", "bulk-summary",
-        `Wrote ${res.written} file(s) into ${res.folder}`));
+      panelMessage(`Wrote ${res.written} file(s) into ${res.folder}`);
       await refreshFolder(folderOf(path));
     } catch (e) {
       setStatus("Generate failed: " + e.message, "err");
-      results.appendChild(el("div", "bulk-note", "Generate failed: " + e.message));
+      panelMessage("Generate failed: " + e.message, "err");
     } finally {
-      state.busy = false; genBtn.disabled = false; topGen.disabled = false;
+      state.busy = false;
+      genBtn.disabled = false; topGen.disabled = false; cancelBtn.disabled = false;
+      disarm();
     }
-  });
+  }
+  genBtn.addEventListener("click", runGenerate);
 
   refresh();
 }

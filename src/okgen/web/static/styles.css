@@ -558,3 +558,12 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
   box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.35);
 }
 .gen-go { font-weight: 600; padding: 7px 18px; }
+/* Armed state for the two-step Generate confirmation. */
+.gen-actions.armed {
+  border-color: var(--dirty);
+  box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.35), 0 0 0 1px var(--dirty) inset;
+}
+.gen-actions.armed .gen-go {
+  background: var(--dirty); border-color: var(--dirty); color: #1e1e1e;
+}
+.gen-err { color: var(--err); }
