@@ -672,18 +672,23 @@ def _is_blank_row(rec, hidden: set) -> bool:
 
 
 def _apply_detail_fill(okf: OkFile, config: Config) -> None:
-    """Keep configured detail sections padded with trailing all-zero rows.
+    """Keep configured detail sections' count field (and, for some, filler rows)
+    in sync with the number of REAL (non-blank) detail rows.
 
-    For each section in ``config.fill_sections`` (Preticket's Lane): if it has
-    at least one REAL (non-blank) row, keep the real rows in order and follow
-    them with exactly N all-zero filler rows, and set the header count field to
-    the number of real rows. If it has NO real rows (empty, or only all-zero
-    filler), no filler is added and the header count field is set to 0.
+    Two modes, per ``config.fill_sections`` entry:
 
-    Filler rows are COPIED, never synthesised — from an existing blank row in
-    the file when present, else the compile-time ``filler_raw`` — because the
-    zero/space byte layout is not derivable from the field spec. Idempotent: a
-    file already at N real + K filler re-normalises to the same bytes.
+    - ``zeros > 0`` (Preticket's Lane): keep the real rows, follow them with
+      exactly N all-zero filler rows, and set the header count field to the real
+      count. Filler rows are COPIED, never synthesised — from an existing blank
+      row in the file, else the compile-time ``filler_raw`` — because the
+      zero/space byte layout is not derivable from the field spec.
+
+    - ``zeros == 0`` (EUPreticket's Lane): COUNT ONLY — the format has no filler
+      rows, so nothing is added or removed; just set the header count field to
+      the number of real rows.
+
+    A section with no real rows sets its count field to 0. Idempotent, and runs
+    only on writes (not on plain open), so an unmodified file round-trips exact.
     """
     if config is None or not okf.records:
         return
@@ -696,6 +701,12 @@ def _apply_detail_fill(okf: OkFile, config: Config) -> None:
         rows = [r for r in okf.records if r.section is sec]
         real = [r for r in rows if not _is_blank_row(r, hidden)]
         blanks = [r for r in rows if _is_blank_row(r, hidden)]
+
+        # Count-only mode: no filler rows, just sync the count to real rows.
+        if zeros == 0:
+            _set_count_field(okf, layout.name, sec_name, len(real), config)
+            continue
+
         if not real:
             # no real detail lines -> line count is 0 (leave any zero rows as-is)
             _set_count_field(okf, layout.name, sec_name, 0, config)

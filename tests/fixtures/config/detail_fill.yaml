@@ -13,3 +13,8 @@
 fill:
   Preticket:
     Lane: 10
+  # EUPreticket has NO filler rows in production — count-only (zeros: 0) means
+  # OkGen just keeps line_count in sync with the real detail-row count, without
+  # adding or removing any rows.
+  EUPreticket:
+    Lane: 0

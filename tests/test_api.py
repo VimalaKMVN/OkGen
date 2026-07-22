@@ -2251,10 +2251,55 @@ def _line_count(view):
     return view["sections"][0]["records"][0]["values"].get("line_count")
 
 
-def test_fill_config_only_preticket(config):
-    assert config.zero_fill("Preticket", "Lane") == 10
-    assert config.zero_fill("StyleHeader", "Lane") is None
-    assert config.zero_fill("EUPreticket", "Lane") is None
+def test_fill_config(config):
+    assert config.zero_fill("Preticket", "Lane") == 10     # 10 filler rows
+    assert config.zero_fill("EUPreticket", "Lane") == 0    # count-only, no filler
+    assert config.zero_fill("StyleHeader", "Lane") is None # not managed at all
+
+
+def test_eupreticket_line_count_follows_real_rows_no_filler(tmp_path, registry, config):
+    """EUPreticket has no filler rows: line_count is synced to the real detail
+    count and NO all-zero rows are added or removed."""
+    work = tmp_path / "EUPreticket.OK"
+    shutil.copy2(DATA_DIR / "EUPreticket.OK", work)
+
+    before = service.parse_file_view(work, registry, config)
+    lane = next(s for s in before["sections"] if s["name"] == "Lane")
+    n = len(lane["records"])                              # 5 real rows in the sample
+
+    other = tmp_path / "copy.OK"
+    service.apply_edits(work, [], registry, target_path=str(other), config=config)
+    after = service.parse_file_view(other, registry, config)
+
+    lane_after = next(s for s in after["sections"] if s["name"] == "Lane")
+    assert len(lane_after["records"]) == n               # no rows added or removed
+    assert after["sections"][0]["records"][0]["values"]["line_count"] == str(n).zfill(2)
+    assert after["roundtrip_ok"]
+    # not a single all-zero filler row was introduced
+    for r in lane_after["records"]:
+        assert any((v or "").strip("0 ") for v in r["values"].values())
+
+
+def test_eupreticket_line_count_after_delete_and_keep(tmp_path, registry, config):
+    """Deleting rows and bulk 'keep N' both re-sync EUPreticket line_count."""
+    work = tmp_path / "EUPreticket.OK"
+    shutil.copy2(DATA_DIR / "EUPreticket.OK", work)
+
+    lane = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                if s["name"] == "Lane")
+    service.delete_record(work, lane["records"][0]["index"], [], registry, config, backup=False)
+    v = service.parse_file_view(work, registry, config)
+    n = len(next(s for s in v["sections"] if s["name"] == "Lane")["records"])
+    assert v["sections"][0]["records"][0]["values"]["line_count"] == str(n).zfill(2)
+
+    work2 = tmp_path / "EUPreticket2.OK"
+    shutil.copy2(DATA_DIR / "EUPreticket.OK", work2)
+    service.bulk_op_apply([str(work2)], "EUPreticket", "Lane",
+                          {"type": "keep", "count": 2}, registry, config, backup=False)
+    v2 = service.parse_file_view(work2, registry, config)
+    lane2 = next(s for s in v2["sections"] if s["name"] == "Lane")
+    assert len(lane2["records"]) == 2
+    assert v2["sections"][0]["records"][0]["values"]["line_count"] == "02"
 
 
 def test_fill_on_save_normalizes_to_ten(tmp_path, registry, config):
