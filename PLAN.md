@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.27.0-literal-fields`.
+> Baseline: top of `main` = tag `v0.27.1-blank-seed`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -79,7 +79,9 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.27.0-literal-fields`.** **Tests: 277 passing** (276 Python + 1 Node smoke suite).
+- **Top of `main` = tag `v0.27.1-blank-seed`.** **Tests: 285 passing** (284 Python + 1 Node smoke suite).
+  **Adding the first row to an empty section now seeds a CLEAN blank template**, not the layout's baked placeholder values. `_seed_record` kept `sample_raw` verbatim — Preticket's is placeholder junk (`MESSAGES01`, `Fact1Fact1Fact1`, `FRENCH DESCRIPTION!!`, `VENDORST`), so seeding an empty Lane dumped that garbage and the user had to clear ~24 fields; EUPreticket only looked fine because its sample holds realistic values. Now the structure (markers, delimiters, terminator, field widths) is preserved and every field VALUE is blanked (spaces / zeros per justification). Copying an existing row (the non-empty case) is unchanged — still duplicates the row above. Two sub-fixes: the seed offset is now derived from the section marker (`0` for marker-less fixed-width like Preticket, was hardcoded `1` — self-corrected on reparse, but wrong pre-save), and the structural **record-type marker field** (`#`/`&`, the hidden `detail_marker`/`lane_marker`) is **skipped** when blanking, else it wiped to a space and orphaned the row into `(unassigned)`. Verified clean + byte-exact across all 7 layouts and every populated section.
+- **Prior top of `main` = tag `v0.27.0-literal-fields`** (277 passing).
   **Literal (free-text) fields** (D15) — a configured set of fields is now stored **exactly as typed**: never zero-padded, never re-justified, leading/middle/trailing spaces preserved, with only the leftover at the END space-filled. Field width is still enforced (over-long values are **rejected, not truncated**) because a short record would shift every field after it. Config-driven via a new `literal:` block in `field_display.yaml` (a `"*"` key applies to all layouts), covering message1/2, fact1-3, item, universal_item, description, area, size + size_1-10 + size_code + phys_size_1-10, upp_weight, header_asn_id — plus total_weight/vendor_style/fiber/approx_size/country, which don't exist in any current layout but are listed so they behave correctly if they appear.
   - **Fixed a real bug:** `EUPreticket.message1` was **zero-padding** — its sample value is `'01        '`, so `_infer_format` guessed "zero-padded number" and typing `AB` stored `'00000000AB'`. Padding style is guessed from the sample, which is fine for codes and wrong for free text; the literal list removes the guess where it doesn't belong.
   - **Codes deliberately excluded:** `dept` stays zero-padded (7 → `07`) — confirmed with the user, since it is a 2-char code that downstream systems and the rename token both depend on.
@@ -147,7 +149,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 277
+.venv/bin/python -m pytest tests/ -q              # currently 285
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```

@@ -545,7 +545,7 @@ def _op_add(okf: OkFile, config: Config, section_index=None, after_index=None) -
             sec = next((s for s in okf.layout.sections if s.name == _name), None)
             if sec is None:
                 raise EditError(f"section '{_name}' cannot receive rows")
-            template = _seed_record(okf, sec)
+            template = _seed_record(okf, sec, config)
             if template is None:
                 raise EditError(f"section '{sec.name}' has no template to seed a row")
             seeded = True
@@ -656,15 +656,43 @@ def _normalize_eols(okf) -> None:
             rec.raw = content + eol
 
 
-def _seed_record(okf, sec):
-    """Build a new record to start an EMPTY section, from the section's
-    ``sample_raw`` seed (a real reference line). Returns None when no seed is
-    known for the section (e.g. an ambiguous shared-marker section)."""
+def _seed_record(okf, sec, config: Config = None):
+    """Build a BLANK first row for an EMPTY section.
+
+    The section's ``sample_raw`` is a real reference line, so it carries the
+    correct structure — markers, delimiters, terminator and every field width.
+    But its field *values* are whatever happened to be in the reference file
+    (e.g. Preticket's are placeholder junk like ``MESSAGES01`` / ``Fact1Fact1``),
+    which the user would then have to clear one field at a time. So we keep the
+    structure and blank every field value, giving a clean template to fill.
+
+    A copy of an existing row (the non-empty case) is untouched by this — that
+    still duplicates the row above, as intended.
+
+    Returns None when no seed structure is known for the section.
+    """
     seed = getattr(sec, "sample_raw", None)
     if not seed:
         return None
-    offset = 0 if getattr(okf.layout, "delimited", False) else 1
-    return new_record(seed.rstrip("\r"), sec, okf.layout, offset=offset, index=-1)
+    # offset is the leading marker length: 0 for delimited and for marker-less
+    # fixed-width detail lines (e.g. Preticket), 1 for a '#'/'&'-marked line.
+    marker = getattr(sec, "marker", "") or ""
+    offset = 0 if getattr(okf.layout, "delimited", False) else len(marker)
+    rec = new_record(seed.rstrip("\r"), sec, okf.layout, offset=offset, index=-1)
+    # Blank each field, keeping markers/delimiters/terminator and exact widths.
+    # SKIP the structural marker fields (the '#'/'&' record-type char that routes
+    # a delimited row to its section) — blanking those to a space would orphan
+    # the row into "(unassigned)". They are exactly the layout's hidden fields.
+    literal = config.literal_fields(okf.layout.name) if config else set()
+    skip = config.hidden_fields(okf.layout.name) if config else set()
+    for f in sec.fields:
+        if f.name in skip:
+            continue
+        try:
+            rec.set(f.name, "", literal=f.name in literal)
+        except (ValueError, KeyError):
+            continue      # size-0 marker placeholder / unsettable field
+    return rec
 
 
 def _insert_in_section_order(okf, clone, sec) -> int:
@@ -1310,7 +1338,7 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
             else:
                 # Empty section: seed the first row from the reference line and
                 # place it in canonical section order.
-                template = _seed_record(okf, sec)
+                template = _seed_record(okf, sec, config)
                 if template is None:
                     return {"name": name, "status": "error",
                             "error": f"section '{section_name}' has no template to seed a row"}
@@ -1837,7 +1865,7 @@ def _set_row_count(okf: OkFile, config: Config, section_name: str, target: int) 
         if rows:
             template, at = rows[-1], okf.records.index(rows[-1]) + 1
         else:
-            template = _seed_record(okf, sec)
+            template = _seed_record(okf, sec, config)
             if template is None:
                 return                            # nothing to seed from — leave empty
             at = _insert_in_section_order(okf, template, sec) + 1
