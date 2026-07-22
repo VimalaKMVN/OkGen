@@ -1,5 +1,20 @@
 "use strict";
 
+// Build marker — shown in the Generate panel header so a cached copy of this
+// file is obvious at a glance ("build" in the UI vs the tag you deployed).
+const OKGEN_BUILD = "v0.25.4";
+
+// Nothing in this app should fail silently: surface JS errors and rejected
+// promises in the status bar, otherwise a thrown error inside a click handler
+// looks exactly like a dead button.
+window.addEventListener("error", (e) => {
+  try { setStatus("Script error: " + (e.message || e.error), "err"); } catch (_) {}
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const msg = (e.reason && (e.reason.message || e.reason)) || "unknown";
+  try { setStatus("Unhandled error: " + msg, "err"); } catch (_) {}
+});
+
 // ---- state ----
 const state = {
   rootDir: null,
@@ -1975,6 +1990,7 @@ function renderGeneratePanel(panel, path, scope) {
   head.appendChild(el("h3", null, `Generate volume files — ${scope.name}`));
   head.appendChild(el("span", "bulk-label",
     `${scope.layout} · key ${scope.key_field} is assigned uniquely to every file`));
+  head.appendChild(el("span", "bulk-label gen-build", `build ${OKGEN_BUILD}`));
   const topGen = el("button", "btn btn-primary", "Generate");
   head.appendChild(topGen);
   const close = el("button", "btn", "Close");
@@ -2102,13 +2118,14 @@ function renderGeneratePanel(panel, path, scope) {
   ["layout", "key", "seq"].forEach(addPart);        // sensible default pattern
 
   // --- preview + generate ---------------------------------------------------
+  const results = el("div", "gen-results");
+  panel.appendChild(results);              // ABOVE the sticky bar, so messages show
   const actions = el("div", "bulk-actions gen-actions");
   const genBtn = el("button", "btn btn-primary gen-go", "Generate");
   actions.appendChild(genBtn);
   const folderNote = el("span", "bulk-label", "");
   actions.appendChild(folderNote);
   panel.appendChild(actions);
-  const results = el("div"); panel.appendChild(results);
   // Both Generate buttons (header + sticky bar) do the same thing.
   topGen.addEventListener("click", () => runGenerate());
 

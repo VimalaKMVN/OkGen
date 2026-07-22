@@ -21,6 +21,10 @@ _DEFAULT_DATA_DIR = Path(__file__).resolve().parents[3] / "data" / "OkFileDefini
 
 def create_app(data_dir=None, config_dir=None) -> Flask:
     app = Flask(__name__)
+    # This runs locally against files on the same machine, so there is nothing to
+    # gain from caching app.js/styles.css — and plenty to lose: a stale cached
+    # copy makes a fixed bug look unfixed after a deploy.
+    app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     registry = LayoutRegistry.from_dir(data_dir or _DEFAULT_DATA_DIR)
     config = Config.load(config_dir)
 
