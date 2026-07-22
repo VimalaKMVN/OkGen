@@ -1172,3 +1172,139 @@ def test_staged_move_every_layout(tmp_path, registry, config, sample):
     saved = service.parse_file_view(other, registry, config)
     srows = next(s for s in saved["sections"] if s["name"] == detail["name"])["records"]
     assert (srows[0]["values"][field], srows[1]["values"][field]) == (v1, v0)
+
+
+# --------------------------------------------------------------------------- #
+# v0.20.0 features, per layout: empty sections, padding, single-file bulk
+# --------------------------------------------------------------------------- #
+def _empty_out_section(work, section_name, registry, config):
+    """Delete every row of a section via staged ops; returns the saved view."""
+    ops = []
+    while True:
+        view = service.parse_file_view(work, registry, config)
+        rows = next(s for s in view["sections"] if s["name"] == section_name)["records"]
+        if not rows:
+            break
+        service.delete_record(work, rows[0]["index"], [], registry, config, backup=False)
+    return service.parse_file_view(work, registry, config)
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_empty_section_survives_every_layout(tmp_path, registry, config, sample):
+    """Emptying a section keeps it visible and does not shift the other sections."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    before = service.parse_file_view(work, registry, config)
+    target = next(s for s in before["sections"] if not s["is_header"] and s["records"])
+    others = {s["name"]: len(s["records"]) for s in before["sections"]
+              if s["name"] != target["name"]}
+
+    after = _empty_out_section(work, target["name"], registry, config)
+
+    names = [s["name"] for s in after["sections"]]
+    assert names == [s["name"] for s in before["sections"]]      # canonical order kept
+    emptied = next(s for s in after["sections"] if s["name"] == target["name"])
+    assert emptied["records"] == []                              # present, shown as "None"
+    for s in after["sections"]:                                  # siblings unshifted
+        if s["name"] != target["name"]:
+            assert len(s["records"]) == others[s["name"]], f"{s['name']} shifted"
+    assert after["roundtrip_ok"]
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_empty_section_can_be_reseeded_every_layout(tmp_path, registry, config, sample):
+    """After emptying a section you can add its first row back from the seed."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    before = service.parse_file_view(work, registry, config)
+    target = next(s for s in before["sections"] if not s["is_header"] and s["records"])
+
+    after = _empty_out_section(work, target["name"], registry, config)
+    sec_index = next(s["index"] for s in after["sections"] if s["name"] == target["name"])
+    view = service.add_record(work, sec_index, [], registry, config, backup=False)
+
+    assert _detail_count(view, target["name"]) == 1
+    assert view["roundtrip_ok"]
+
+
+def test_section_without_sample_rows_cannot_be_seeded(tmp_path, registry, config):
+    """Known gap: a section absent from the reference .OK has no seed to copy.
+
+    DistLabels' TSticker has zero rows in data/OkFileDefinitions/DistLabels.OK,
+    so the compiler could not learn its marker or a sample line — adding its
+    first row fails with a clear error rather than writing a guessed record.
+    Fixing this needs a real DistLabels sample containing TSticker rows.
+    """
+    work = tmp_path / "DistLabels.OK"
+    shutil.copy2(DATA_DIR / "DistLabels.OK", work)
+    view = service.parse_file_view(work, registry, config)
+    tsticker = next((s for s in view["sections"] if s["name"] == "TSticker"), None)
+    if tsticker is None:
+        pytest.skip("TSticker section not in this layout build")
+    assert tsticker["records"] == []
+    with pytest.raises(service.EditError, match="no template to seed"):
+        service.add_record(work, tsticker["index"], [], registry, config, backup=False)
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_short_value_is_repadded_on_save_every_layout(tmp_path, registry, config, sample):
+    """Padding UX: a short typed value is re-padded, so record width is preserved."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    width_before = len(work.read_bytes().split(b"\n")[0])
+
+    view = service.parse_file_view(work, registry, config)
+    field = next(f for f in view["sections"][0]["fields"]
+                 if f.get("size") and f["size"] >= 4 and f["editable"]
+                 and not f["hidden"] and not f.get("derived") and not f.get("options"))
+    res = service.apply_edits(
+        work, [{"section_index": 0, "record_index": 0, "field": field["name"], "value": "7"}],
+        registry, config=config, backup=False)
+
+    assert res["roundtrip_ok"]
+    assert len(work.read_bytes().split(b"\n")[0]) == width_before   # re-padded to width
+    stored = service.parse_file_view(work, registry, config)["sections"][0]["records"][0]
+    assert len(stored["values"][field["name"]]) == field["size"]
+    assert stored["values"][field["name"]].strip().lstrip("0") == "7"
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_bulk_works_on_a_single_file_every_layout(tmp_path, registry, config, sample):
+    """Bulk Edit applies to a selection of ONE file, on every layout."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    scope = service.bulk_scope([str(work)], registry, config)
+    layout = next(iter(scope["layouts"]))
+    field = next(f for f in scope["header_fields"][layout]
+                 if f.get("size") and f["size"] >= 4 and not f.get("options"))
+
+    pv = service.bulk_preview([str(work)], layout, field["name"], "7", registry, config)
+    assert pv["results"][0]["status"] == "change"
+    ap = service.bulk_apply([str(work)], layout, field["name"], "7", registry, config,
+                            backup=False)
+    assert ap["results"][0]["status"] == "changed"
+
+
+def test_bulk_preview_flags_partial_signature_value(tmp_path, registry, config):
+    """CartonLabel 'format' is legal to edit, but N/Y/7/9 collide with another
+    layout's detection rule — the PREVIEW must say so, not just the apply."""
+    work = tmp_path / "CartonLabel.OK"
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", work)
+    original = work.read_bytes()
+
+    pv = service.bulk_preview([str(work)], "CartonLabel", "format", "7", registry, config)
+    assert pv["results"][0]["status"] == "error"
+    assert "detection signature" in pv["results"][0]["error"]
+
+    ap = service.bulk_apply([str(work)], "CartonLabel", "format", "7", registry, config,
+                            backup=False)
+    assert ap["results"][0]["status"] == "error"
+    assert work.read_bytes() == original

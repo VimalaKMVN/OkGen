@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.22.1-per-layout-coverage`.
+> Baseline: top of `main` = tag `v0.23.0-v020-per-layout-coverage`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -76,7 +76,11 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.22.1-per-layout-coverage`.** **Tests: 161 passing.**
+- **Top of `main` = tag `v0.23.0-v020-per-layout-coverage`.** **Tests: 191 passing, 0 skipped.**
+  Verified the **v0.20.0** features (empty sections, padding UX, single-file bulk) across all 7 layouts — they were only tested on StyleHeader (+ EUStyleHeader for routing). All now parametrized: empty-section survival/canonical order, reseeding an emptied section, short-value re-padding, and single-file bulk. Two real findings:
+  - **`DistLabels.TSticker` cannot be seeded** — the reference `DistLabels.OK` contains **zero** TSticker rows, so the compiler learned no `marker` and no `sample_raw` for it (every other layout/section has both). Adding its first row fails with `no template to seed a row`. **Blocked on a real DistLabels sample containing TSticker rows**; pinned by a test that documents the gap so it surfaces the day the data arrives.
+  - **Partial detection signatures** — the D12 audit was value-dependent and missed these: `CartonLabel.format` set to `N`/`Y`/`7`/`9` re-detects as StyleHeader/Preticket/DistLabels, and `chain` on the NA layouts set to `DD`/`HH` reads as an EU layout. Both are legitimate editable fields, so they are *not* config-locked — `_assert_layout_stable` already blocked the write, and `_bulk_eval` now runs the same check so the **preview** reports it per file instead of the user applying and hitting an error.
+- **Prior top of `main` = tag `v0.22.1-per-layout-coverage`** (was 161 passing).
   Coverage gap closed: the staged-row-ops work was only parametrized for **delete**; **add** and **move** were tested on StyleHeader alone. Both are now parametrized across all 7 layouts (preview writes nothing → Save As changes only the copy → source byte-identical), so every layout × every row op is covered. The add case picks the first section with headroom (StyleHeader's Lane sits at its 10-record limit) rather than skipping the layout.
 - **Prior top of `main` = tag `v0.22.0-detection-signature-lock`** (was 147 passing).
   **Detection-signature fields locked** (see D12). An audit of all 7 layouts found every one has a header field that *is* its detection signature, all editable in the section editor and all offered by Bulk Edit. Fixed in three layers: (1) `config/field_display.yaml` marks each one `readonly` (shown as a static label, still visible); (2) bulk scope drops read-only/hidden fields, so Bulk Edit can no longer reach them — this was the mass-brick path; (3) `service._assert_layout_stable` re-detects from the serialized header before every write (save, Save As, row ops, bulk, make-unique) and rejects anything that would change the detected layout, leaving no `.bak` behind. Bulk reports it per file as an `error` status instead of throwing. `tests/fixtures/config/field_display.yaml` mirrors the production locks.
@@ -112,7 +116,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 161
+.venv/bin/python -m pytest tests/ -q              # currently 191
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```
@@ -120,6 +124,7 @@ Commit convention: end messages with `Co-Authored-By: Claude Opus 4.8 (1M contex
 
 ## 6. Next increments / open threads (not yet built)
 - **Calgary JSON layouts (NEW FORMAT — architectural fork, in discussion).** Source files live in `/Users/praveendx/repos/OkGenData/Calgary New Layout Definitions and JSON files/`: a definition xlsx (3 tabs `styleHeader`/`distributionLabel`/`cartonLabel` — field-mapping refs, `Field Name` + `Max Length` + `Notes`, **not** position specs) + 3 zips of real **JSON** samples (18 files). These are **JSON, not fixed-width/pipe-delimited** — a would-be **3rd engine** beyond OkGen's positional/byte-span model. Shape: `data.type` (`styleHeaders`/`cartonLabels`/`distributionLabels` = layout discriminator) · `data.timestamp` · flat `header` (~54 keys, mostly null) · nested arrays (`lanes`/`sizes`/`stores`/`details`). Gotchas: chain appears as code (`"04"`,`"06"`) **and** name (`"Winners"`); values mix `null` / `""` / `" "`; formatting is inconsistent (some carton files **minified**, style/dist **pretty-printed**) — so "byte-exact round-trip" means something new here. **Blocked on user (returning next session):** (1) the JSON **schema** (authoritative field set/order/types per type); (2) the **fork decision** — does OkGen *view/edit JSON natively* (new engine) vs *convert JSON↔existing .OK*? Design can't start until both land.
+- **`DistLabels.TSticker` seed data.** The section exists in the layout spec but has no rows in the reference `.OK`, so OkGen can't seed its first row (no marker, no sample line). Need a real DistLabels file containing TSticker rows, then recompile the layout — `test_section_without_sample_rows_cannot_be_seeded` documents the current behaviour and should flip to a reseed test once the data exists.
 - **Production deployment** on the DC/RDP boxes beyond `run.bat` (always-available auto-start) — approach not yet decided. *Pain that reinforces this:* when the app is left running under one RDP user's session, its `python.exe` locks `.venv`, blocking a deploy that deletes it — and a non-admin can't inspect/kill another session's process. Running OkGen as a **Windows Service** (e.g. NSSM) under a dedicated service account would remove per-session locks entirely. Interim helper shipped: `list-active-users.bat` (lists logged-in users so you can reach out).
 - **Productization:** generalize the layout loader to "upload your own fixed-width spec" (the key unlock for a sellable, non-TJX product). Clear IP/ownership first; clean-room any generic version.
 - **DC production-tool pivot:** auth/roles/concurrency/queue dashboard — awaiting direction.

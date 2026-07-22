@@ -1290,6 +1290,15 @@ def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry):
     new = header.get(field)
     if new == current:
         return {"name": name, "status": "unchanged", "current": current, "new": new}
+    # Some fields are only PARTIAL detection signatures — legitimate to edit, but
+    # a few values collide with another layout's rule (CartonLabel 'format' set
+    # to N/Y/7/9 reads as StyleHeader/Preticket/DistLabels). Surface that in the
+    # preview instead of letting the user apply and hit a per-file error.
+    try:
+        _assert_layout_stable(okf)
+    except EditError as exc:
+        return {"name": name, "status": "error", "current": current, "new": new,
+                "error": str(exc)}
     return {"name": name, "status": "change", "current": current, "new": new, "okf": okf}
 
 
