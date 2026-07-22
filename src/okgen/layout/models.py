@@ -50,6 +50,20 @@ class Section:
     sample_record: Optional[str] = None   # tab's row-1 sample (marker stripped)
     ignored_fields: List[str] = field(default_factory=list)  # dropped unsized rows
     issues: List[str] = field(default_factory=list)
+    # Canonical record-type marker for this section's detail lines (e.g. "#",
+    # "&", or "" for marker-less details). Records route to their section by
+    # THIS marker rather than by order of appearance, so an empty section no
+    # longer captures a later section's records. None = unknown (falls back to
+    # order-of-appearance). Populated by the compiler; header sections leave it
+    # None (the header is always line 0, routed by position, not marker).
+    marker: Optional[str] = None
+    # A real, full record line for this section (EOL stripped), learned from the
+    # bundled reference ``<layout>.OK`` sample. Used to seed the first row when a
+    # user adds records to an otherwise-empty section — it is a genuine,
+    # correctly-formatted line (marker, delimiters, padding, terminator all
+    # intact), which is why it is preferred over ``sample_record`` (the xlsx
+    # sample can be marker-stripped, padding-less, or non-delimited).
+    sample_raw: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -57,6 +71,8 @@ class Section:
             "tab": self.tab,
             "record_length": self.record_length,
             "sample_record": self.sample_record,
+            "marker": self.marker,
+            "sample_raw": self.sample_raw,
             "ignored_fields": self.ignored_fields,
             "issues": self.issues,
             "fields": [f.to_dict() for f in self.fields],

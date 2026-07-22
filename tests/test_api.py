@@ -647,6 +647,56 @@ def test_add_record_respects_lane_limit(tmp_path, registry, config):
         service.add_record(work, lane_idx, [], registry, config, backup=False)
 
 
+def _styleheader_with_empty_lane(tmp_path, registry):
+    """A StyleHeader file whose Lane ('#') section has been emptied out."""
+    from okgen.okfile import parse_okfile
+    lay = registry.get("StyleHeader")
+    okf = parse_okfile(DATA_DIR / "StyleHeader.OK", layout=lay, registry=registry)
+    okf.records = [r for r in okf.records if not (r.section and r.section.name == "Lane")]
+    work = tmp_path / "StyleHeader.OK"
+    okf.save(work)
+    return work
+
+
+def test_add_record_seeds_empty_section(tmp_path, registry, config):
+    """Adding to an empty section seeds a valid first row without disturbing
+    the sibling section."""
+    work = _styleheader_with_empty_lane(tmp_path, registry)
+    before = service.parse_file_view(work, registry, config)
+    lane = next(s for s in before["sections"] if s["name"] == "Lane")
+    n_size = len(next(s for s in before["sections"] if s["name"] == "Size")["records"])
+    assert lane["records"] == []                    # empty, but present as "None"
+
+    view = service.add_record(work, lane["index"], [], registry, config, backup=False)
+    lane2 = next(s for s in view["sections"] if s["name"] == "Lane")
+    size2 = next(s for s in view["sections"] if s["name"] == "Size")
+    assert len(lane2["records"]) == 1               # seeded the first Lane row
+    assert len(size2["records"]) == n_size          # Size untouched (no shift)
+    assert view["roundtrip_ok"]
+
+
+def test_bulk_add_seeds_empty_section(tmp_path, registry, config):
+    """Bulk Add can populate an empty section from its seed line."""
+    work = _styleheader_with_empty_lane(tmp_path, registry)
+    res = service._bulk_op_eval(
+        work, "StyleHeader", "Lane", {"type": "add", "count": 3}, registry, config)
+    assert res["status"] == "change", res
+    res["okf"].save(work)
+    view = service.parse_file_view(work, registry, config)
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+    assert len(lane["records"]) == 3
+    assert view["roundtrip_ok"]
+
+
+def test_bulk_set_on_empty_section_is_noop(tmp_path, registry, config):
+    """Non-add bulk ops still report no_section on an empty section."""
+    work = _styleheader_with_empty_lane(tmp_path, registry)
+    res = service._bulk_op_eval(
+        work, "StyleHeader", "Lane",
+        {"type": "set", "field": "lane1", "value": "X"}, registry, config)
+    assert res["status"] == "no_section"
+
+
 def test_browse_folder_parses_dialog_output(monkeypatch):
     # Mock the native dialog so the test never opens a real GUI.
     import subprocess

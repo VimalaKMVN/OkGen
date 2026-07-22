@@ -12,6 +12,8 @@
       "tab": "Header",
       "record_length": 96,
       "sample_record": "011C:56745002420110620000001201202807804056199402594000866N  0000C NC 000000    000000000      ",
+      "marker": null,
+      "sample_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -319,6 +321,8 @@
       "tab": "Store",
       "record_length": 26,
       "sample_record": "0559N00000000001000000124N",
+      "marker": "#",
+      "sample_raw": "#0003N01263800001053100224N\\                                                                                                        ",
       "ignored_fields": [
         "tot_qty"
       ],

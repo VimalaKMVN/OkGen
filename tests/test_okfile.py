@@ -62,6 +62,58 @@ def test_styleheader_sections_and_markers(registry):
     assert size_rec.get("qty") == "00002"
 
 
+def _drop_section(okf, section_name):
+    """Rebuild an OkFile with every record of one section removed."""
+    okf.records = [
+        r for r in okf.records
+        if not (r.section and r.section.name == section_name)
+    ]
+    return okf
+
+
+@pytest.mark.parametrize(
+    "filename,layout_name,empty_sec,kept_sec",
+    [
+        # Fixed-width StyleHeader: drop the '#'-marked Lane records; the
+        # '&'-marked Size records must STAY in Size (not slide up into Lane).
+        ("StyleHeader.OK", "StyleHeader", "Lane", "Size"),
+        # Delimited EU StyleHeader: drop the '&'-marked Lane records; the
+        # '#'-marked Detail records must STAY in Detail.
+        ("EUStyleHeader.OK", "EUStyleHeader", "Lane", "Detail"),
+    ],
+)
+def test_empty_section_does_not_shift_later_records(
+    registry, tmp_path, filename, layout_name, empty_sec, kept_sec
+):
+    layout = registry.get(layout_name)
+    okf = parse_okfile(DATA_DIR / filename, layout=layout, registry=registry)
+    kept_before = [r.raw for r in okf.sections()[kept_sec]]
+    assert kept_before, f"fixture must have {kept_sec} records to be meaningful"
+
+    _drop_section(okf, empty_sec)
+    out = tmp_path / filename
+    okf.save(out)
+
+    reparsed = parse_okfile(out, layout=layout, registry=registry)
+    secs = reparsed.sections()
+    # The emptied section is still present (shown as "None"), not vanished.
+    assert empty_sec in secs and secs[empty_sec] == []
+    # The later section keeps ITS records — no misassignment into the empty one.
+    assert [r.raw for r in secs[kept_sec]] == kept_before
+
+
+def test_empty_sections_appear_in_canonical_order(registry):
+    """Every layout section is a key in sections() even with zero records."""
+    layout = registry.get("StyleHeader")
+    okf = parse_okfile(DATA_DIR / "StyleHeader.OK", layout=layout, registry=registry)
+    _drop_section(okf, "Lane")
+    _drop_section(okf, "Size")
+    keys = list(okf.sections())
+    assert keys == [s.name for s in layout.sections]  # header, Lane, Size — all present
+    assert okf.sections()["Lane"] == []
+    assert okf.sections()["Size"] == []
+
+
 def test_edit_preserves_width_and_roundtrips(registry):
     """Editing a field changes only its span; reverting restores the bytes."""
     path = DATA_DIR / "CartonLabel.OK"

@@ -9,10 +9,12 @@ Record-to-section mapping (derived from the sample files):
   * Line 0 is always the Header section; its first char is the marker and is
     stripped (``|`` for most, ``\\xa6`` for Preticket).
   * Later lines starting with a marker in :data:`DETAIL_MARKERS` strip that one
-    char and map to the non-header sections in order of first appearance
-    (``#`` -> first detail section, ``&`` -> second, ...).
+    char and map to the non-header section whose *canonical* marker matches
+    (``Section.marker``, set by the compiler) — so an empty section no longer
+    captures a later section's records. Sections with an unknown marker fall
+    back to order-of-first-appearance (see :class:`_MarkerRouter`).
   * Later lines with no marker (alphanumeric first char, e.g. Preticket Detail)
-    have offset 0 and map to the first detail section.
+    have offset 0 and route under the "" marker (the marker-less detail).
 """
 
 from __future__ import annotations
@@ -151,8 +153,19 @@ class OkFile:
         target.write_bytes(self.to_bytes())
 
     def sections(self) -> Dict[str, List[Record]]:
-        """Group records by section name."""
+        """Group records by section, in the layout's canonical section order.
+
+        Every section the layout defines is present as a key — including ones
+        with **no records** (mapped to an empty list) so an empty section
+        (e.g. a file with no Lane rows) still shows up as "None" instead of
+        vanishing. Any records that matched no section land under
+        ``"(unassigned)"``. Insertion order is header first, then the detail
+        sections as declared, so a section's positional index is stable
+        regardless of which sections happen to be populated.
+        """
         out: Dict[str, List[Record]] = {}
+        for sec in (self.layout.sections if self.layout else []):
+            out.setdefault(sec.name, [])
         for r in self.records:
             key = r.section.name if r.section else "(unassigned)"
             out.setdefault(key, []).append(r)
@@ -210,31 +223,56 @@ def _delim_record_marker(raw: str, delimiter: str) -> str:
     return ""
 
 
+class _MarkerRouter:
+    """Map a line's record-type marker to the section that owns it.
+
+    Detail sections declare a canonical ``marker`` (set by the compiler). A
+    line is routed to the section whose marker matches — so an empty section
+    no longer swallows a later section's records. Sections whose marker is
+    unknown (``None``) — e.g. two sections that share one marker, or a layout
+    with no reference sample — fall back to the original order-of-first-
+    appearance rule among themselves, preserving prior behaviour.
+    """
+
+    def __init__(self, detail_secs: List[Section]):
+        self._explicit: Dict[str, Section] = {}
+        self._unknown: List[Section] = []
+        for sec in detail_secs:
+            if sec.marker is not None:
+                self._explicit.setdefault(sec.marker, sec)
+            else:
+                self._unknown.append(sec)
+        self._fallback: Dict[str, Optional[Section]] = {}
+
+    def resolve(self, marker: str) -> Optional[Section]:
+        if marker in self._explicit:
+            return self._explicit[marker]
+        if marker not in self._fallback:
+            idx = len(self._fallback)
+            self._fallback[marker] = (
+                self._unknown[idx] if idx < len(self._unknown)
+                else (self._unknown[0] if self._unknown else None)
+            )
+        return self._fallback[marker]
+
+
 def _assign_delimited(raws: List[str], layout: Layout) -> List[Record]:
     """Assign records for a delimited layout.
 
     Line 0 is the Header. Later lines map to the non-header sections by their
-    record-type marker in order of first appearance (``&`` -> first detail
-    section, ``#`` -> next, ...), mirroring the fixed-width assigner. A layout
-    whose detail lines carry no marker collapses to a single detail section.
+    record-type marker matched to each section's canonical marker (see
+    :class:`_MarkerRouter`). A layout whose detail lines carry no marker
+    collapses to a single detail section.
     """
     header_sec = layout.sections[0] if layout.sections else None
-    detail_secs = layout.sections[1:]
-    marker_to_sec: Dict[str, Optional[Section]] = {}
+    router = _MarkerRouter(layout.sections[1:])
     records: List[Record] = []
     for i, raw in enumerate(raws):
         is_header = i == 0
         if is_header:
             sec = header_sec
         else:
-            mk = _delim_record_marker(raw, layout.delimiter)
-            if mk not in marker_to_sec:
-                idx = len(marker_to_sec)
-                marker_to_sec[mk] = (
-                    detail_secs[idx] if idx < len(detail_secs)
-                    else (detail_secs[0] if detail_secs else None)
-                )
-            sec = marker_to_sec[mk]
+            sec = router.resolve(_delim_record_marker(raw, layout.delimiter))
         rec = Record(raw=raw, offset=0, section=sec, index=i)
         if sec is not None:
             rec.field_spans = _delim_spans(
@@ -249,8 +287,7 @@ def _assign_records(raws: List[str], layout: Layout) -> List[Record]:
         return _assign_delimited(raws, layout)
 
     header_sec = layout.sections[0] if layout.sections else None
-    detail_secs = layout.sections[1:]
-    marker_to_sec: Dict[str, Optional[Section]] = {}
+    router = _MarkerRouter(layout.sections[1:])
     records: List[Record] = []
 
     for i, raw in enumerate(raws):
@@ -258,17 +295,13 @@ def _assign_records(raws: List[str], layout: Layout) -> List[Record]:
             rec = Record(raw=raw, offset=1, section=header_sec, index=i)
         else:
             first = raw[:1]
-            if first in DETAIL_MARKERS:
-                if first not in marker_to_sec:
-                    idx = len(marker_to_sec)
-                    marker_to_sec[first] = detail_secs[idx] if idx < len(detail_secs) else None
-                sec = marker_to_sec[first]
-                rec = Record(raw=raw, offset=1, section=sec, index=i)
-                if sec is None:
-                    rec.issues.append(f"marker {first!r} has no matching section")
-            else:
-                sec = detail_secs[0] if detail_secs else None
-                rec = Record(raw=raw, offset=0, section=sec, index=i)
+            marked = first in DETAIL_MARKERS
+            # A marker char is a one-byte prefix (offset 1); marker-less detail
+            # lines (alphanumeric first char) route under the "" marker.
+            sec = router.resolve(first if marked else "")
+            rec = Record(raw=raw, offset=1 if marked else 0, section=sec, index=i)
+            if sec is None:
+                rec.issues.append(f"marker {first!r} has no matching section")
         records.append(rec)
     return records
 

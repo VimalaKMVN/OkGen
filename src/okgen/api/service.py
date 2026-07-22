@@ -167,8 +167,11 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
 
     sections_out: List[dict] = []
     grouped = okf.sections()
+    # Resolve each section's definition from the layout (not from its records)
+    # so an empty section still renders its columns + a "None" state.
+    layout_secs = {s.name: s for s in okf.layout.sections}
     for sec_index, (sec_name, recs) in enumerate(grouped.items()):
-        sec = recs[0].section if recs and recs[0].section else None
+        sec = layout_secs.get(sec_name) or (recs[0].section if recs else None)
         field_meta = []
         if sec:
             hidden = config.hidden_fields(layout_name)
@@ -370,6 +373,7 @@ def add_record(
     okf = parse_okfile(src, registry=registry)
     _apply_edits_to_okf(okf, edits or [], config)
 
+    seeded = False
     if after_index is not None:
         anchor = next((r for r in okf.records if r.index == after_index), None)
         if anchor is None or anchor.section is None:
@@ -382,9 +386,20 @@ def add_record(
         if section_index is None or section_index < 0 or section_index >= len(grouped):
             raise EditError(f"section_index {section_index} out of range")
         _name, recs = grouped[section_index]
-        if not recs or recs[0].section is None:
-            raise EditError("section has no record to copy")
-        template = recs[-1]
+        if section_index == 0:
+            raise EditError("cannot add rows to the header section")
+        if recs:
+            template = recs[-1]
+        else:
+            # Empty section: seed the first row from the section's reference line
+            # and drop it into the file in canonical section order.
+            sec = next((s for s in okf.layout.sections if s.name == _name), None)
+            if sec is None:
+                raise EditError(f"section '{_name}' cannot receive rows")
+            template = _seed_record(okf, sec)
+            if template is None:
+                raise EditError(f"section '{sec.name}' has no template to seed a row")
+            seeded = True
 
     sec = template.section
     sec_count = sum(1 for r in okf.records if r.section is sec)
@@ -398,7 +413,10 @@ def add_record(
         section=template.section,
         index=template.index,                # placeholder; reassigned on reload
     )
-    okf.records.insert(okf.records.index(template) + 1, clone)
+    if seeded:
+        _insert_in_section_order(okf, clone, sec)
+    else:
+        okf.records.insert(okf.records.index(template) + 1, clone)
     _normalize_eols(okf)
 
     _backup_and_save(okf, src, backup)
@@ -493,6 +511,32 @@ def _normalize_eols(okf) -> None:
             rec.raw = content
         else:
             rec.raw = content + eol
+
+
+def _seed_record(okf, sec):
+    """Build a new record to start an EMPTY section, from the section's
+    ``sample_raw`` seed (a real reference line). Returns None when no seed is
+    known for the section (e.g. an ambiguous shared-marker section)."""
+    seed = getattr(sec, "sample_raw", None)
+    if not seed:
+        return None
+    offset = 0 if getattr(okf.layout, "delimited", False) else 1
+    return Record(raw=seed.rstrip("\r"), offset=offset, section=sec, index=-1)
+
+
+def _insert_in_section_order(okf, clone, sec) -> int:
+    """Insert a record so the file keeps its canonical section order (e.g. a new
+    Size row lands after the Lane rows, before Detail). Returns the insert index.
+    """
+    order = [s.name for s in okf.layout.sections]
+    target = order.index(sec.name) if sec.name in order else len(order)
+    insert_at = 1  # default: right after the header
+    for i, r in enumerate(okf.records):
+        nm = r.section.name if r.section else None
+        if nm in order and order.index(nm) <= target:
+            insert_at = i + 1
+    okf.records.insert(insert_at, clone)
+    return insert_at
 
 
 # --------------------------------------------------------------------------- #
@@ -933,13 +977,17 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
     except Exception as exc:
         return {"name": name, "status": "error", "error": str(exc)}
     grouped = okf.sections()
-    if section_name not in grouped:
+    sec = next((s for s in okf.layout.sections if s.name == section_name), None)
+    if sec is None:
         return {"name": name, "status": "no_section"}
-    recs = grouped[section_name]
-    sec = recs[0].section
-    header_name = next(iter(grouped))
+    recs = grouped.get(section_name, [])
+    header_name = okf.layout.sections[0].name if okf.layout.sections else None
     t = op.get("type")
     before = len(recs)
+    # Every op except "add" needs existing rows to work on; "add" can seed the
+    # first row into an empty section from its reference line.
+    if not recs and t != "add":
+        return {"name": name, "status": "no_section"}
 
     if t in ("set", "random", "unique"):
         field = op.get("field")
@@ -1010,9 +1058,18 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
             if to_add <= 0:
                 note = "at limit" if (limit is not None and before >= limit) else "nothing to add"
                 return {"name": name, "status": "unchanged", "detail": f"{before} row(s); {note}"}
-            template = recs[-1]
-            insert_at = okf.records.index(template) + 1
-            for i in range(to_add):
+            if recs:
+                template = recs[-1]
+                insert_at = okf.records.index(template) + 1
+            else:
+                # Empty section: seed the first row from the reference line and
+                # place it in canonical section order.
+                template = _seed_record(okf, sec)
+                if template is None:
+                    return {"name": name, "status": "error",
+                            "error": f"section '{section_name}' has no template to seed a row"}
+                insert_at = _insert_in_section_order(okf, template, sec) + 1
+            for i in range(to_add if recs else to_add - 1):
                 clone = Record(raw=template.raw.rstrip("\r"), offset=template.offset,
                                section=template.section, index=template.index)
                 okf.records.insert(insert_at + i, clone)

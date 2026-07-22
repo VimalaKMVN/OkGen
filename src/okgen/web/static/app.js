@@ -246,9 +246,12 @@ function updateSelectionUI() {
   const c = $("#selCount");
   if (c) c.textContent = n > 1 ? ` · ${n} selected` : "";
   const btn = $("#bulkBtn");
-  if (btn) { btn.classList.toggle("hidden", n < 2); btn.textContent = `Bulk Actions (${n}) ▾`; }
-  // Bulk Edit only makes sense for a multi-selection — close it otherwise.
-  if (isBulkOpen() && n < 2) exitBulkMode();
+  // Bulk actions work on any non-empty selection — including a single file
+  // (a plain click already selects the file it opens), so the button shows
+  // for 1+ files. It only hides when nothing is selected.
+  if (btn) { btn.classList.toggle("hidden", n < 1); btn.textContent = `Bulk Actions (${n}) ▾`; }
+  // Close the bulk panel only when the selection is emptied.
+  if (isBulkOpen() && n < 1) exitBulkMode();
 }
 
 function isBulkOpen() {
@@ -260,7 +263,7 @@ function isRenameOpen() {
 
 // ---- bulk edit (B1: Header field, one layout, set value) ----
 async function enterBulkMode() {
-  if (state.selection.size < 2) return;
+  if (state.selection.size < 1) return;
   if (!confirmDiscardIfDirty()) return;
   state.file = null; state.view = null; state.edits = {};
   $("#editorTabs").classList.add("hidden");
@@ -304,7 +307,7 @@ function renderBulkPanel(scope) {
   const layoutNames = Object.keys(scope.layouts);
 
   const head = el("div", "bulk-head");
-  head.appendChild(el("h3", null, `Bulk Edit — ${scope.files.length} file(s) selected`));
+  head.appendChild(el("h3", null, `Bulk Edit — ${scope.files.length} ${scope.files.length === 1 ? "file" : "files"} selected`));
   const close = el("button", "btn", "✕ Close");
   close.addEventListener("click", exitBulkMode);
   head.appendChild(close);
@@ -588,7 +591,7 @@ function renderRenamePanel(scope) {
   const panel = $("#renamePanel");
   panel.innerHTML = "";
   const head = el("div", "bulk-head");
-  head.appendChild(el("h3", null, `Bulk Rename — ${scope.files.length} file(s)`));
+  head.appendChild(el("h3", null, `Bulk Rename — ${scope.files.length} ${scope.files.length === 1 ? "file" : "files"}`));
   const close = el("button", "btn", "✕ Close");
   close.addEventListener("click", exitRenameMode);
   head.appendChild(close);
@@ -996,6 +999,30 @@ async function addRowAfter(recordIndex) {
   }
 }
 
+// Seed the first row into an empty section (there's no existing row to copy
+// from, so the server seeds it from the section's reference sample line).
+async function addRowToSection(sectionIndex) {
+  if (!state.file) return;
+  if (!beginBusy("Adding row…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+  try {
+    const view = await postJSON("/api/record/add", {
+      path: state.file,
+      section_index: sectionIndex,
+      edits: collectEdits(),
+    });
+    state.view = view;
+    state.edits = {};
+    renderEditor(view);
+    updateSaveButtons();
+    updateDirtyIndicator();
+    setStatus("First row added to section (saved)", "ok");
+  } catch (e) {
+    setStatus("Add failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
+}
+
 function editKey(s, r, f) { return `${s}|${r}|${f}`; }
 
 // ----- derived (computed) fields: mirror config/derived_fields.yaml logic ---
@@ -1062,6 +1089,7 @@ function makeControl(sec, rec, field) {
     return ro;
   }
   let ctrl;
+  let orig = value;
   if (field.options) {
     ctrl = el("select", "cell fval");
     const codes = Object.keys(field.options);
@@ -1073,13 +1101,20 @@ function makeControl(sec, rec, field) {
   } else {
     ctrl = el("input", "cell fval");
     ctrl.type = "text";
-    ctrl.value = value;
+    // Fixed-width fields arrive padded with spaces (left- or right-justified),
+    // which fills the input to its maxLength — so the field looks empty with
+    // the cursor floating mid-field and there's no room to type. Strip the pad
+    // spaces for editing; the server re-pads to the field width on save
+    // (okfile._fit), and untouched fields are never re-sent, so the file still
+    // round-trips byte-for-byte.
+    orig = value.replace(/^ +| +$/g, "");
+    ctrl.value = orig;
     if (field.size != null) ctrl.maxLength = field.size;
   }
   ctrl.dataset.section = sec.index;
   ctrl.dataset.record = rec.index;
   ctrl.dataset.field = field.name;
-  ctrl.dataset.orig = value;
+  ctrl.dataset.orig = orig;
   ctrl.addEventListener("input", onEdit);
   ctrl.addEventListener("change", onEdit);
   return ctrl;
@@ -1123,6 +1158,22 @@ function renderTable(sec) {
   table.appendChild(thead);
   const tbody = el("tbody");
   const n = sec.records.length;
+  if (n === 0) {
+    // Empty section: show a single "None" row spanning every column so the
+    // section is still visible (and stays in place) instead of vanishing —
+    // with an Add button so the user can start populating it.
+    const shown = sec.fields.filter((f) => !f.hidden).length;
+    const tr = el("tr", "rec-empty");
+    const td = el("td");
+    td.colSpan = shown + 2;   // "#" column + fields + row-actions column
+    td.appendChild(document.createTextNode("None  "));
+    const addFirst = el("button", "row-add", "＋ Add row");
+    addFirst.title = "Add the first row to this section";
+    addFirst.addEventListener("click", () => addRowToSection(sec.index));
+    td.appendChild(addFirst);
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
   sec.records.forEach((rec, i) => {
     const tr = el("tr");
     const num = el("td"); num.appendChild(el("span", "rownum", String(i + 1))); tr.appendChild(num);  // per-section row #
@@ -1270,7 +1321,7 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Copy ${count} files` : "Copy", () => copySelection());
   add("Paste here", () => pasteInto(folderOf(node.path)), !state.clipboard.length);
   menu.appendChild(el("div", "ctx-sep"));
-  if (count > 1) add(`Bulk Edit (${count})`, () => enterBulkMode());
+  add(count > 1 ? `Bulk Edit (${count})` : "Bulk Edit", () => enterBulkMode());
   add(count > 1 ? `Bulk Rename (${count})…` : "Bulk Rename…", () => enterRenameMode());
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   add(count > 1 ? `🏷️  Send ${count} to NiceLabel` : "🏷️  Send to NiceLabel", () => sendToNiceLabel());
@@ -1728,7 +1779,7 @@ function showBulkMenu() {
     else it.addEventListener("click", () => { hideCtxMenu(); fn(); });
     menu.appendChild(it);
   };
-  add(`Bulk Edit (${n})`, () => enterBulkMode(), n < 2);
+  add(`Bulk Edit (${n})`, () => enterBulkMode());
   add(`Bulk Rename (${n})`, () => enterRenameMode());
   add(`Make keys unique (${n})`, () => makeUniqueSelection());
   menu.appendChild(el("div", "ctx-sep"));

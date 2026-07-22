@@ -12,6 +12,8 @@
       "tab": "Header",
       "record_length": 80,
       "sample_record": "017119938A  66725627200611211021000000000000002999#BLK INTUITION WOMENS SNELURS",
+      "marker": null,
+      "sample_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -165,6 +167,8 @@
       "tab": "Store ",
       "record_length": 32,
       "sample_record": "0158N00000000012  00000000122280",
+      "marker": "#",
+      "sample_raw": "#0090N00000000001  00000000176418\\",
       "ignored_fields": [
         "store_totqty"
       ],
@@ -265,6 +269,8 @@
       "tab": "TSticker",
       "record_length": 14,
       "sample_record": "00022001000001",
+      "marker": null,
+      "sample_raw": null,
       "ignored_fields": [
         "tsticker_totqty"
       ],

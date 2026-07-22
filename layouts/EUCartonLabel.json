@@ -12,6 +12,8 @@
       "tab": "Header",
       "record_length": 420,
       "sample_record": "|H|F|05|N|8881333    | |20210910|1608|Change  |89 |0411|158897 |7|N|Gucci purple Velvet pumps|0 |0 |SHO  |            |           |9901333    |           |         |         |9901333  |20210910|30     |    |  |    |  |    |  |    |  |    |  |N|S  |M  |L  |   |   |   |   |   |   |   |GBP|24999     |F|          |N|N|N|C|00509101|RG|CL|1   |10 |3    |            |202109100001|                    |99999|888|TEXT1|TEXT2|TEXT3|TEXT4|TEXT5|TEXT6|TEXT7|TEXT8|TEXT9|TXT10|00000999990000022222|C:1234567  |\\    ",
+      "marker": null,
+      "sample_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -902,6 +904,8 @@
       "tab": "Detail",
       "record_length": 44,
       "sample_record": "|#|3110358|L  |1    |0000|01|  |5999      |9300      |\\",
+      "marker": "#",
+      "sample_raw": "|#|3110358|L  |1    |0000|01|  |5999      |9300      |\\",
       "ignored_fields": [],
       "issues": [],
       "fields": [

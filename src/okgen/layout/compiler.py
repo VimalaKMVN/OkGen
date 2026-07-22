@@ -230,9 +230,93 @@ def compile_layout(xlsx_path: Path) -> Layout:
             layout.sections.append(section)
         if not layout.sections:
             layout.issues.append("no layout tabs found")
+        _derive_section_markers(layout, xlsx_path.parent)
         return layout
     finally:
         wb.close()
+
+
+# Leading chars treated as a one-char record marker on fixed-width detail lines.
+# (Kept in sync with okfile.DETAIL_MARKERS; duplicated here to avoid an import
+# cycle between the compiler and the parser.)
+_DETAIL_MARKERS = set("|#&")
+
+
+def _derive_section_markers(layout: Layout, data_dir: Path) -> None:
+    """Assign each non-header section its canonical record-type ``marker`` and a
+    ``sample_raw`` seed line.
+
+    The marker is what lets records route to the *right* section even when an
+    earlier section is empty (e.g. no Lane records): the parser matches each
+    line's marker to the section that owns it instead of mapping the k-th marker
+    seen to the k-th section. ``sample_raw`` is a genuine full record line used
+    to seed the first row when a user adds records to an empty section.
+
+    * Delimited layouts carry the marker in the section's sample record
+      (``|&|...`` / ``|#|...``), so it is read straight from ``sample_record``.
+    * Fixed-width layouts strip the marker from their xlsx sample, so it is
+      learned from the sibling reference ``<name>.OK`` file (a complete, in-order
+      example) — which is also where ``sample_raw`` comes from for every layout.
+
+    If that reference file is absent/unreadable the markers stay None (the
+    parser falls back to its original order-of-appearance rule) and no seed is
+    stored (adding to a still-empty section is then refused with a clear error).
+    """
+    detail_secs = layout.sections[1:]
+    if not detail_secs:
+        return
+    if layout.delimited:
+        for sec in detail_secs:
+            sec.marker = _delim_marker(sec.sample_record or "", layout.delimiter)
+
+    ref = data_dir / f"{layout.name}.OK"
+    try:
+        lines = ref.read_bytes().decode("latin-1").splitlines()
+    except OSError:
+        return
+
+    # First real line seen per record-type token, in order of appearance.
+    first_line: dict = {}
+    for raw in lines[1:]:                       # line 0 is the header
+        if layout.delimited:
+            token = _delim_marker(raw, layout.delimiter)
+        else:
+            first = raw[:1]
+            token = first if first in _DETAIL_MARKERS else ""
+        first_line.setdefault(token, raw)
+
+    if layout.delimited:
+        # Markers already set from the xlsx samples; match tokens by marker.
+        by_marker = {sec.marker: sec for sec in detail_secs}
+        for token, raw in first_line.items():
+            sec = by_marker.get(token)
+            if sec is not None and sec.sample_raw is None:
+                sec.sample_raw = raw
+        return
+
+    # Fixed-width: map tokens to detail sections in appearance order (marker-less
+    # "" tokens always go to the first detail section, like the parser).
+    markered = 0
+    for token, raw in first_line.items():
+        if token == "":
+            sec = detail_secs[0]
+        else:
+            sec = detail_secs[markered] if markered < len(detail_secs) else None
+            markered += 1
+        if sec is None:
+            continue
+        if sec.marker is None:
+            sec.marker = token
+        if sec.sample_raw is None:
+            sec.sample_raw = raw
+
+
+def _delim_marker(raw: str, delimiter: str) -> str:
+    """Record-type marker of a delimited sample: the char after a leading
+    delimiter (``|&|`` -> ``&``), or '' for marker-less delimited details."""
+    if raw[:1] == delimiter:
+        return raw[1:2]
+    return ""
 
 
 def _ticket_process(rows: List[List]) -> Optional[str]:

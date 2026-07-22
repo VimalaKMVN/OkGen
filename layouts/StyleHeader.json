@@ -12,6 +12,8 @@
       "tab": "Header",
       "record_length": 249,
       "sample_record": "03NB509364AA 1T:2122496201009080751INITIAL   LUDBNGUM       A600718-8IN MULTI VOTIVE         3412331591741N                    002400N00079900000670000000000000910090100                                                                                \\",
+      "marker": null,
+      "sample_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -407,6 +409,8 @@
       "tab": "Lane",
       "record_length": 8,
       "sample_record": "RCV034  ",
+      "marker": "#",
+      "sample_raw": "#RCD053  \\",
       "ignored_fields": [
         "lane2",
         "lane3",
@@ -438,6 +442,8 @@
       "tab": "Size",
       "record_length": 11,
       "sample_record": " XS   00026",
+      "marker": "&",
+      "sample_raw": "&EA    00002\\",
       "ignored_fields": [],
       "issues": [],
       "fields": [
