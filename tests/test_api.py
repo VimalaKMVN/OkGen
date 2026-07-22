@@ -2481,3 +2481,42 @@ def test_fill_generation_line_count_matches_real_rows(tmp_path, registry, config
         assert len(filler) == 10
         assert _line_count(view) == str(len(real)).zfill(2)
         assert view["roundtrip_ok"]
+
+
+def test_line_count_left_unchanged_when_over_two_digits(tmp_path, registry, config):
+    """Preticket/EUPreticket line_count is 2 digits: once real rows reach 100+
+    it no longer fits, so the count is LEFT AS-IS (not truncated/overflowed)."""
+    # direct check of the width guard at the 99/100 boundary
+    from okgen.okfile import parse_okfile
+    okf = parse_okfile(DATA_DIR / "EUPreticket.OK", registry=registry)
+    original = okf.records[0].get("line_count")
+
+    service._set_count_field(okf, "EUPreticket", "Lane", 99, config)
+    assert okf.records[0].get("line_count") == "99"      # 2 digits -> fits
+
+    service._set_count_field(okf, "EUPreticket", "Lane", 100, config)
+    assert okf.records[0].get("line_count") == "99"      # 3 digits -> unchanged
+    service._set_count_field(okf, "EUPreticket", "Lane", 12345, config)
+    assert okf.records[0].get("line_count") == "99"      # still unchanged
+
+
+def test_preticket_over_99_rows_keeps_count_and_filler(tmp_path, registry, config):
+    """Preticket with 100+ real rows: line_count is frozen (won't fit 2 digits),
+    but the 10-row filler block and round-trip are unaffected."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    before_lc = _line_count(service.parse_file_view(work, registry, config))
+
+    lane = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                if s["name"] == "Lane")
+    anchor = next(r["index"] for r in lane["records"]
+                  if any((r["values"].get(k) or "").strip("0 ") for k in r["values"]))
+    service.apply_edits(work, [], registry, config=config, backup=False,
+                        ops=[{"type": "add", "after_index": anchor} for _ in range(100)])
+
+    view = service.parse_file_view(work, registry, config)
+    real, filler = _lane_split(view)
+    assert len(real) >= 100
+    assert len(filler) == 10                              # filler still maintained
+    assert _line_count(view) == before_lc                # count left as-is (frozen)
+    assert view["roundtrip_ok"]

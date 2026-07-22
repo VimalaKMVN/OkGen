@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.28.3-eupreticket-line-count`.
+> Baseline: top of `main` = tag `v0.28.4-line-count-2digit-guard`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -80,7 +80,8 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.28.3-eupreticket-line-count`.** **Tests: 296 passing, 4 skipped** (295 Python + 1 Node smoke suite).
+- **Top of `main` = tag `v0.28.4-line-count-2digit-guard`.** **Tests: 298 passing, 4 skipped** (297 Python + 1 Node smoke suite).
+  **`line_count` is left unchanged when it won't fit** — Preticket/EUPreticket `line_count` is a 2-digit field, so once the real detail rows reach **100+** the count no longer fits and `_set_count_field` **leaves the existing value as-is** (never truncates or overflows the header). Made explicit + tested (was already the behaviour via the width check). Preticket's 10-row filler block is still maintained past 99 rows; only the count freezes.
   **EUPreticket `line_count` now tracks the real detail-row count** — count-only mode (D16), no filler rows. EUPreticket production files carry no zero-filler block (confirmed with the user), so it gets the count sync without the padding: `detail_fill.yaml` entry `EUPreticket: Lane: 0` (zeros=0 = count-only). `_apply_detail_fill` sets `line_count` = number of real Lane rows on every write (save/Save As, add/delete/move, bulk, generation), adding/removing **no** rows. The sample's stale `line_count='02'` (with 5 rows) corrects to `'05'` on first save. Byte-exact on plain open, as everywhere. The 4 skips are Preticket cases in generic count tests now covered by dedicated fill tests.
   Two zero-fill bugs found while verifying it through bulk edits: (1) **bulk field ops (set/list/random/unique) wrote into the filler rows**, turning the all-zero padding into "real" rows (`line_count` jumped to 23) — field ops now skip filler rows in a fill-managed section, so they only touch real data and the padding stays all-zero; (2) **bulk HEADER set-value didn't trigger fill** (only the detail-op path did), so a `dept` bulk edit left `4+19`/`line_count=05` — `bulk_apply` now enforces the invariant too. Volume generation was already correct (incl. row-count variation). All verified: bulk keep/add/set/list/random/unique, bulk header edit, and generation all produce real + 10 filler with `line_count` = real count.
 - **Prior top of `main` = tag `v0.28.1-line-count-zero`** (290 passing).
@@ -157,7 +158,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 296
+.venv/bin/python -m pytest tests/ -q              # currently 298
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```

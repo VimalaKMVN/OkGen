@@ -739,7 +739,14 @@ def _apply_detail_fill(okf: OkFile, config: Config) -> None:
 
 def _set_count_field(okf: OkFile, layout_name: str, section_name: str,
                      count: int, config: Config) -> None:
-    """Write ``count`` (zero-padded) into the section's header count field."""
+    """Write ``count`` (zero-padded) into the section's header count field.
+
+    If ``count`` does not fit the field's width, the field is LEFT UNCHANGED
+    rather than truncated or overflowed — e.g. Preticket/EUPreticket keep a
+    2-digit ``line_count``, so once the real detail rows reach 100+ the count is
+    no longer updated (its existing value stands). Overwriting would corrupt the
+    header, and truncating would silently misreport the count.
+    """
     cf = config.count_field(layout_name, section_name)
     if not cf or not okf.records:
         return
@@ -751,7 +758,7 @@ def _set_count_field(okf: OkFile, layout_name: str, section_name: str,
     if f.size is None:
         return
     val = str(count).zfill(f.size)
-    if len(val) <= f.size:
+    if len(val) <= f.size:                        # fits -> update; else leave as-is
         header.set(cf, val)
 
 
