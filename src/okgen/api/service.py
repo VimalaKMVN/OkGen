@@ -1311,6 +1311,13 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
     recs = grouped.get(section_name, [])
     header_name = okf.layout.sections[0].name if okf.layout.sections else None
     t = op.get("type")
+    # In a zero-filled section (Preticket's Lane) the trailing all-zero rows are
+    # structural padding, not data — field ops must not write into them (that
+    # would turn filler into "real" rows). Count/keep ops still see all rows.
+    if config is not None and config.zero_fill(layout_name, section_name) \
+            and t in ("set", "random", "unique", "list"):
+        hidden = config.hidden_fields(layout_name)
+        recs = [r for r in recs if not _is_blank_row(r, hidden)]
     before = len(recs)
     # Every op except "add" needs existing rows to work on; "add" can seed the
     # first row into an empty section from its reference line.
@@ -1531,6 +1538,7 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
         r["path"] = str(p)
         if r["status"] == "change" and okf is not None:
             try:
+                _apply_detail_fill(okf, config)   # keep Preticket-style filler rows
                 _assert_layout_stable(okf)
                 if backup and sp.exists():
                     shutil.copy2(sp, sp.with_suffix(sp.suffix + ".bak"))

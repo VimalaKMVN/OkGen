@@ -1916,8 +1916,14 @@ def test_bulk_list_op_every_layout_and_section(tmp_path, registry, config, sampl
         after = service.parse_file_view(work, registry, config)
         assert after["layout"] == layout and after["roundtrip_ok"]
         rows = next(s for s in after["sections"] if s["name"] == sec["name"])["records"]
+        # A zero-filled section (Preticket Lane) keeps its all-zero filler rows
+        # untouched — bulk field ops only write to real rows. Check just those.
+        fill_managed = bool(config.zero_fill(layout, sec["name"]))
         for r in rows:
             got = r["values"][field["name"]].strip().lstrip("0") or "0"
+            is_blank = all((v or "").strip("0 ") == "" for v in r["values"].values())
+            if fill_managed and is_blank:
+                continue                          # untouched filler row
             assert got in [a.lstrip("0") for a in allowed], \
                 f"{layout}/{sec['name']}/{field['name']} wrote {got!r}, not from {allowed}"
 
@@ -2377,3 +2383,56 @@ def test_fill_line_count_zero_when_no_real_rows(tmp_path, registry, config):
     empty_saved = tmp_path / "e.OK"
     service.apply_edits(work2, [], registry, target_path=str(empty_saved), config=config)
     assert _line_count(service.parse_file_view(empty_saved, registry, config)) == "00"
+
+
+def test_fill_bulk_field_op_leaves_filler_untouched(tmp_path, registry, config):
+    """A bulk field-set on Preticket Lane writes only to REAL rows; the all-zero
+    filler stays all-zero (and is not miscounted as real)."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    res = service.bulk_op_apply([str(work)], "Preticket", "Lane",
+                                {"type": "set", "field": "message1", "value": "HELLO"},
+                                registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+
+    real, filler = _lane_split(service.parse_file_view(work, registry, config))
+    assert len(real) == 4 and len(filler) == 10
+    assert _line_count(service.parse_file_view(work, registry, config)) == "04"
+    # every real row got HELLO; every filler row stayed blank
+    for r in real:
+        assert r["values"]["message1"].strip() == "HELLO"
+    for r in filler:
+        assert r["values"]["message1"].strip("0 ") == ""
+
+
+def test_fill_bulk_header_edit_normalizes(tmp_path, registry, config):
+    """A bulk HEADER set-value on a Preticket also enforces real + 10 filler."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    res = service.bulk_apply([str(work)], "Preticket", "dept", "77",
+                             registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+    real, filler = _lane_split(service.parse_file_view(work, registry, config))
+    assert len(real) == 4 and len(filler) == 10
+    assert _line_count(service.parse_file_view(work, registry, config)) == "04"
+
+
+@pytest.mark.parametrize("rows_spec", [None, {"min": 2, "max": 5}])
+def test_fill_generation_line_count_matches_real_rows(tmp_path, registry, config, rows_spec):
+    """Generation (with and without row-count variation) always yields
+    real + 10 filler, and line_count equals the real-row count."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    spec = {"count": 4,
+            "detail_fields": [{"section": "Lane", "name": "qty", "min": 1, "max": 9}],
+            "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"}
+    if rows_spec:
+        spec["row_counts"] = [{"section": "Lane", **rows_spec}]
+
+    res = service.generate_apply(work, spec, registry, config)
+    for f in Path(res["folder"]).glob("*.OK"):
+        view = service.parse_file_view(f, registry, config)
+        real, filler = _lane_split(view)
+        assert len(filler) == 10
+        assert _line_count(view) == str(len(real)).zfill(2)
+        assert view["roundtrip_ok"]

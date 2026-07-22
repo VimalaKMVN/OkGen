@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.28.1-line-count-zero`.
+> Baseline: top of `main` = tag `v0.28.2-fill-bulk-fixes`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -80,7 +80,9 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.28.1-line-count-zero`.** **Tests: 290 passing, 4 skipped** (289 Python + 1 Node smoke suite). The 4 skips are Preticket cases in generic count tests now covered by dedicated fill tests.
+- **Top of `main` = tag `v0.28.2-fill-bulk-fixes`.** **Tests: 294 passing, 4 skipped** (293 Python + 1 Node smoke suite). The 4 skips are Preticket cases in generic count tests now covered by dedicated fill tests.
+  Two zero-fill bugs found while verifying it through bulk edits: (1) **bulk field ops (set/list/random/unique) wrote into the filler rows**, turning the all-zero padding into "real" rows (`line_count` jumped to 23) — field ops now skip filler rows in a fill-managed section, so they only touch real data and the padding stays all-zero; (2) **bulk HEADER set-value didn't trigger fill** (only the detail-op path did), so a `dept` bulk edit left `4+19`/`line_count=05` — `bulk_apply` now enforces the invariant too. Volume generation was already correct (incl. row-count variation). All verified: bulk keep/add/set/list/random/unique, bulk header edit, and generation all produce real + 10 filler with `line_count` = real count.
+- **Prior top of `main` = tag `v0.28.1-line-count-zero`** (290 passing).
   **Preticket trailing zero-fill** (D16). Preticket pads its detail block with all-zero "filler" rows (the sample has 4 real + 19). Now, whenever the Lane section holds **≥1 real row**, OkGen keeps exactly **10** trailing filler rows after the real ones and sets the header `line_count` to the number of **real** rows. No filler is added when the section is empty. Filler rows are **COPIED** — from the file's own existing blank rows, or the new compile-time `Section.filler_raw` learned from the reference `.OK` — never synthesised, because the zero/space byte layout isn't derivable from the field spec (the layout even has a 12-char undeclared `vendor_style` tail). Applies on every write path: single-file Save/Save As, staged add/delete/move, bulk ops (notably `keep 1 rows`), and volume generation — **not** on plain open, so an unmodified file still round-trips byte-exact. Idempotent: a normalised file re-saves identically. Filler rows show in both the rendered and Raw views (they are real records). Config-driven (`config/detail_fill.yaml`, Preticket-only); other layouts are byte-unaffected. Also fixes the sample's stray `line_count='05'` → `'04'` on first save. When the Lane has **no real rows** (empty, or only all-zero filler), `line_count` is set to **`00`**.
 - **Prior top of `main` = tag `v0.27.2-seed-alignment`** (285 passing).
   **Adding the first row to an empty section now keeps the section's realistic sample values, correctly aligned.** The reported symptom was misalignment, not junk — the sample values (`MESSAGES01`, `Fact1Fact1…`, `26x29x35Item…`) are legitimate reference data; they were just shifted one character right. Root cause: `_seed_record` hardcoded the leading-marker `offset` to `1`, but Preticket's Lane detail lines are **marker-less** (offset `0`), so every fixed-width field read one char late (`page` showed `010` not `001`, `message1` `ESSAGES01M` not `MESSAGES01`). It only appeared in the **staged preview** (the UI's `+` path, no reparse); a save-then-reparse recomputed the offset from the marker and hid it — which is why an earlier reparse-based sweep missed it. Fix: derive the offset from the section marker (`len(marker)`), keeping the sample values intact. *(Supersedes the v0.27.1 blank-seed approach, which discarded the useful sample values — reverted per user.)* Verified across all 7 layouts × every populated section: seeded row matches a real row field-for-field, in both preview and saved, byte-exact.
@@ -154,7 +156,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 290
+.venv/bin/python -m pytest tests/ -q              # currently 294
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```
