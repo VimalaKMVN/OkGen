@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.21.0-staged-row-ops`.
+> Baseline: top of `main` = tag `v0.21.1-staged-row-ops-all-layouts`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -75,12 +75,14 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.21.0-staged-row-ops`.** **Tests: 118 passing.**
+- **Top of `main` = tag `v0.21.1-staged-row-ops-all-layouts`.** **Tests: 125 passing.**
   **Save As no longer mutates the original file** (see D11). Row add/delete/move used to write to the opened file immediately, so deleting lanes/details/stores and then choosing Save As left the *original* modified too — and any pending header edits were flushed into it as a side effect. Now:
   - **Client** keeps an ordered op journal (`state.ops` in `app.js`) alongside `state.edits`; each row op posts `preview: true` + the journal and renders the returned view **without anything being written**. The journal is only committed once the server accepts the op, so a rejected op (e.g. a section at its `max_records` limit) leaves pending state untouched.
   - **Server** grew `service.replay_ops` + pure in-memory mutators (`_op_add`/`_op_delete`/`_op_move`, `_reindex` renumbering records exactly as a reparse would) and `_build_file_view`, which renders an editor view from an unsaved in-memory file. `apply_edits` takes `ops` and writes **once** — to `path` for Save, to `target_path` for Save As, leaving the source byte-identical.
   - **Save is enabled by row ops again** (`dirtyCount()` = field edits + staged ops): previously a row op cleared `state.edits`, so Save greyed out because the change was already on disk. Row-op status messages now say "(unsaved)", and the Raw verify banner distinguishes staged rows (rendered) from just-typed field edits (not yet).
   - *Trade-off, intended:* nothing touches disk until a Save button, so abandoning a file discards staged row work — the "unsaved changes" prompt now covers row ops too.
+  - **Verified on all seven layouts** (fixed-width *and* delimited) by a parametrized test: preview writes nothing, Save As leaves the source byte-identical, the copy carries the change.
+  - *Found while testing, NOT fixed (pre-existing, see §6):* header fields that form a layout's **detection signature** are editable, and changing them makes the file undetectable afterwards — e.g. EUPreticket `indicator` `P`→anything, CartonLabel `picklist_pre` `C:`→anything. Reproduces with zero row ops on the old save path.
 - **Prior top of `main` = tag `v0.20.0-empty-sections-single-file-bulk`** (was 112 passing).
   Empty-section routing/display/editing + padding UX + single-file bulk — fixes three related editor issues across all NA + EU layouts (see D10):
   - **Empty sections no longer shift records or vanish.** Every section now carries a canonical `marker` (derived in `layout/compiler.py`: from the sample for delimited layouts, learned from the reference `.OK` for fixed-width). The `okfile.py` assigners route by that marker instead of order-of-appearance, so an empty section (e.g. no Lane rows) keeps later sections in place. `okf.sections()` returns **every** layout section in canonical order including empties, and the UI renders an empty section as a "None" row (previously it disappeared / swallowed the next section's records). All seven `layouts/*.json` regenerated with `marker` + `sample_raw`.
@@ -104,7 +106,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 118
+.venv/bin/python -m pytest tests/ -q              # currently 125
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```
@@ -112,6 +114,7 @@ Commit convention: end messages with `Co-Authored-By: Claude Opus 4.8 (1M contex
 
 ## 6. Next increments / open threads (not yet built)
 - **Calgary JSON layouts (NEW FORMAT — architectural fork, in discussion).** Source files live in `/Users/praveendx/repos/OkGenData/Calgary New Layout Definitions and JSON files/`: a definition xlsx (3 tabs `styleHeader`/`distributionLabel`/`cartonLabel` — field-mapping refs, `Field Name` + `Max Length` + `Notes`, **not** position specs) + 3 zips of real **JSON** samples (18 files). These are **JSON, not fixed-width/pipe-delimited** — a would-be **3rd engine** beyond OkGen's positional/byte-span model. Shape: `data.type` (`styleHeaders`/`cartonLabels`/`distributionLabels` = layout discriminator) · `data.timestamp` · flat `header` (~54 keys, mostly null) · nested arrays (`lanes`/`sizes`/`stores`/`details`). Gotchas: chain appears as code (`"04"`,`"06"`) **and** name (`"Winners"`); values mix `null` / `""` / `" "`; formatting is inconsistent (some carton files **minified**, style/dist **pretty-printed**) — so "byte-exact round-trip" means something new here. **Blocked on user (returning next session):** (1) the JSON **schema** (authoritative field set/order/types per type); (2) the **fork decision** — does OkGen *view/edit JSON natively* (new engine) vs *convert JSON↔existing .OK*? Design can't start until both land.
+- **Detection-signature fields are editable and can brick a file** (found 2026-07-22, pre-existing — not caused by the staged-row-ops work). Some header fields double as the layout's detection signature, so editing them makes the saved file undetectable on reopen: **EUPreticket `indicator`** (must stay `P`; the editor even offers Y/No options for it) and **CartonLabel `picklist_pre`** (must stay `C:`). Reproduce: save an `indicator` edit with no row ops → `could not detect layout: no rule matched`. Likely fix is config-driven: mark these read-only via `field_display.yaml` (the D9 mechanism) and/or validate on save that the result still detects as the same layout. Worth auditing every layout's signature field before deciding.
 - **Production deployment** on the DC/RDP boxes beyond `run.bat` (always-available auto-start) — approach not yet decided. *Pain that reinforces this:* when the app is left running under one RDP user's session, its `python.exe` locks `.venv`, blocking a deploy that deletes it — and a non-admin can't inspect/kill another session's process. Running OkGen as a **Windows Service** (e.g. NSSM) under a dedicated service account would remove per-session locks entirely. Interim helper shipped: `list-active-users.bat` (lists logged-in users so you can reach out).
 - **Productization:** generalize the layout loader to "upload your own fixed-width spec" (the key unlock for a sellable, non-TJX product). Clear IP/ownership first; clean-room any generic version.
 - **DC production-tool pivot:** auth/roles/concurrency/queue dashboard — awaiting direction.

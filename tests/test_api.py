@@ -1000,3 +1000,35 @@ def test_flask_record_delete_preview_does_not_write(tmp_path):
     })
     assert res.status_code == 200
     assert work.read_bytes() == original
+
+
+@pytest.mark.parametrize("sample", [
+    "StyleHeader.OK", "Preticket.OK", "DistLabels.OK", "CartonLabel.OK",
+    "EUPreticket.OK", "EUStyleHeader.OK", "EUCartonLabel.OK",
+])
+def test_save_as_leaves_original_untouched_every_layout(tmp_path, registry, config, sample):
+    """Every layout, fixed-width and delimited: Save As must not touch the source."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    original = work.read_bytes()
+
+    before = service.parse_file_view(work, registry, config)
+    detail = next((s for s in before["sections"] if not s["is_header"] and s["records"]), None)
+    assert detail, f"{sample} has no detail rows to exercise"
+    victim = detail["records"][0]["index"]
+
+    # Preview the delete: the view reflects it, the file does not.
+    view = service.delete_record(work, victim, [], registry, config, preview=True)
+    n_preview = len(next(s for s in view["sections"] if s["name"] == detail["name"])["records"])
+    assert n_preview == len(detail["records"]) - 1
+    assert work.read_bytes() == original
+
+    # Save As: the copy carries the change, the source is byte-identical.
+    other = tmp_path / f"copy_{sample}"
+    service.apply_edits(work, [], registry, target_path=str(other), config=config,
+                        ops=[{"type": "delete", "record_index": victim}])
+    assert work.read_bytes() == original
+    saved = service.parse_file_view(other, registry, config)
+    assert len(next(s for s in saved["sections"] if s["name"] == detail["name"])["records"]) == n_preview
