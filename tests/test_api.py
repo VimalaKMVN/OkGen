@@ -1688,14 +1688,30 @@ def _keytrol(path, registry, config):
     return service.parse_file_view(path, registry, config)["sections"][0]["records"][0]["values"]["keytrol"]
 
 
-def test_split_key_prefix_and_number():
-    """A leading non-digit run is a prefix; digits-then-letters is left alone."""
-    assert service._split_key("C:88813   ") == ("C:", 88813)
-    assert service._split_key("0008881334") == ("", 8881334)
-    assert service._split_key("C:") == ("C:", None)
-    assert service._split_key("33001P3A") == ("", None)      # Preticket po — unchanged
-    assert service._split_key("   ") == ("", None)
-    assert service._split_key(None) == ("", None)
+def test_split_key_prefix_number_suffix():
+    """A key is prefix + number + suffix; only the number is ours to renumber."""
+    def parts(v):
+        p = service._split_key(v)
+        return (p.prefix, p.value, p.suffix, p.width)
+
+    assert parts("C:88813   ") == ("C:", 88813, "", 5)      # EUCartonLabel prefix
+    assert parts("126539Q") == ("", 126539, "Q", 6)         # EUStyleHeader suffix
+    assert parts("33001P3A") == ("", 33001, "P3A", 5)       # both kinds of tail
+    assert parts("0008881334") == ("", 8881334, "", 10)     # plain, zero-padded
+    assert parts("C:") == ("C:", None, "", 0)               # nothing to renumber
+    assert parts("   ") == ("", None, "", 0)
+    assert parts(None) == ("", None, "", 0)
+
+
+def test_format_key_keeps_suffix_in_place():
+    """The digit run keeps its width so a suffix does not drift."""
+    assert service._format_key("", 126540, 11, "Q", 6) == "126540Q"
+    assert service._format_key("C:", 88814, 11, "", 5) == "C:88814"
+    assert service._format_key("C:", 88814, 11) == "C:000088814"   # no width -> fill
+    # the digit run grows only when the number needs it, and only into free space
+    assert service._format_key("", 1234567, 11, "Q", 6) == "1234567Q"
+    with pytest.raises(service.EditError):
+        service._format_key("", 12345678901, 11, "Q", 6)           # no room left
 
 
 def test_make_unique_keeps_key_prefix(tmp_path, registry, config):
@@ -1777,3 +1793,61 @@ def test_generate_inherits_template_key_prefix(tmp_path, registry, config):
     assert all(k.startswith("C:") for k in keys), keys
     assert len({k.strip() for k in keys}) == 5
     assert _keytrol(template, registry, config) == before      # template untouched
+
+
+def test_make_unique_keeps_key_suffix_eustyleheader(tmp_path, registry, config):
+    """EUStyleHeader keytrol = leading digits + optional letter suffix.
+
+    Only the digits are renumbered; the suffix stays put and the digit run keeps
+    its width, so 126539Q becomes 126540Q (not 0000126540Q).
+    """
+    for name in ("a.OK", "b.OK", "c.OK"):
+        shutil.copy2(DATA_DIR / "EUStyleHeader.OK", tmp_path / name)
+
+    before = service.parse_file_view(tmp_path / "a.OK", registry, config)
+    original = before["sections"][0]["records"][0]["values"]["keytrol"].strip()
+    assert original.endswith("Q"), f"fixture expected to carry a suffix, got {original!r}"
+
+    service.make_unique_in_folder(tmp_path, registry, config, backup=False)
+
+    keys = []
+    for name in ("a.OK", "b.OK", "c.OK"):
+        view = service.parse_file_view(tmp_path / name, registry, config)
+        assert view["layout"] == "EUStyleHeader" and view["roundtrip_ok"]
+        keys.append(view["sections"][0]["records"][0]["values"]["keytrol"].strip())
+
+    assert original in keys, "the first file must keep its key"
+    assert len(set(keys)) == 3, keys
+    for k in keys:
+        assert k.endswith("Q"), f"suffix lost: {k}"
+        assert k[:-1].isdigit() and len(k[:-1]) == 6, f"digit run changed shape: {k}"
+
+
+def test_make_unique_keeps_alphanumeric_tail_preticket(tmp_path, registry, config):
+    """Preticket po '33001P3A' renumbers the leading digits, keeping 'P3A'."""
+    for name in ("a.OK", "b.OK"):
+        shutil.copy2(DATA_DIR / "Preticket.OK", tmp_path / name)
+    before = service.parse_file_view(tmp_path / "a.OK", registry, config)
+    original = before["sections"][0]["records"][0]["values"]["po"].strip()
+
+    service.make_unique_in_folder(tmp_path, registry, config, backup=False)
+
+    keys = [service.parse_file_view(tmp_path / n, registry, config)
+            ["sections"][0]["records"][0]["values"]["po"].strip() for n in ("a.OK", "b.OK")]
+    assert original in keys and len(set(keys)) == 2, keys
+    tail = original.lstrip("0123456789")
+    assert all(k.endswith(tail) for k in keys), keys
+
+
+def test_key_spaces_are_per_prefix_and_suffix(tmp_path, registry, config):
+    """'C:7', '7' and '7Q' are three distinct keys — none displaces another."""
+    def make(name, key):
+        shutil.copy2(DATA_DIR / "EUCartonLabel.OK", tmp_path / name)
+        return _set_keytrol(tmp_path / name, key, registry, config)
+
+    plain, pref, suff = make("a.OK", "0000007"), make("b.OK", "C:7"), make("c.OK", "7Q")
+    service.make_unique_in_folder(tmp_path, registry, config, backup=False)
+
+    assert _keytrol(plain, registry, config).strip() == "0000007"
+    assert _keytrol(pref, registry, config).strip() == "C:7"
+    assert _keytrol(suff, registry, config).strip() == "7Q"

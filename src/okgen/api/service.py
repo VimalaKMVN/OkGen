@@ -10,7 +10,7 @@ import random
 import re
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, NamedTuple, Optional
 
 from okgen.config import Config
 from okgen.detect import detect_from_header, detect_layout, read_chain, read_header_line
@@ -885,89 +885,105 @@ def copy_files(srcs, dst_dir, registry=None, config=None) -> dict:
 # --------------------------------------------------------------------------- #
 # Unique key field
 # --------------------------------------------------------------------------- #
-def _split_key(raw) -> tuple:
-    """Split a key value into its non-numeric PREFIX and numeric tail.
+class KeyParts(NamedTuple):
+    """A key decomposed as ``prefix + number + suffix``.
 
-    Some keys carry a meaningful literal prefix — an EUCartonLabel ``keytrol``
-    may read ``C:88813`` — which identifies the file and must survive every
-    operation. Only the number after it is ours to renumber.
+    Only ``number`` is ours to renumber; the literal prefix and suffix identify
+    the file and must survive every operation:
 
-    The prefix is a LEADING run of non-digits followed by digits and nothing
-    else. Anything more tangled has no renumberable tail and is left alone —
-    notably Preticket's ``po`` values like ``33001P3A``, which behave exactly as
-    they did before prefixes existed.
+        'C:88813'    -> ('C:', 88813, '',    5)   EUCartonLabel literal prefix
+        '126539Q'    -> ('',   126539, 'Q',  6)   EUStyleHeader trailing suffix
+        '33001P3A'   -> ('',   33001,  'P3A', 5)
+        '0008881334' -> ('',   8881334, '',  10)
+        'ABC'        -> ('ABC', None,  '',    0)  nothing to renumber
+    """
+    prefix: str
+    value: "Optional[int]"
+    suffix: str
+    width: int          # how many characters the digit run occupied
 
-        'C:88813   ' -> ('C:', 88813)
-        '0008881334' -> ('',   8881334)
-        'C:'         -> ('C:', None)      prefix, no number yet
-        '33001P3A'   -> ('',   None)      digits then letters — not ours to renumber
-        'ABC'        -> ('ABC', None)
+    @property
+    def space(self) -> tuple:
+        """Numbering space: keys sharing a prefix+suffix are renumbered together."""
+        return (self.prefix, self.suffix)
 
-    Returns ``(prefix, int | None)``.
+
+def _split_key(raw) -> KeyParts:
+    """Split a key value into prefix + number + suffix.
+
+    The number is the FIRST digit run; whatever precedes it is the prefix and
+    whatever follows is the suffix. EUStyleHeader keytrols are 6 leading digits
+    with an optional letter suffix (``126539Q``), EUCartonLabel keytrols may
+    carry a ``C:`` prefix — both are preserved and only the digits move.
     """
     if raw is None:
-        return ("", None)
+        return KeyParts("", None, "", 0)
     core = str(raw).strip()
-    if not core:
-        return ("", None)
-    m = re.fullmatch(r"(\D*)(\d*)", core)
-    if m is None:                      # digits followed by non-digits: leave alone
-        return ("", None)
-    prefix, tail = m.group(1), m.group(2)
-    return (prefix, int(tail) if tail else None)
+    m = re.search(r"\d+", core) if core else None
+    if m is None:
+        return KeyParts(core, None, "", 0)
+    return KeyParts(core[:m.start()], int(m.group()), core[m.end():], len(m.group()))
 
 
-def _format_key(prefix: str, value: int, size: int) -> str:
-    """Render ``prefix`` + zero-padded ``value`` into a ``size``-wide key."""
-    room = size - len(prefix)
+def _format_key(prefix: str, value: int, size: int, suffix: str = "",
+                width: "Optional[int]" = None) -> str:
+    """Render ``prefix`` + zero-padded ``value`` + ``suffix`` into ``size`` chars.
+
+    ``width`` is the digit-run width to keep — passing the original keeps the
+    suffix at the same offset (``126539Q`` -> ``126540Q``, not ``0000126540Q``).
+    It grows only if the number no longer fits, and only into free space.
+    """
+    room = size - len(prefix) - len(suffix)
     if room < 1:
-        raise EditError(f"key prefix {prefix!r} leaves no room in a {size}-char field")
-    body = str(value).zfill(room)
+        raise EditError(
+            f"key {prefix!r}+{suffix!r} leaves no room in a {size}-char field")
+    body = str(value)
     if len(body) > room:
-        raise EditError(f"key {prefix}{value} overflows the {size}-char field")
-    return prefix + body
+        raise EditError(f"key {prefix}{value}{suffix} overflows the {size}-char field")
+    pad = room if width is None else max(min(width, room), len(body))
+    return prefix + body.zfill(pad) + suffix
 
 
 def _read_key_int(path: Path, registry, config):
-    """(layout, key_field, int_value | None, prefix) for a file's unique key."""
+    """(layout, key_field, int_value | None, KeyParts) for a file's unique key."""
     try:
         header = read_header_line(path)
         layout = detect_from_header(header).layout
     except Exception:
-        return (None, None, None, "")
+        return (None, None, None, KeyParts("", None, "", 0))
     if not layout:
-        return (None, None, None, "")
+        return (None, None, None, KeyParts("", None, "", 0))
     kf = config.unique_field(layout)
     if not kf:
-        return (layout, None, None, "")
+        return (layout, None, None, KeyParts("", None, "", 0))
     reg_layout = registry.get(layout)
     if getattr(reg_layout, "delimited", False):
         raw = _delim_header_value(header, reg_layout, kf)
     else:
         f = _header_field(reg_layout, kf)
         raw = _key_from_header(header, reg_layout, f)
-    prefix, value = _split_key(raw)
-    return (layout, kf, value, prefix)
+    parts = _split_key(raw)
+    return (layout, kf, parts.value, parts)
 
 
-def _next_key_int(maxv: Dict[tuple, int], layout: str, prefix: str = "") -> int:
-    """Next free key value for a (layout, prefix): max-seen + 1, but never 0.
+def _next_key_int(maxv: Dict[tuple, int], layout: str, space: tuple = ("", "")) -> int:
+    """Next free key value for a (layout, prefix, suffix): max-seen + 1, never 0.
 
-    Numbering is per PREFIX, so ``C:``-prefixed keys are renumbered among
-    themselves and plain keys among themselves — 'C:00007' and '00007' are
-    different keys and neither blocks the other.
+    Numbering is per prefix AND suffix, so 'C:00007', '00007' and '00007Q' are
+    three different keys in three independent spaces — none blocks the others.
 
     Keys are always assigned a non-zero value (an all-zero key reads as a blank
     sentinel), so the first key handed out in an empty/keyless folder is 1.
     """
-    return max(maxv.get((layout, prefix), -1) + 1, 1)
+    return max(maxv.get((layout,) + tuple(space), -1) + 1, 1)
 
 
 def _set_key(path: Path, registry, key_field: str, new_int: int, size: int, backup: bool,
-             prefix: str = ""):
-    """Write a new key into a file's header, KEEPING any literal prefix."""
+             parts: "Optional[KeyParts]" = None):
+    """Write a new key into a file's header, KEEPING its prefix and suffix."""
+    parts = parts or KeyParts("", None, "", 0)
     try:
-        new_str = _format_key(prefix, new_int, size)
+        new_str = _format_key(parts.prefix, new_int, size, parts.suffix, parts.width)
     except EditError:
         raise EditError(f"no available key for {path.name} (width {size} overflow)")
     okf = parse_okfile(path, registry=registry)
@@ -990,10 +1006,11 @@ def _folder_key_state(folder: Path, registry, config, exclude: set):
     for entry in folder.iterdir():
         if not is_ok_file(entry) or entry.resolve() in exclude:
             continue
-        layout, kf, val, prefix = _read_key_int(entry, registry, config)
+        layout, kf, val, parts = _read_key_int(entry, registry, config)
         if layout and kf and val is not None:
-            used.setdefault((layout, prefix), set()).add(val)
-            maxv[(layout, prefix)] = max(maxv.get((layout, prefix), -1), val)
+            space = (layout,) + parts.space
+            used.setdefault(space, set()).add(val)
+            maxv[space] = max(maxv.get(space, -1), val)
     return used, maxv
 
 
@@ -1002,26 +1019,28 @@ def _uniquify_new_files(folder: Path, new_files: List[Path], registry, config) -
     used, maxv = _folder_key_state(folder, registry, config, {p.resolve() for p in new_files})
     rekeyed = []
     for p in new_files:
-        layout, kf, val, prefix = _read_key_int(p, registry, config)
+        layout, kf, val, parts = _read_key_int(p, registry, config)
         if not (layout and kf):
             continue
-        u = used.setdefault((layout, prefix), set())
+        space = (layout,) + parts.space
+        u = used.setdefault(space, set())
         if val is not None and val not in u:
             u.add(val)
-            maxv[(layout, prefix)] = max(maxv.get((layout, prefix), -1), val)
+            maxv[space] = max(maxv.get(space, -1), val)
             continue
         f = _header_field(registry.get(layout), kf)
-        new_int = _next_key_int(maxv, layout, prefix)
+        new_int = _next_key_int(maxv, layout, parts.space)
         try:
-            # keep the file's own literal prefix (e.g. 'C:') — renumber the rest
-            new_str = _set_key(p, registry, kf, new_int, f.size, backup=False, prefix=prefix)
+            # keep the file's own prefix ('C:') and suffix ('Q') — renumber the digits
+            new_str = _set_key(p, registry, kf, new_int, f.size, backup=False, parts=parts)
         except (EditError, Exception) as exc:  # noqa: BLE001
             rekeyed.append({"file": p.name, "error": str(exc)})
             continue
         u.add(new_int)
-        maxv[(layout, prefix)] = new_int
+        maxv[space] = new_int
         rekeyed.append({"file": p.name, "field": kf,
-                        "from": (f"{prefix}{val}" if val is not None else None), "to": new_str})
+                        "from": (f"{parts.prefix}{val}{parts.suffix}"
+                                 if val is not None else None), "to": new_str})
     return rekeyed
 
 
@@ -1035,26 +1054,28 @@ def make_unique_in_folder(folder, registry, config, backup=True) -> dict:
     maxv: Dict[tuple, int] = {}
     rekeyed = []
     for p in files:
-        layout, kf, val, prefix = _read_key_int(p, registry, config)
+        layout, kf, val, parts = _read_key_int(p, registry, config)
         if not (layout and kf):
             continue
-        u = used.setdefault((layout, prefix), set())
+        space = (layout,) + parts.space
+        u = used.setdefault(space, set())
         if val is not None and val not in u:
             u.add(val)
-            maxv[(layout, prefix)] = max(maxv.get((layout, prefix), -1), val)
+            maxv[space] = max(maxv.get(space, -1), val)
             continue
         f = _header_field(registry.get(layout), kf)
-        new_int = _next_key_int(maxv, layout, prefix)
+        new_int = _next_key_int(maxv, layout, parts.space)
         try:
-            # keep the file's own literal prefix (e.g. 'C:') — renumber the rest
-            new_str = _set_key(p, registry, kf, new_int, f.size, backup=backup, prefix=prefix)
+            # keep the file's own prefix ('C:') and suffix ('Q') — renumber the digits
+            new_str = _set_key(p, registry, kf, new_int, f.size, backup=backup, parts=parts)
         except (EditError, Exception) as exc:  # noqa: BLE001
             rekeyed.append({"file": p.name, "error": str(exc)})
             continue
         u.add(new_int)
-        maxv[(layout, prefix)] = new_int
+        maxv[space] = new_int
         rekeyed.append({"file": p.name, "field": kf,
-                        "from": (f"{prefix}{val}" if val is not None else None),
+                        "from": (f"{parts.prefix}{val}{parts.suffix}"
+                                 if val is not None else None),
                         "to": new_str})
     return {"folder": str(folder), "rekeyed": rekeyed}
 
@@ -1773,7 +1794,7 @@ def _set_row_count(okf: OkFile, config: Config, section_name: str, target: int) 
 
 def _generate_one(okf: OkFile, spec: dict, config: Config,
                   key_field: str, key_size: int, key_int: int,
-                  key_prefix: str = "") -> None:
+                  key_parts: "Optional[KeyParts]" = None) -> None:
     """Apply one generated file's variations to a freshly parsed template."""
     # 1. row counts first — new rows then get their own random values
     for rc in spec.get("row_counts") or []:
@@ -1788,7 +1809,9 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
 
     # 2. the unique key — always, so no two generated files collide
     if header is not None and key_field and key_size:
-        header.set(key_field, _format_key(key_prefix, key_int, key_size))
+        kp = key_parts or KeyParts("", None, "", 0)
+        header.set(key_field, _format_key(kp.prefix, key_int, key_size,
+                                          kp.suffix, kp.width))
 
     # 3. user-chosen header fields
     for hf in spec.get("header_fields") or []:
@@ -1827,7 +1850,7 @@ def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=
     # key as the first and every file collides.
     # The template's own key prefix (e.g. 'C:') is inherited by every generated
     # file, and numbering happens within that prefix's space.
-    _lay, _kf, _val, key_prefix = _read_key_int(sp, registry, config)
+    _lay, _kf, _val, key_parts = _read_key_int(sp, registry, config)
     maxv: Dict[tuple, int] = {}
     scan = [sp.parent] + [d for d in sp.parent.iterdir() if d.is_dir()]
     if dest_folder:
@@ -1838,7 +1861,7 @@ def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=
         _u, m = _folder_key_state(folder, registry, config, set())
         for key, hi in m.items():
             maxv[key] = max(maxv.get(key, -1), hi)
-    next_key = _next_key_int(maxv, layout_name, key_prefix)
+    next_key = _next_key_int(maxv, layout_name, key_parts.space)
 
     parts = spec.get("name_parts") or [{"type": "token", "name": "orig"},
                                        {"type": "token", "name": "seq"}]
@@ -1849,7 +1872,7 @@ def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=
     for i in range(count):
         okf = parse_okfile(sp, layout=template.layout, registry=registry)
         _generate_one(okf, spec, config, key_field, key_size, next_key + i,
-                      key_prefix=key_prefix)
+                      key_parts=key_parts)
         _assert_layout_stable(okf)          # a random value must never break detection
 
         toks = _tokens_from_okf(okf, config, orig_stem=sp.stem, custom={})
@@ -1861,7 +1884,8 @@ def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=
 
         if write:
             okf.save(Path(dest_folder) / name)
-        yield name, okf, {"key": _format_key(key_prefix, next_key + i, key_size)
+        yield name, okf, {"key": _format_key(key_parts.prefix, next_key + i, key_size,
+                                             key_parts.suffix, key_parts.width)
                           if key_size else ""}
 
 
