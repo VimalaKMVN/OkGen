@@ -72,9 +72,17 @@ body {
 .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
 .btn-primary:not(:disabled) { border-color: var(--accent); }
-/* The secondary action next to a primary one: same brightness, outlined. */
+/* Save As is enabled whenever a file is open (it doubles as "copy to a new
+   name"), so it must never read as greyed out. Outlined + bright = live. When
+   there ARE unsaved changes it brightens further, matching Save's emphasis so
+   the pair wakes up together on any edit — field change, add, delete or move. */
 #saveAsBtn:not(:disabled) { background: #3f444a; border-color: var(--accent); color: #fff; }
 #saveAsBtn:hover:not(:disabled) { background: #4a5058; }
+#saveAsBtn.has-changes:not(:disabled) {
+  background: #4a5058;
+  border-color: var(--accent-hover);
+  box-shadow: 0 0 0 1px var(--accent-hover) inset;
+}
 
 .layout { flex: 1; display: flex; min-height: 0; }
 .tree-pane {

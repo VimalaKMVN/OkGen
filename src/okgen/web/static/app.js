@@ -1307,12 +1307,18 @@ function onEdit(e) {
 }
 
 function updateSaveButtons() {
-  const dirty = dirtyCount();   // field edits + staged row ops
-  // Both buttons gate identically, so they light up together the moment you
-  // change anything. Save As used to be enabled whenever a file was open, which
-  // read as "greyed out but somehow clickable" and confused users.
+  // `dirty` counts EVERY kind of pending change: field edits (state.edits) and
+  // staged row add/delete/move (state.ops). Both buttons light up on any of
+  // them. Save As stays enabled with no changes too, so it can still copy a
+  // file to a new name — it is styled as clearly live rather than greyed.
+  const dirty = dirtyCount();
   $("#saveBtn").disabled = !state.file || dirty === 0;
-  $("#saveAsBtn").disabled = !state.file || dirty === 0;
+  $("#saveAsBtn").disabled = !state.file;
+  const saveAs = $("#saveAsBtn");
+  saveAs.classList.toggle("has-changes", dirty > 0);
+  saveAs.title = dirty > 0
+    ? `Save all ${dirty} unsaved change(s) to a NEW file — this file stays as it is`
+    : "Save a copy of this file under a new name";
   updateDirtyIndicator();
   updateRawBanner();
   if (dirty) setStatus(`${dirty} unsaved edit(s)`, "dirty");
