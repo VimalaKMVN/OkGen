@@ -2343,3 +2343,37 @@ def test_fill_does_not_touch_non_preticket(tmp_path, registry, config):
     other = tmp_path / "copy.OK"
     service.apply_edits(work, [], registry, target_path=str(other), config=config)
     assert other.read_bytes() == before
+
+
+def test_fill_line_count_zero_when_no_real_rows(tmp_path, registry, config):
+    """line_count is 0 when the Lane has no real data — whether it holds only
+    all-zero filler rows or is completely empty."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+
+    # normalise to 4 real + 10 filler, then delete every REAL row
+    saved = tmp_path / "n.OK"
+    service.apply_edits(work, [], registry, target_path=str(saved), config=config)
+    while True:
+        real, _ = _lane_split(service.parse_file_view(saved, registry, config))
+        if not real:
+            break
+        service.delete_record(saved, real[0]["index"], [], registry, config, backup=False)
+
+    view = service.parse_file_view(saved, registry, config)
+    real, filler = _lane_split(view)
+    assert real == []                                    # only zero rows remain
+    assert _line_count(view) == "00", _line_count(view)  # count reflects zero real
+
+    # a completely empty Lane also reports 0
+    work2 = tmp_path / "Preticket2.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work2)
+    while True:
+        rows = next(s for s in service.parse_file_view(work2, registry, config)["sections"]
+                    if s["name"] == "Lane")["records"]
+        if not rows:
+            break
+        service.delete_record(work2, rows[0]["index"], [], registry, config, backup=False)
+    empty_saved = tmp_path / "e.OK"
+    service.apply_edits(work2, [], registry, target_path=str(empty_saved), config=config)
+    assert _line_count(service.parse_file_view(empty_saved, registry, config)) == "00"

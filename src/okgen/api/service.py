@@ -677,8 +677,8 @@ def _apply_detail_fill(okf: OkFile, config: Config) -> None:
     For each section in ``config.fill_sections`` (Preticket's Lane): if it has
     at least one REAL (non-blank) row, keep the real rows in order and follow
     them with exactly N all-zero filler rows, and set the header count field to
-    the number of real rows. A section with no real rows is left untouched (no
-    filler is added when there are no detail lines at all).
+    the number of real rows. If it has NO real rows (empty, or only all-zero
+    filler), no filler is added and the header count field is set to 0.
 
     Filler rows are COPIED, never synthesised — from an existing blank row in
     the file when present, else the compile-time ``filler_raw`` — because the
@@ -694,12 +694,12 @@ def _apply_detail_fill(okf: OkFile, config: Config) -> None:
             continue
         hidden = config.hidden_fields(layout.name)
         rows = [r for r in okf.records if r.section is sec]
-        if not rows:
-            continue
         real = [r for r in rows if not _is_blank_row(r, hidden)]
         blanks = [r for r in rows if _is_blank_row(r, hidden)]
         if not real:
-            continue                              # no real lines -> no filler
+            # no real detail lines -> line count is 0 (leave any zero rows as-is)
+            _set_count_field(okf, layout.name, sec_name, 0, config)
+            continue
         template_raw = (blanks[0].raw if blanks
                         else getattr(sec, "filler_raw", None))
         if not template_raw:
@@ -723,17 +723,25 @@ def _apply_detail_fill(okf: OkFile, config: Config) -> None:
         _reindex(okf)
 
         # header count field = number of REAL rows (not counting filler)
-        cf = config.count_field(layout.name, sec_name)
-        if cf:
-            header = okf.records[0]
-            try:
-                f = header._field(cf)             # noqa: SLF001
-                if f.size is not None:
-                    val = str(len(real)).zfill(f.size)
-                    if len(val) <= f.size:
-                        header.set(cf, val)
-            except KeyError:
-                pass
+        _set_count_field(okf, layout.name, sec_name, len(real), config)
+
+
+def _set_count_field(okf: OkFile, layout_name: str, section_name: str,
+                     count: int, config: Config) -> None:
+    """Write ``count`` (zero-padded) into the section's header count field."""
+    cf = config.count_field(layout_name, section_name)
+    if not cf or not okf.records:
+        return
+    header = okf.records[0]
+    try:
+        f = header._field(cf)                     # noqa: SLF001
+    except KeyError:
+        return
+    if f.size is None:
+        return
+    val = str(count).zfill(f.size)
+    if len(val) <= f.size:
+        header.set(cf, val)
 
 
 def _seed_record(okf, sec, config: Config = None):
