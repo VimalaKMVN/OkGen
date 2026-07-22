@@ -1986,6 +1986,11 @@ async function enterGenerateMode() {
 
 function renderGeneratePanel(panel, path, scope) {
   panel.innerHTML = "";
+  // Declared first: refresh() runs while the panel is still being built (the
+  // default filename chips call it), so these must already be initialised —
+  // reading a `let` before its declaration throws and aborts the whole render.
+  let timer = null;
+  let armed = false, armTimer = null;
   const head = el("div", "bulk-head");
   head.appendChild(el("h3", null, `Generate volume files — ${scope.name}`));
   head.appendChild(el("span", "bulk-label",
@@ -2167,7 +2172,6 @@ function renderGeneratePanel(panel, path, scope) {
     return spec;
   }
 
-  let timer = null;
   function refresh() { clearTimeout(timer); timer = setTimeout(doPreview, 250); }
 
   async function doPreview() {
@@ -2216,8 +2220,6 @@ function renderGeneratePanel(panel, path, scope) {
   const cancelBtn = el("button", "btn", "Cancel");
   cancelBtn.classList.add("hidden");
   actions.insertBefore(cancelBtn, folderNote);
-  let armed = false, armTimer = null;
-
   function disarm() {
     armed = false;
     clearTimeout(armTimer);

@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.25.1-key-prefix-suffix`.
+> Baseline: top of `main` = tag `v0.25.5-generate-tdz-fix`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -78,7 +78,11 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.25.1-key-prefix-suffix`.** **Tests: 236 passing, 0 skipped.**
+- **Top of `main` = tag `v0.25.5-generate-tdz-fix`.** **Tests: 237 passing** (236 Python + 1 Node smoke suite).
+  **Fixed the Generate panel doing nothing.** Root cause was a JS temporal-dead-zone error: the default filename chips call `refresh()` *during* panel construction, but `let timer` was declared ~50 lines later — reading a `let` before its declaration throws, so `renderGeneratePanel` aborted mid-render. Everything after that point (the sticky action bar, the results area, **every click handler**) never existed. That is why there was no bottom button at all, and why the header button added in v0.25.2 appeared but did nothing. Declarations are now hoisted to the top of the function.
+  - **New: browser-side test harness** (`tests/js/`) — a dependency-free DOM stub plus a Node script that executes the real `app.js`, renders the Generate panel and drives its buttons, asserting the panel builds, results sit above the sticky bar, the first click arms the inline confirmation and the second POSTs `/api/generate/apply` with the right spec. Run by pytest via `tests/test_js_panels.py` (skips if `node` is absent, so the offline Windows boxes are unaffected). **Verified it reproduces the TDZ bug when reintroduced.** This is the first automated coverage of client-side code — previously all 236 tests were server-only, which is exactly how this shipped.
+  - Supporting fixes while chasing it: results moved above the sticky footer (messages were rendering off-screen behind it); global `error`/`unhandledrejection` handlers so a thrown handler no longer looks like a dead button — **this is what finally surfaced the real error**; `SEND_FILE_MAX_AGE_DEFAULT = 0` so a cached `app.js` can't make a fix look unapplied; and a build marker in the panel header (`OKGEN_BUILD`) so the loaded build is visible.
+- **Prior top of `main` = tag `v0.25.1-key-prefix-suffix`** (236 passing).
   Key model generalized to **`prefix + number + suffix`** (D14): the number is the first digit run, everything before it is the prefix and everything after is the suffix, and **only the number is renumbered**. Confirmed real shapes with the user: EUCartonLabel `keytrol` may lead with `C:`; **EUStyleHeader `keytrol` is 6 leading digits with an optional letter suffix (`126539Q`)**; other layouts are plain numbers. The digit run keeps its original width so a suffix never drifts (`126539Q` → `126540Q`, not `0000126540Q`), growing only if the number needs it and only into free space. Numbering spaces are per `(layout, prefix, suffix)`, so `C:7`, `7` and `7Q` are three distinct keys that never displace each other. Preticket `33001P3A` now renumbers to `33002P3A` instead of being wiped to a plain number — the previous release treated any digits-then-letters key as *keyless* and overwrote it (even when it wasn't a duplicate). **Verified across all 7 layouts** (Make Unique on 3 duplicates + paste-collision auto-uniquify): every key stays unique, keeps its shape, respects its field width, and the file still detects/round-trips.
 - **Prior top of `main` = tag `v0.25.0-key-prefix`** (was 232 passing).
   **Keys may carry a literal prefix** (D14) — an EUCartonLabel `keytrol` can read `C:88813`. Previously `_read_key_int` did a bare `int()`, so a prefixed key parsed as *no key at all*: Make Unique treated the file as keyless and overwrote it with a plain number, **destroying the `C:`**. Now `_split_key` splits a key into a leading non-digit prefix + numeric tail; the prefix is preserved by every operation (edit, Save As, paste auto-uniquify, Make Unique, volume generation) and only the number is renumbered. Numbering is per **(layout, prefix)**, so `C:00007` and `00007` are different keys in independent spaces and neither displaces the other. Deliberately generic rather than EUCartonLabel-specific — any layout's key gets the same treatment. Values that are digits-then-letters (Preticket `po` = `33001P3A`) have no renumberable tail and behave exactly as before.
@@ -131,7 +135,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 236
+.venv/bin/python -m pytest tests/ -q              # currently 237
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```
