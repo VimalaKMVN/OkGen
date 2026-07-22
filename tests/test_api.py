@@ -1003,6 +1003,15 @@ def test_flask_record_delete_preview_does_not_write(tmp_path):
     assert work.read_bytes() == original
 
 
+def _non_fill_detail(view, config):
+    """First populated non-header section whose row count is NOT auto-managed by
+    detail-fill (Preticket's Lane is — its counts are covered by dedicated
+    fill tests, so the generic count assertions skip it)."""
+    return next((s for s in view["sections"]
+                 if not s["is_header"] and s["records"]
+                 and not config.zero_fill(view["layout"], s["name"])), None)
+
+
 @pytest.mark.parametrize("sample", [
     "StyleHeader.OK", "Preticket.OK", "DistLabels.OK", "CartonLabel.OK",
     "EUPreticket.OK", "EUStyleHeader.OK", "EUCartonLabel.OK",
@@ -1016,8 +1025,9 @@ def test_save_as_leaves_original_untouched_every_layout(tmp_path, registry, conf
     original = work.read_bytes()
 
     before = service.parse_file_view(work, registry, config)
-    detail = next((s for s in before["sections"] if not s["is_header"] and s["records"]), None)
-    assert detail, f"{sample} has no detail rows to exercise"
+    detail = _non_fill_detail(before, config)
+    if detail is None:
+        pytest.skip(f"{sample}: only detail-fill-managed sections (covered elsewhere)")
     victim = detail["records"][0]["index"]
 
     # Preview the delete: the view reflects it, the file does not.
@@ -1124,8 +1134,10 @@ def test_staged_add_every_layout(tmp_path, registry, config, sample):
     # 10-record limit, so fall through to Size rather than skipping the layout).
     detail = next((s for s in before["sections"]
                    if not s["is_header"] and s["records"]
+                   and not config.zero_fill(before["layout"], s["name"])
                    and (s["max_records"] is None or len(s["records"]) < s["max_records"])), None)
-    assert detail, f"{sample}: every populated section is at its max_records limit"
+    if detail is None:
+        pytest.skip(f"{sample}: no non-fill section with headroom")
     anchor = detail["records"][0]["index"]
 
     view = service.add_record(work, None, [], registry, config,
@@ -1221,7 +1233,9 @@ def test_empty_section_can_be_reseeded_every_layout(tmp_path, registry, config, 
     work = tmp_path / sample
     shutil.copy2(DATA_DIR / sample, work)
     before = service.parse_file_view(work, registry, config)
-    target = next(s for s in before["sections"] if not s["is_header"] and s["records"])
+    target = _non_fill_detail(before, config)     # fill layouts add 10 filler rows
+    if target is None:
+        pytest.skip(f"{sample}: only detail-fill-managed sections")
 
     after = _empty_out_section(work, target["name"], registry, config)
     sec_index = next(s["index"] for s in after["sections"] if s["name"] == target["name"])
@@ -1374,9 +1388,12 @@ def test_staged_add_then_edit_new_row_every_layout(tmp_path, registry, config, s
     shutil.copy2(DATA_DIR / sample, work)
 
     before = service.parse_file_view(work, registry, config)
-    sec = next(s for s in before["sections"]
-               if not s["is_header"] and s["records"]
-               and (s["max_records"] is None or len(s["records"]) < s["max_records"]))
+    sec = next((s for s in before["sections"]
+                if not s["is_header"] and s["records"]
+                and not config.zero_fill(before["layout"], s["name"])
+                and (s["max_records"] is None or len(s["records"]) < s["max_records"])), None)
+    if sec is None:
+        pytest.skip(f"{sample}: no non-fill section with headroom")
     anchor = sec["records"][0]["index"]
     field = next(f["name"] for f in sec["fields"] if f.get("size") and not f.get("hidden"))
 
@@ -2210,3 +2227,119 @@ def test_seeded_preticket_row_not_shifted(tmp_path, registry, config):
     vals = next(s for s in preview["sections"] if s["name"] == "Lane")["records"][0]["values"]
     assert vals["page"] == "001", f"shifted: page={vals['page']!r}"
     assert vals["message1"] == "MESSAGES01", f"shifted: message1={vals['message1']!r}"
+
+
+# --------------------------------------------------------------------------- #
+# Preticket-style trailing zero-fill: >=1 real Lane row -> real + 10 filler
+# --------------------------------------------------------------------------- #
+def _lane_split(view):
+    """(real rows, filler rows) for a Preticket Lane view."""
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+    real = [r for r in lane["records"]
+            if any((r["values"].get(k) or "").strip("0 ") for k in r["values"])]
+    filler = [r for r in lane["records"] if r not in real]
+    return real, filler
+
+
+def _line_count(view):
+    return view["sections"][0]["records"][0]["values"].get("line_count")
+
+
+def test_fill_config_only_preticket(config):
+    assert config.zero_fill("Preticket", "Lane") == 10
+    assert config.zero_fill("StyleHeader", "Lane") is None
+    assert config.zero_fill("EUPreticket", "Lane") is None
+
+
+def test_fill_on_save_normalizes_to_ten(tmp_path, registry, config):
+    """The sample has 4 real + 19 filler; a save standardises to 4 real + 10."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    other = tmp_path / "copy.OK"
+    service.apply_edits(work, [], registry, target_path=str(other), config=config)
+
+    real, filler = _lane_split(service.parse_file_view(other, registry, config))
+    assert len(real) == 4 and len(filler) == 10
+    assert _line_count(service.parse_file_view(other, registry, config)) == "04"
+    assert service.parse_file_view(other, registry, config)["roundtrip_ok"]
+
+
+def test_fill_is_idempotent(tmp_path, registry, config):
+    """Re-saving an already-normalised file is byte-identical."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    a = tmp_path / "a.OK"
+    service.apply_edits(work, [], registry, target_path=str(a), config=config)
+    b = tmp_path / "b.OK"
+    service.apply_edits(a, [], registry, target_path=str(b), config=config)
+    assert a.read_bytes() == b.read_bytes()
+
+
+def test_fill_bulk_keep_one_row(tmp_path, registry, config):
+    """Bulk 'keep first 1 row' -> 1 real + 10 filler."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    res = service.bulk_op_apply([str(work)], "Preticket", "Lane",
+                                {"type": "keep", "count": 1}, registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+    real, filler = _lane_split(service.parse_file_view(work, registry, config))
+    assert len(real) == 1 and len(filler) == 10
+    assert _line_count(service.parse_file_view(work, registry, config)) == "01"
+
+
+def test_fill_add_first_row_to_empty_lane(tmp_path, registry, config):
+    """Adding the first row to an emptied Lane seeds 1 real + 10 filler, using
+    the compile-time filler_raw (the file has no blank row left to copy)."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    while True:
+        rows = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                    if s["name"] == "Lane")["records"]
+        if not rows:
+            break
+        service.delete_record(work, rows[0]["index"], [], registry, config, backup=False)
+    # emptied: no fill (no real rows)
+    real, filler = _lane_split(service.parse_file_view(work, registry, config))
+    assert len(real) == 0 and len(filler) == 0
+
+    si = next(s["index"] for s in service.parse_file_view(work, registry, config)["sections"]
+              if s["name"] == "Lane")
+    view = service.add_record(work, si, [], registry, config, backup=False)
+    real, filler = _lane_split(view)
+    assert len(real) == 1 and len(filler) == 10
+    assert view["roundtrip_ok"]
+
+
+def test_fill_generation_produces_filler(tmp_path, registry, config):
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    res = service.generate_apply(work, {
+        "count": 3,
+        "name_parts": [{"type": "token", "name": "orig"}, {"type": "token", "name": "seq"}],
+        "separator": "_"}, registry, config)
+    for f in Path(res["folder"]).glob("*.OK"):
+        real, filler = _lane_split(service.parse_file_view(f, registry, config))
+        assert len(filler) == 10, f"{f.name}: {len(filler)} filler rows"
+        assert service.parse_file_view(f, registry, config)["roundtrip_ok"]
+
+
+def test_fill_filler_rows_are_all_zero(tmp_path, registry, config):
+    """The appended filler rows are genuine all-zero rows (copied, not junk)."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    other = tmp_path / "copy.OK"
+    service.apply_edits(work, [], registry, target_path=str(other), config=config)
+    _, filler = _lane_split(service.parse_file_view(other, registry, config))
+    for row in filler:
+        for name, value in row["values"].items():
+            assert (value or "").strip("0 ") == "", f"filler field {name}={value!r} not blank"
+
+
+def test_fill_does_not_touch_non_preticket(tmp_path, registry, config):
+    """A layout with no fill config is byte-identical through a no-op save."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    before = work.read_bytes()
+    other = tmp_path / "copy.OK"
+    service.apply_edits(work, [], registry, target_path=str(other), config=config)
+    assert other.read_bytes() == before

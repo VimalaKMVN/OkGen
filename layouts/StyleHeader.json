@@ -14,6 +14,7 @@
       "sample_record": "03NB509364AA 1T:2122496201009080751INITIAL   LUDBNGUM       A600718-8IN MULTI VOTIVE         3412331591741N                    002400N00079900000670000000000000910090100                                                                                \\",
       "marker": null,
       "sample_raw": null,
+      "filler_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -411,6 +412,7 @@
       "sample_record": "RCV034  ",
       "marker": "#",
       "sample_raw": "#RCD053  \\",
+      "filler_raw": null,
       "ignored_fields": [
         "lane2",
         "lane3",
@@ -444,6 +446,7 @@
       "sample_record": " XS   00026",
       "marker": "&",
       "sample_raw": "&EA    00002\\",
+      "filler_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [

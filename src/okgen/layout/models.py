@@ -64,6 +64,13 @@ class Section:
     # intact), which is why it is preferred over ``sample_record`` (the xlsx
     # sample can be marker-stripped, padding-less, or non-delimited).
     sample_raw: Optional[str] = None
+    # A real ALL-BLANK (zero/space-filled) record line for this section, learned
+    # from the reference ``<layout>.OK`` when it contains such filler rows (some
+    # formats, e.g. Preticket, pad their detail block with all-zero rows). Used
+    # as the template when auto-filling a section's trailing zero rows and no
+    # blank row is present in the file being edited to copy from. None when the
+    # reference has no filler row.
+    filler_raw: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +80,7 @@ class Section:
             "sample_record": self.sample_record,
             "marker": self.marker,
             "sample_raw": self.sample_raw,
+            "filler_raw": self.filler_raw,
             "ignored_fields": self.ignored_fields,
             "issues": self.issues,
             "fields": [f.to_dict() for f in self.fields],

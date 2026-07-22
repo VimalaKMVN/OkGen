@@ -329,6 +329,7 @@ def apply_edits(
     okf = parse_okfile(src, registry=registry)
     replay_ops(okf, ops, config)
     _apply_edits_to_okf(okf, edits, config)
+    _apply_detail_fill(okf, config)
 
     _assert_layout_stable(okf)
     out = Path(target_path) if target_path else src
@@ -513,6 +514,7 @@ def _record_op(path, registry, config, ops, edits, backup, preview, mutate) -> t
     result = mutate(okf)
     _normalize_eols(okf)
     _reindex(okf)
+    _apply_detail_fill(okf, config)
 
     if preview:
         return _build_file_view(okf, src, config), result
@@ -654,6 +656,84 @@ def _normalize_eols(okf) -> None:
             rec.raw = content
         else:
             rec.raw = content + eol
+
+
+def _is_blank_row(rec, hidden: set) -> bool:
+    """True when a record carries no real data: every visible field is only
+    zeros and/or spaces. Hidden structural fields (the '#'/'&' marker) are
+    ignored, so an all-zero detail row still counts as blank."""
+    for f in (rec.section.fields if rec.section else []):
+        if f.name in hidden:
+            continue
+        v = rec.get(f.name)
+        if v is not None and v.strip("0 ") != "":
+            return False
+    return True
+
+
+def _apply_detail_fill(okf: OkFile, config: Config) -> None:
+    """Keep configured detail sections padded with trailing all-zero rows.
+
+    For each section in ``config.fill_sections`` (Preticket's Lane): if it has
+    at least one REAL (non-blank) row, keep the real rows in order and follow
+    them with exactly N all-zero filler rows, and set the header count field to
+    the number of real rows. A section with no real rows is left untouched (no
+    filler is added when there are no detail lines at all).
+
+    Filler rows are COPIED, never synthesised — from an existing blank row in
+    the file when present, else the compile-time ``filler_raw`` — because the
+    zero/space byte layout is not derivable from the field spec. Idempotent: a
+    file already at N real + K filler re-normalises to the same bytes.
+    """
+    if config is None or not okf.records:
+        return
+    layout = okf.layout
+    for sec_name, zeros in config.fill_sections(layout.name).items():
+        sec = next((x for x in layout.sections if x.name == sec_name), None)
+        if sec is None:
+            continue
+        hidden = config.hidden_fields(layout.name)
+        rows = [r for r in okf.records if r.section is sec]
+        if not rows:
+            continue
+        real = [r for r in rows if not _is_blank_row(r, hidden)]
+        blanks = [r for r in rows if _is_blank_row(r, hidden)]
+        if not real:
+            continue                              # no real lines -> no filler
+        template_raw = (blanks[0].raw if blanks
+                        else getattr(sec, "filler_raw", None))
+        if not template_raw:
+            continue                              # no filler example to copy
+        offset = 0 if getattr(layout, "delimited", False) else len(sec.marker or "")
+        fillers = [new_record(template_raw.rstrip("\r"), sec, layout,
+                              offset=offset, index=-1) for _ in range(zeros)]
+        new_rows = real + fillers
+
+        # splice the rebuilt section back where its rows were, keeping order
+        result, inserted = [], False
+        for r in okf.records:
+            if r.section is sec:
+                if not inserted:
+                    result.extend(new_rows)
+                    inserted = True
+                continue                          # drop the originals
+            result.append(r)
+        okf.records = result
+        _normalize_eols(okf)
+        _reindex(okf)
+
+        # header count field = number of REAL rows (not counting filler)
+        cf = config.count_field(layout.name, sec_name)
+        if cf:
+            header = okf.records[0]
+            try:
+                f = header._field(cf)             # noqa: SLF001
+                if f.size is not None:
+                    val = str(len(real)).zfill(f.size)
+                    if len(val) <= f.size:
+                        header.set(cf, val)
+            except KeyError:
+                pass
 
 
 def _seed_record(okf, sec, config: Config = None):
@@ -1373,6 +1453,7 @@ def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> 
         r["path"] = str(p)
         if r["status"] == "change" and okf is not None:
             try:
+                _apply_detail_fill(okf, config)   # keep Preticket-style filler rows
                 _assert_layout_stable(okf)
                 if backup and sp.exists():
                     shutil.copy2(sp, sp.with_suffix(sp.suffix + ".bak"))
@@ -1950,6 +2031,7 @@ def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=
         okf = parse_okfile(sp, layout=template.layout, registry=registry)
         _generate_one(okf, spec, config, key_field, key_size, next_key + i,
                       key_parts=key_parts)
+        _apply_detail_fill(okf, config)          # keep Preticket-style filler rows
         _assert_layout_stable(okf)          # a random value must never break detection
 
         toks = _tokens_from_okf(okf, config, orig_stem=sp.stem, custom={})

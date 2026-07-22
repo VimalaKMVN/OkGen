@@ -1,0 +1,15 @@
+# Trailing zero-fill for detail sections that pad a fixed block with all-zero
+# "filler" rows (Preticket). Whenever a configured section holds >= 1 real
+# (non-blank) row, OkGen keeps exactly `zeros` trailing filler rows after the
+# real ones and sets the header count field (from section_counts) to the number
+# of REAL rows. When the section has no real rows at all, no filler is added.
+#
+# Filler rows are COPIED — from the file's own existing filler rows when present,
+# otherwise from the reference filler learned at compile time (Section.filler_raw)
+# — never synthesised, because the zero/space byte layout is not derivable from
+# the field spec.
+#
+#   layout -> { section -> zeros }
+fill:
+  Preticket:
+    Lane: 10

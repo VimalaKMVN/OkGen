@@ -14,6 +14,7 @@
       "sample_record": "P05A10021888 8720240710352102001001000126000000339810",
       "marker": null,
       "sample_raw": null,
+      "filler_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -180,6 +181,7 @@
       "sample_record": "00100135217504401XL    N01                  003500N99999800003000000000000000014",
       "marker": "",
       "sample_raw": "001|001|3521|750440|1|XL    |N|01        |          |003500|N|999998|00003|000000000|000|0000|14\\",
+      "filler_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [

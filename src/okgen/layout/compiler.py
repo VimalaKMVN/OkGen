@@ -275,15 +275,23 @@ def _derive_section_markers(layout: Layout, data_dir: Path) -> None:
     except OSError:
         return
 
-    # First real line seen per record-type token, in order of appearance.
+    # First real line seen per record-type token, in order of appearance, plus
+    # the first ALL-BLANK (zero/space) line per token — some formats pad their
+    # detail block with such filler rows (Preticket), and the fill feature reuses
+    # them verbatim rather than synthesising (the zero/space byte layout is not
+    # derivable from the field spec).
     first_line: dict = {}
+    filler_line: dict = {}
     for raw in lines[1:]:                       # line 0 is the header
         if layout.delimited:
             token = _delim_marker(raw, layout.delimiter)
         else:
             first = raw[:1]
             token = first if first in _DETAIL_MARKERS else ""
-        first_line.setdefault(token, raw)
+        if _is_blank_line(raw):
+            filler_line.setdefault(token, raw)
+        else:
+            first_line.setdefault(token, raw)
 
     if layout.delimited:
         # Markers already set from the xlsx samples; match tokens by marker.
@@ -309,6 +317,15 @@ def _derive_section_markers(layout: Layout, data_dir: Path) -> None:
             sec.marker = token
         if sec.sample_raw is None:
             sec.sample_raw = raw
+        if sec.filler_raw is None and token in filler_line:
+            sec.filler_raw = filler_line[token]
+
+
+def _is_blank_line(raw: str) -> bool:
+    """True when a record line is an all-zero/space filler row: its content is
+    only '0' and ' ', ignoring the trailing terminator ('\\') and CR/LF/pad."""
+    core = raw.rstrip("\r\n").rstrip(" ").rstrip("\\").rstrip(" ")
+    return core != "" and set(core) <= set("0 ")
 
 
 def _delim_marker(raw: str, delimiter: str) -> str:

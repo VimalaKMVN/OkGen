@@ -112,6 +112,7 @@ class Config:
         hidden_fields: Optional[Dict[str, set]] = None,
         readonly_fields: Optional[Dict[str, set]] = None,
         literal_fields: Optional[Dict[str, set]] = None,
+        detail_fill: Optional[Dict[str, dict]] = None,
         derived_fields: Optional[Dict[str, list]] = None,
         isolated_chain_groups: Optional[List[set]] = None,
     ):
@@ -134,6 +135,7 @@ class Config:
         self._hidden_fields = hidden_fields or {}
         self._readonly_fields = readonly_fields or {}
         self._literal_fields = literal_fields or {}
+        self._detail_fill = detail_fill or {}
         # {layout: [spec, ...]} computed fields not present in the raw file.
         self._derived_fields = derived_fields or {}
         # Groups of chains isolated for editing — you cannot change a chain
@@ -300,6 +302,17 @@ class Config:
     def is_literal(self, layout: Optional[str], field: Optional[str]) -> bool:
         return bool(field) and field in self.literal_fields(layout)
 
+    # ----- trailing zero-fill (Preticket-style filler rows) -----
+    def zero_fill(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:
+        """How many trailing all-zero filler rows this section keeps, or None."""
+        if not layout or not section:
+            return None
+        return self._detail_fill.get(layout, {}).get(section)
+
+    def fill_sections(self, layout: Optional[str]) -> Dict[str, int]:
+        """{section: zero-count} for every filled section of this layout."""
+        return dict(self._detail_fill.get(layout, {})) if layout else {}
+
     # ----- derived (computed) fields -----
     def derived_fields(self, layout: Optional[str]) -> list:
         """Derived-field specs for this layout (list of dicts), or []."""
@@ -460,6 +473,15 @@ class Config:
                 for l, fs in (data.get("literal") or {}).items()
             }
 
+        detail_fill: Dict[str, dict] = {}
+        fill_path = cdir / "detail_fill.yaml"
+        if fill_path.is_file():
+            data = yaml.safe_load(fill_path.read_text(encoding="utf-8")) or {}
+            detail_fill = {
+                str(l): {str(sec): int(n) for sec, n in (secs or {}).items()}
+                for l, secs in (data.get("fill") or {}).items()
+            }
+
         derived_fields: Dict[str, list] = {}
         df2_path = cdir / "derived_fields.yaml"
         if df2_path.is_file():
@@ -489,5 +511,5 @@ class Config:
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
                    nicelabel_warning, send_quips, send_done_quips, regions,
-                   hidden_fields, readonly_fields, literal_fields, derived_fields,
-                   isolated_chain_groups)
+                   hidden_fields, readonly_fields, literal_fields, detail_fill,
+                   derived_fields, isolated_chain_groups)

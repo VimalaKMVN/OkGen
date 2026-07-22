@@ -14,6 +14,7 @@
       "sample_record": "|D|Q|05|N|126539Q    |M|20241017|1606|Initial |42 |0121|071368 |1| |QA1 Item2                |1 |0 |PBBML|            |2111235    |2111235    |           |D:2147152|         |         |20241003|10     |    |  |    |  |    |  |    |  |    |  |N|NS |   |   |   |   |   |   |   |   |   |GBP|599       |U|1000      | |N|N| |        |  |  |5   |   |     |            |            |S502786688062384C   |10   |1  |     |     |     |     |     |     |     |     |     |     |                    |           |\\  ",
       "marker": null,
       "sample_raw": null,
+      "filler_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -906,6 +907,7 @@
       "sample_record": "|&|STM 201    |\\  ",
       "marker": "&",
       "sample_raw": "|&|STM 201    |\\  ",
+      "filler_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -951,6 +953,7 @@
       "sample_record": "|#|3110358|L  |1    |0000|01|  |5999      |9300      |\\",
       "marker": "#",
       "sample_raw": "|#|3110601|NS |2    |0000|01|  |599       |          |\\  ",
+      "filler_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [

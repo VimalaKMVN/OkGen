@@ -14,6 +14,7 @@
       "sample_record": "02YL00882268 45201106061535010010010000220000000999",
       "marker": null,
       "sample_raw": null,
+      "filler_raw": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -169,6 +170,7 @@
       "sample_record": "00100142103239702      NXXXXXXXXXX          001800N00099900220007194339000454218                                                                                                          ",
       "marker": "",
       "sample_raw": "00100101217194183P65   YMESSAGES01MESSAGES02999999Y59999900003123456789000000012FRENCH DESCRIPTION!!ENGFRE26x29x35ItemItemItemFact1Fact1Fact1Fact1Fact2Fact2Fact2Fact2Fact3Fact3Fact3Fact3VENDORST\\   ",
+      "filler_raw": "00000000000000000000000000000000000000000000000000000000000000000000000000000000                                                                                                                  \\   ",
       "ignored_fields": [],
       "issues": [],
       "fields": [
