@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.24.1-volume-generation`.
+> Baseline: top of `main` = tag `v0.24.2-span-integrity-sweep`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -77,7 +77,9 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.24.1-volume-generation`.** **Tests: 211 passing, 0 skipped.**
+- **Top of `main` = tag `v0.24.2-span-integrity-sweep`.** **Tests: 226 passing, 0 skipped.**
+  Exhaustively verified the delimited-span fix: **311 ad-hoc cases** over all 7 layouts × every non-header section × every editable field × {staged add+edit, update, add/edit/move/delete combo, seed-empty+edit, bulk-add+edit} — **0 failures**. Markers intact, no orphaned `(unassigned)` rows, section routing canonical, byte-exact round-trip everywhere. Pinned by 3 new parametrized tests, the strongest being *editing a field on a runtime-created row changes ONLY that field* (verified to fail on all 3 delimited layouts with the fix disabled), plus a static guard that no code outside `okfile.py` constructs a bare `Record(...)` instead of `new_record()`.
+- **Prior top of `main` = tag `v0.24.1-volume-generation`** (was 211 passing).
   **Generate volume files** — new bulk action (D13): pick ONE file as a template and produce N copies (100/200/500/1000, max 5000) for load-testing NiceLabel or demos. Every file gets a fresh unique key; user-ticked header fields and detail/row fields get random values in a min/max range (detail fields vary per **row**); per-section row counts can vary within a range, respecting `max_records`. Names come from the same token model as Bulk Rename, resolved from the **generated** record via the new `_tokens_from_okf`. Output goes to an auto-named sibling folder (`generated_<stem>_<n>`, suffixed if taken). Service: `generate_scope`/`generate_preview`/`generate_apply` + routes `/api/generate/{scope,preview,apply}` + a `#generatePanel` UI reached from **Bulk Actions → Generate volume files…** (enabled only with exactly one file selected). Preview builds the first 5 in memory and writes nothing; 1000 files take ~0.13s. The key field and any locked field (detection signature, hidden marker) are excluded from the randomizable list, and `_assert_layout_stable` runs on every generated file. Keys start above every key already used in the template's folder **and its subfolders**, so a second batch never collides with the first.
   - **Fixed a corruption bug introduced by the staged-row-ops work** (v0.21.0, found while building this): delimited records locate fields via delimiter-walked `field_spans` built during parsing, but cloned/seeded rows were constructed directly with none — so `set()` fell back to the fixed-width formula and wrote over the record-type marker, orphaning the row into `(unassigned)`. It only bit once row ops became staged, because before that every op saved to disk and the next edit re-parsed. Root fix: `okfile.new_record()` computes spans for any record built outside parsing; all four clone/seed sites use it. Regression test verified to fail without the fix on exactly the two marker-routed layouts.
 - **Prior top of `main` = tag `v0.23.4-saveas-copy-plus-emphasis`** (was 192 passing; Save/Save As affordance + Save-As-as-copy).
@@ -122,7 +124,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 211
+.venv/bin/python -m pytest tests/ -q              # currently 226
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```

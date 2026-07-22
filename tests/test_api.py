@@ -1530,3 +1530,145 @@ def test_flask_generate_endpoints(tmp_path):
                        json={"path": str(work), "spec": dict(spec, count=99999)})
     assert over.status_code == 422
     assert "limit" in over.get_json()["error"]
+
+
+# --------------------------------------------------------------------------- #
+# Marker / field-span integrity for rows created at runtime
+# --------------------------------------------------------------------------- #
+def _row_creation_cases(view):
+    """(section, editable fields) for each populated non-header section."""
+    for sec in view["sections"]:
+        if sec["is_header"] or not sec["records"]:
+            continue
+        fields = [f for f in sec["fields"]
+                  if f.get("size") and not f.get("hidden")
+                  and not f.get("derived") and f.get("editable")]
+        if fields:
+            yield sec, fields
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_edit_touches_only_its_own_field_on_created_rows(tmp_path, registry, config, sample):
+    """Every section, every field: editing a row created at runtime must change
+    ONLY that field — never a neighbour, never the record-type marker.
+
+    This is the general form of the delimited-span corruption: a row built
+    outside parsing had no delimiter-walked spans, so writes landed at
+    fixed-width offsets and clobbered whatever was actually there.
+    """
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    base = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, base)
+    view = service.parse_file_view(base, registry, config)
+    section_names = [s["name"] for s in view["sections"]]
+
+    for sec, fields in _row_creation_cases(view):
+        original_row = dict(sec["records"][0]["values"])
+        for f in fields:
+            work = tmp_path / f"w_{sec['name']}_{f['name']}.OK"
+            shutil.copy2(base, work)
+            anchor = sec["records"][0]["index"]
+            value = ("9" * f["size"])[:f["size"]]
+            try:
+                service.apply_edits(work, [], registry, config=config, backup=False, ops=[
+                    {"type": "add", "after_index": anchor},
+                    {"type": "edit", "edits": [{"section_index": sec["index"],
+                                                "record_index": anchor + 1,
+                                                "field": f["name"], "value": value}]}])
+            except service.EditError as exc:
+                if "limit" in str(exc):        # section full — not a span problem
+                    continue
+                raise
+
+            after = service.parse_file_view(work, registry, config)
+            assert [s["name"] for s in after["sections"]] == section_names, \
+                f"{sec['name']}/{f['name']}: section routing changed (marker clobbered?)"
+            assert after["roundtrip_ok"]
+            new_row = next(s for s in after["sections"]
+                           if s["name"] == sec["name"])["records"][1]["values"]
+            assert new_row[f["name"]].strip().lstrip("0") in (value.strip().lstrip("0"), "")
+            for other in fields:
+                if other["name"] == f["name"]:
+                    continue
+                assert new_row[other["name"]] == original_row[other["name"]], (
+                    f"{sec['name']}: editing {f['name']} also changed {other['name']}")
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_seeded_and_bulk_added_rows_take_edits_correctly(tmp_path, registry, config, sample):
+    """The other two row-creation paths — seeding an empty section and bulk Add
+    — must produce rows whose fields are addressable, like a parsed row."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    base = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, base)
+    view = service.parse_file_view(base, registry, config)
+
+    for sec, fields in _row_creation_cases(view):
+        field = fields[0]
+        value = ("9" * field["size"])[:field["size"]]
+
+        # --- seeded row: empty the section, add the first row back, edit it ---
+        seeded = tmp_path / f"seed_{sec['name']}.OK"
+        shutil.copy2(base, seeded)
+        emptied = _empty_out_section(seeded, sec["name"], registry, config)
+        si = next(s["index"] for s in emptied["sections"] if s["name"] == sec["name"])
+        try:
+            service.add_record(seeded, si, [], registry, config, backup=False)
+        except service.EditError as exc:
+            if "no template to seed" not in str(exc):
+                raise
+        else:
+            v1 = service.parse_file_view(seeded, registry, config)
+            idx = next(s for s in v1["sections"]
+                       if s["name"] == sec["name"])["records"][0]["index"]
+            service.apply_edits(seeded, [{"section_index": si, "record_index": idx,
+                                          "field": field["name"], "value": value}],
+                                registry, config=config, backup=False)
+            v2 = service.parse_file_view(seeded, registry, config)
+            assert "(unassigned)" not in [s["name"] for s in v2["sections"]]
+            assert v2["roundtrip_ok"]
+            got = next(s for s in v2["sections"]
+                       if s["name"] == sec["name"])["records"][0]["values"][field["name"]]
+            assert got.strip().lstrip("0") in (value.strip().lstrip("0"), "")
+
+        # --- bulk-added row: add 2 rows via the bulk op, then edit the last ---
+        bulk = tmp_path / f"bulk_{sec['name']}.OK"
+        shutil.copy2(base, bulk)
+        res = service._bulk_op_eval(bulk, view["layout"], sec["name"],
+                                    {"type": "add", "count": 2}, registry, config)
+        if res["status"] != "change":
+            continue                            # at its limit
+        res["okf"].save(bulk)
+        v3 = service.parse_file_view(bulk, registry, config)
+        last = next(s for s in v3["sections"] if s["name"] == sec["name"])["records"][-1]
+        service.apply_edits(bulk, [{"section_index": sec["index"],
+                                    "record_index": last["index"],
+                                    "field": field["name"], "value": value}],
+                            registry, config=config, backup=False)
+        v4 = service.parse_file_view(bulk, registry, config)
+        assert "(unassigned)" not in [s["name"] for s in v4["sections"]]
+        assert v4["roundtrip_ok"]
+        got = next(s for s in v4["sections"]
+                   if s["name"] == sec["name"])["records"][-1]["values"][field["name"]]
+        assert got.strip().lstrip("0") in (value.strip().lstrip("0"), "")
+
+
+def test_no_direct_record_construction_outside_okfile():
+    """Rows must be built via okfile.new_record so delimited spans are computed.
+
+    A bare ``Record(...)`` elsewhere silently reintroduces the marker-clobbering
+    bug, and only on delimited layouts — cheap to guard statically.
+    """
+    src = Path(__file__).resolve().parents[1] / "src" / "okgen"
+    offenders = []
+    for py in src.rglob("*.py"):
+        if py.name == "okfile.py":
+            continue                            # parsing + new_record live here
+        for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if "Record(" in stripped and "new_record(" not in stripped \
+                    and not stripped.startswith("#"):
+                offenders.append(f"{py.name}:{i}: {stripped}")
+    assert not offenders, "build rows with okfile.new_record():\n" + "\n".join(offenders)
