@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 from okgen.config import Config
 from okgen.detect import detect_from_header, detect_layout, read_chain, read_header_line
 from okgen.layout.registry import LayoutRegistry
-from okgen.okfile import ENCODING, OkFile, Record, parse_okfile
+from okgen.okfile import ENCODING, OkFile, Record, new_record, parse_okfile
 
 OK_SUFFIX = ".ok"  # compared case-insensitively
 
@@ -549,10 +549,11 @@ def _op_add(okf: OkFile, config: Config, section_index=None, after_index=None) -
     if limit is not None and sec_count >= limit:
         raise EditError(f"section '{sec.name}' is at its limit of {limit} records")
 
-    clone = Record(
-        raw=template.raw.rstrip("\r"),       # copy values; EOL fixed up below
+    clone = new_record(
+        template.raw.rstrip("\r"),           # copy values; EOL fixed up below
+        template.section,
+        okf.layout,
         offset=template.offset,
-        section=template.section,
         index=template.index,                # placeholder; reassigned on reload
     )
     if seeded:
@@ -656,7 +657,7 @@ def _seed_record(okf, sec):
     if not seed:
         return None
     offset = 0 if getattr(okf.layout, "delimited", False) else 1
-    return Record(raw=seed.rstrip("\r"), offset=offset, section=sec, index=-1)
+    return new_record(seed.rstrip("\r"), sec, okf.layout, offset=offset, index=-1)
 
 
 def _insert_in_section_order(okf, clone, sec) -> int:
@@ -1212,8 +1213,8 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
                             "error": f"section '{section_name}' has no template to seed a row"}
                 insert_at = _insert_in_section_order(okf, template, sec) + 1
             for i in range(to_add if recs else to_add - 1):
-                clone = Record(raw=template.raw.rstrip("\r"), offset=template.offset,
-                               section=template.section, index=template.index)
+                clone = new_record(template.raw.rstrip("\r"), template.section, okf.layout,
+                                   offset=template.offset, index=template.index)
                 okf.records.insert(insert_at + i, clone)
             _normalize_eols(okf)
             new_count = before + to_add
@@ -1355,7 +1356,17 @@ def _file_tokens(path: Path, registry, config, custom: dict) -> dict:
     taken from the first record of the detail section that has it (e.g. for
     Preticket, comp_price/comp_up/ret_price/type live in the Lane section).
     """
-    okf = parse_okfile(path, registry=registry)
+    return _tokens_from_okf(parse_okfile(path, registry=registry), config,
+                            orig_stem=path.stem, custom=custom)
+
+
+def _tokens_from_okf(okf: OkFile, config: Config, orig_stem: str, custom: dict) -> dict:
+    """Resolve rename-token values from an ALREADY-PARSED file.
+
+    Split out of :func:`_file_tokens` so volume generation can name a file it
+    holds in memory — the values must come from the generated record, not from
+    whatever is on disk (nothing is on disk yet).
+    """
     layout = okf.layout.name
     toks: dict = {}
     for _secname, recs in okf.sections().items():   # header section comes first
@@ -1375,7 +1386,7 @@ def _file_tokens(path: Path, registry, config, custom: dict) -> dict:
     kf = config.unique_field(layout)
     toks["key"] = toks.get(kf, "") if kf else ""
     toks["region"] = config.region(toks.get("zone", ""))
-    toks["orig"] = path.stem
+    toks["orig"] = orig_stem
     # Derived (computed) fields — e.g. EUCartonLabel's `format` — aren't in the
     # raw record; resolve them from the driving fields already in ``toks``.
     for spec in config.derived_fields(layout):
@@ -1587,3 +1598,270 @@ def rename_file(src, dst) -> dict:
     d.parent.mkdir(parents=True, exist_ok=True)
     s.rename(d)
     return {"renamed": str(s), "to": str(d)}
+
+
+# --------------------------------------------------------------------------- #
+# Volume generation — many files from one template
+# --------------------------------------------------------------------------- #
+GENERATE_MAX = 5000        # hard ceiling; the UI offers 100/200/500/1000
+
+
+def generate_scope(path, registry: LayoutRegistry, config: Config) -> dict:
+    """What can be varied when generating volume files from ONE template.
+
+    Returns the template's layout/key plus the randomizable fields — header and
+    per detail section — and the rename-token palette used to name the output.
+    Locked fields (a layout's detection signature, hidden markers) and the key
+    field are excluded: the key is always assigned uniquely, and a randomized
+    signature byte would make every generated file undetectable.
+    """
+    sp = Path(path)
+    view = parse_file_view(sp, registry, config)
+    layout_name = view["layout"]
+    layout = registry.get(layout_name)
+    key_field = config.unique_field(layout_name)
+    locked = config.readonly_fields(layout_name) | config.hidden_fields(layout_name)
+
+    def numeric_fields(fields):
+        """Only fixed-width fields we can safely fill with a zero-padded number."""
+        return [{"name": f["name"], "size": f["size"]} for f in fields
+                if f.get("size") and not f.get("derived")
+                and f["name"] not in locked and f["name"] != key_field]
+
+    sections = []
+    for sec in view["sections"]:
+        if sec["is_header"]:
+            continue
+        sections.append({
+            "name": sec["name"],
+            "rows": len(sec["records"]),
+            "max_records": sec["max_records"],
+            "fields": numeric_fields(sec["fields"]),
+        })
+
+    return {
+        "path": str(sp),
+        "name": sp.name,
+        "layout": layout_name,
+        "key_field": key_field,
+        "key_size": getattr(_header_field(layout, key_field), "size", None),
+        "header_fields": numeric_fields(view["sections"][0]["fields"]),
+        "sections": sections,
+        "palette": rename_scope([str(sp)], registry, config)["palette"],
+        "max_count": GENERATE_MAX,
+        "default_folder": str(_generate_folder(sp, 0, dry=True)),
+    }
+
+
+def _generate_folder(template: Path, count: int, dest=None, dry=False) -> Path:
+    """Destination folder for a batch: an auto-named subfolder beside the
+    template, e.g. ``generated_StyleHeader_1000``. Suffixed if it exists."""
+    if dest:
+        return Path(dest)
+    base = template.parent / f"generated_{template.stem}_{count}"
+    if dry:
+        return base
+    out, n = base, 2
+    while out.exists():
+        out = base.with_name(f"{base.name}_{n}")
+        n += 1
+    return out
+
+
+def _rand_padded(size: int, lo, hi) -> str:
+    """A random number as a zero-padded string that fits ``size`` characters."""
+    ceiling = 10 ** size - 1
+    low = 0 if lo in (None, "") else max(0, int(lo))
+    high = ceiling if hi in (None, "") else min(ceiling, int(hi))
+    if low > high:
+        raise EditError(f"min {low} is greater than max {high}")
+    return str(random.randint(low, high)).zfill(size)
+
+
+def _field_in_section(layout, section_name: str, field_name: str):
+    sec = next((s for s in layout.sections if s.name == section_name), None)
+    if sec is None:
+        return None
+    return next((f for f in sec.fields if f.name == field_name), None)
+
+
+def _set_row_count(okf: OkFile, config: Config, section_name: str, target: int) -> None:
+    """Grow or shrink a section to ``target`` rows, respecting max_records."""
+    sec = next((s for s in okf.layout.sections if s.name == section_name), None)
+    if sec is None:
+        return
+    limit = config.max_records(okf.layout.name, section_name)
+    if limit is not None:
+        target = min(target, limit)
+    rows = [r for r in okf.records if r.section is sec]
+
+    while len(rows) > target:                     # shrink from the end
+        okf.records.remove(rows.pop())
+    if len(rows) < target:
+        if rows:
+            template, at = rows[-1], okf.records.index(rows[-1]) + 1
+        else:
+            template = _seed_record(okf, sec)
+            if template is None:
+                return                            # nothing to seed from — leave empty
+            at = _insert_in_section_order(okf, template, sec) + 1
+            rows.append(template)
+        while len(rows) < target:
+            clone = new_record(template.raw.rstrip("\r"), sec, okf.layout,
+                               offset=template.offset, index=template.index)
+            okf.records.insert(at, clone)
+            rows.append(clone)
+            at += 1
+    _normalize_eols(okf)
+    _reindex(okf)
+
+
+def _generate_one(okf: OkFile, spec: dict, config: Config,
+                  key_field: str, key_size: int, key_int: int) -> None:
+    """Apply one generated file's variations to a freshly parsed template."""
+    # 1. row counts first — new rows then get their own random values
+    for rc in spec.get("row_counts") or []:
+        lo, hi = rc.get("min"), rc.get("max")
+        lo = 1 if lo in (None, "") else max(0, int(lo))
+        hi = lo if hi in (None, "") else int(hi)
+        if lo > hi:
+            raise EditError(f"row count min {lo} is greater than max {hi}")
+        _set_row_count(okf, config, rc["section"], random.randint(lo, hi))
+
+    header = okf.records[0] if okf.records else None
+
+    # 2. the unique key — always, so no two generated files collide
+    if header is not None and key_field and key_size:
+        value = str(key_int).zfill(key_size)
+        if len(value) > key_size:
+            raise EditError(f"key {key_int} overflows {key_field} width {key_size}")
+        header.set(key_field, value)
+
+    # 3. user-chosen header fields
+    for hf in spec.get("header_fields") or []:
+        f = _header_field(okf.layout, hf["name"])
+        if f is None or not f.size or header is None:
+            continue
+        header.set(hf["name"], _rand_padded(f.size, hf.get("min"), hf.get("max")))
+
+    # 4. user-chosen detail fields — a fresh value per ROW, not per file
+    for df in spec.get("detail_fields") or []:
+        f = _field_in_section(okf.layout, df["section"], df["name"])
+        if f is None or not f.size:
+            continue
+        sec = next(s for s in okf.layout.sections if s.name == df["section"])
+        for r in (r for r in okf.records if r.section is sec):
+            r.set(df["name"], _rand_padded(f.size, df.get("min"), df.get("max")))
+
+
+def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=None,
+                    write: bool = False):
+    """Build ``count`` generated files. Yields (filename, okf, notes) per file.
+
+    Shared by preview (write=False, small count) and apply, so what you preview
+    is exactly what gets written.
+    """
+    sp = Path(path)
+    template = parse_okfile(sp, registry=registry)
+    layout_name = template.layout.name
+    key_field = config.unique_field(layout_name)
+    key_f = _header_field(template.layout, key_field)
+    key_size = getattr(key_f, "size", None)
+
+    # Start keys above anything already used near the template — the source
+    # folder AND its immediate subfolders, because earlier batches live in
+    # generated_* subfolders. Without this a second batch restarts at the same
+    # key as the first and every file collides.
+    maxv: Dict[str, int] = {}
+    scan = [sp.parent] + [d for d in sp.parent.iterdir() if d.is_dir()]
+    if dest_folder:
+        scan.append(Path(dest_folder))
+    for folder in scan:
+        if not folder.is_dir():
+            continue
+        _u, m = _folder_key_state(folder, registry, config, set())
+        for lay, hi in m.items():
+            maxv[lay] = max(maxv.get(lay, -1), hi)
+    next_key = _next_key_int(maxv, layout_name)
+
+    parts = spec.get("name_parts") or [{"type": "token", "name": "orig"},
+                                       {"type": "token", "name": "seq"}]
+    separator = spec.get("separator", "_")
+    label_names = {"brand", "format_label"} | config.all_derived_names()
+    seen_names: set = set()
+
+    for i in range(count):
+        okf = parse_okfile(sp, layout=template.layout, registry=registry)
+        _generate_one(okf, spec, config, key_field, key_size, next_key + i)
+        _assert_layout_stable(okf)          # a random value must never break detection
+
+        toks = _tokens_from_okf(okf, config, orig_stem=sp.stem, custom={})
+        stem = _build_name(parts, toks, separator, i + 1, label_names=label_names) or sp.stem
+        name = f"{stem}.OK"
+        if name.lower() in seen_names:      # names need not be unique — keys are
+            name = f"{stem}_{i + 1}.OK"
+        seen_names.add(name.lower())
+
+        if write:
+            okf.save(Path(dest_folder) / name)
+        yield name, okf, {"key": str(next_key + i).zfill(key_size) if key_size else ""}
+
+
+def generate_preview(path, spec, registry: LayoutRegistry, config: Config,
+                     sample: int = 5) -> dict:
+    """Build the first few files IN MEMORY so the user can check names/values."""
+    count = int(spec.get("count") or 0)
+    if count < 1:
+        raise EditError("count must be at least 1")
+    if count > GENERATE_MAX:
+        raise EditError(f"count {count} exceeds the {GENERATE_MAX}-file limit")
+
+    sp = Path(path)
+    rows = []
+    for name, okf, note in _generate_batch(sp, spec, registry, config,
+                                           min(sample, count), write=False):
+        header = okf.records[0] if okf.records else None
+        shown = {}
+        for hf in spec.get("header_fields") or []:
+            if header is not None:
+                shown[hf["name"]] = (header.get(hf["name"]) or "").strip()
+        counts = {s.name: sum(1 for r in okf.records if r.section is s)
+                  for s in okf.layout.sections[1:]}
+        rows.append({"name": name, "key": note["key"], "values": shown, "rows": counts})
+
+    return {
+        "count": count,
+        "folder": str(_generate_folder(sp, count, spec.get("dest"), dry=True)),
+        "sample": rows,
+        "truncated": count > len(rows),
+    }
+
+
+def generate_apply(path, spec, registry: LayoutRegistry, config: Config) -> dict:
+    """Write ``count`` generated files into a fresh folder. All-or-nothing on
+    validation: the spec is checked by building the first file before any IO."""
+    count = int(spec.get("count") or 0)
+    if count < 1:
+        raise EditError("count must be at least 1")
+    if count > GENERATE_MAX:
+        raise EditError(f"count {count} exceeds the {GENERATE_MAX}-file limit")
+
+    sp = Path(path)
+    if not sp.is_file():
+        raise FileNotFoundError(f"not found: {sp}")
+    next(_generate_batch(sp, spec, registry, config, 1, write=False))   # validate
+
+    folder = _generate_folder(sp, count, spec.get("dest"))
+    folder.mkdir(parents=True, exist_ok=True)
+
+    written, errors = [], []
+    for name, _okf, note in _generate_batch(sp, spec, registry, config, count,
+                                            dest_folder=folder, write=True):
+        written.append({"name": name, "key": note["key"]})
+    return {
+        "folder": str(folder),
+        "written": len(written),
+        "files": written[:50],          # a sample for the results table
+        "errors": errors,
+        "template": sp.name,
+    }

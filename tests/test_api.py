@@ -1354,3 +1354,143 @@ def test_derived_field_survives_staged_preview_and_is_never_written(tmp_path, re
     saved = service.parse_file_view(other, registry, config)
     assert saved["sections"][0]["records"][0]["values"]["distribution_type"].strip() == "AD"
     assert fmt_of(saved) == "2 - AD Carton Label"            # recomputed on reload
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_staged_add_then_edit_new_row_every_layout(tmp_path, registry, config, sample):
+    """Regression: editing a row added in the SAME staged batch must not corrupt it.
+
+    Delimited records locate fields by walking delimiters (``field_spans``),
+    which is built during parsing. A cloned row built without it fell back to
+    the fixed-width formula and wrote over the record-type marker, orphaning the
+    row into "(unassigned)". The pre-staging code hid this because every row op
+    saved to disk first, so the following edit re-parsed. Staged ops replay
+    add-then-edit entirely in memory, so clones must carry real spans
+    (``okfile.new_record``).
+    """
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+
+    before = service.parse_file_view(work, registry, config)
+    sec = next(s for s in before["sections"]
+               if not s["is_header"] and s["records"]
+               and (s["max_records"] is None or len(s["records"]) < s["max_records"]))
+    anchor = sec["records"][0]["index"]
+    field = next(f["name"] for f in sec["fields"] if f.get("size") and not f.get("hidden"))
+
+    service.apply_edits(work, [], registry, config=config, backup=False, ops=[
+        {"type": "add", "after_index": anchor},
+        {"type": "edit", "edits": [{"section_index": sec["index"],
+                                    "record_index": anchor + 1,
+                                    "field": field, "value": "7"}]},
+    ])
+
+    after = service.parse_file_view(work, registry, config)
+    names = {s["name"] for s in after["sections"]}
+    assert "(unassigned)" not in names, "the added row lost its marker and was orphaned"
+    assert [s["name"] for s in after["sections"]] == [s["name"] for s in before["sections"]]
+    grown = next(s for s in after["sections"] if s["name"] == sec["name"])
+    assert len(grown["records"]) == len(sec["records"]) + 1
+    assert after["roundtrip_ok"]
+    # the edit landed in the right field of the right row
+    assert grown["records"][1]["values"][field].strip().lstrip("0") == "7"
+
+
+# --------------------------------------------------------------------------- #
+# Volume generation
+# --------------------------------------------------------------------------- #
+def _gen_spec(scope, count, with_rows=True):
+    sec = next((s for s in scope["sections"] if s["fields"]), None)
+    spec = {
+        "count": count,
+        "header_fields": ([{"name": scope["header_fields"][0]["name"], "min": 1, "max": 99}]
+                          if scope["header_fields"] else []),
+        "name_parts": [{"type": "token", "name": "layout"},
+                       {"type": "token", "name": "key"},
+                       {"type": "token", "name": "seq"}],
+        "separator": "_",
+    }
+    if sec:
+        spec["detail_fields"] = [{"section": sec["name"], "name": sec["fields"][0]["name"],
+                                  "min": 1, "max": 50}]
+        if with_rows:
+            spec["row_counts"] = [{"section": sec["name"], "min": 1, "max": 4}]
+    return spec
+
+
+def test_generate_scope_excludes_key_and_locked_fields(registry, config):
+    scope = service.generate_scope(DATA_DIR / "StyleHeader.OK", registry, config)
+    names = [f["name"] for f in scope["header_fields"]]
+    assert scope["key_field"] == "keytrol"
+    assert "keytrol" not in names          # the key is assigned, never randomized
+    assert "indicator" not in names        # detection signature stays locked
+    assert scope["max_count"] == service.GENERATE_MAX
+
+
+def test_generate_preview_writes_nothing(tmp_path, registry, config):
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    before = set(tmp_path.iterdir())
+    scope = service.generate_scope(work, registry, config)
+
+    pv = service.generate_preview(work, _gen_spec(scope, 50), registry, config)
+    assert pv["count"] == 50 and pv["truncated"]
+    assert len(pv["sample"]) == 5
+    assert set(tmp_path.iterdir()) == before          # nothing created
+    assert not Path(pv["folder"]).exists()
+    assert len({r["key"] for r in pv["sample"]}) == 5  # keys already unique in preview
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_generate_volume_every_layout(tmp_path, registry, config, sample):
+    """Generate a batch from each layout: unique keys, right layout, varied rows."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    template_bytes = work.read_bytes()
+    scope = service.generate_scope(work, registry, config)
+
+    res = service.generate_apply(work, _gen_spec(scope, 12), registry, config)
+    folder = Path(res["folder"])
+    files = sorted(folder.glob("*.OK"))
+
+    assert res["written"] == 12 and len(files) == 12
+    assert work.read_bytes() == template_bytes          # template untouched
+    keys = set()
+    for f in files:
+        view = service.parse_file_view(f, registry, config)
+        assert view["layout"] == scope["layout"]        # still detects correctly
+        assert view["roundtrip_ok"]
+        keys.add(view["sections"][0]["records"][0]["values"][scope["key_field"]])
+    assert len(keys) == 12, "generated files must all have distinct keys"
+
+
+def test_generate_second_batch_does_not_reuse_keys(tmp_path, registry, config):
+    """A later batch must start above the keys of an earlier one."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    scope = service.generate_scope(work, registry, config)
+
+    def keys_of(res):
+        return {service.parse_file_view(f, registry, config)
+                ["sections"][0]["records"][0]["values"]["keytrol"]
+                for f in Path(res["folder"]).glob("*.OK")}
+
+    first = keys_of(service.generate_apply(work, _gen_spec(scope, 8), registry, config))
+    second = keys_of(service.generate_apply(work, _gen_spec(scope, 8), registry, config))
+    assert len(first) == 8 and len(second) == 8
+    assert not (first & second), "second batch reused keys from the first"
+
+
+def test_generate_rejects_bad_counts(tmp_path, registry, config):
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    scope = service.generate_scope(work, registry, config)
+    with pytest.raises(service.EditError):
+        service.generate_apply(work, _gen_spec(scope, 0), registry, config)
+    with pytest.raises(service.EditError):
+        service.generate_apply(work, _gen_spec(scope, service.GENERATE_MAX + 1), registry, config)
+    assert not list(tmp_path.glob("generated_*"))

@@ -282,6 +282,25 @@ def _assign_delimited(raws: List[str], layout: Layout) -> List[Record]:
     return records
 
 
+def new_record(raw: str, section: Optional[Section], layout: Layout,
+               offset: int = 0, index: int = -1, is_header: bool = False) -> Record:
+    """Build a record OUTSIDE of parsing — for a cloned or seeded row.
+
+    Delimited records locate their fields by walking the actual delimiters, and
+    that map (``field_spans``) is normally built during parsing. A ``Record``
+    constructed directly has none, so ``set()`` silently falls back to the
+    fixed-width formula ``offset + start - 1`` and writes at the wrong place —
+    clobbering the record-type marker and orphaning the row. Always build
+    cloned/seeded rows through this helper so their spans match a parsed row's.
+    """
+    rec = Record(raw=raw, offset=offset, section=section, index=index)
+    if section is not None and getattr(layout, "delimited", False):
+        rec.field_spans = _delim_spans(
+            raw, section, layout.delimiter, layout.record_terminator, is_header
+        )
+    return rec
+
+
 def _assign_records(raws: List[str], layout: Layout) -> List[Record]:
     if getattr(layout, "delimited", False):
         return _assign_delimited(raws, layout)
