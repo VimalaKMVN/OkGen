@@ -209,6 +209,10 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
                     "options": opts or None,
                     "hidden": f.name in hidden,
                     "editable": editable,
+                    # Literal fields are shown padded exactly as stored, so the
+                    # user can see and keep their spaces (the editor strips pad
+                    # spaces from ordinary fields for comfortable typing).
+                    "literal": config.is_literal(layout_name, f.name),
                 })
         # Derived (computed) fields: not in the raw file — inject their meta
         # (read-only, carrying the rules so the client can recompute live) and
@@ -420,7 +424,9 @@ def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
     if errors:
         raise EditError(str(errors))
     for e in edits:
-        by_index[e["record_index"]].set(e["field"], e["value"])
+        rec = by_index[e["record_index"]]
+        literal = config is not None and config.is_literal(okf.layout.name, e["field"])
+        rec.set(e["field"], e["value"], literal=literal)
 
 
 # --------------------------------------------------------------------------- #
@@ -1223,9 +1229,10 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
                 return {"name": name, "status": "too_wide", "detail": f"value too long for {field}"}
             changed = 0
             first_old = recs[0].get(field) if recs else None
+            literal = config is not None and config.is_literal(layout_name, field)
             for r in recs:
                 cur = r.get(field)
-                r.set(field, value)
+                r.set(field, value, literal=literal)
                 if r.get(field) != cur:
                     changed += 1
             if changed == 0:
@@ -1247,8 +1254,9 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
                 return {"name": name, "status": "too_wide",
                         "detail": f"value(s) too long for {field} ({size}): "
                                   + ", ".join(repr(v) for v in too_wide[:3])}
+            literal = config is not None and config.is_literal(layout_name, field)
             for r in recs:
-                r.set(field, random.choice(values))
+                r.set(field, random.choice(values), literal=literal)
             return {"name": name, "status": "change",
                     "detail": f"{field} from {len(values)} allowed value(s) "
                               f"on {before} row(s)", "okf": okf}
@@ -1362,7 +1370,8 @@ def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> 
     return {"results": results}
 
 
-def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry):
+def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry,
+               config: Config = None):
     """Evaluate the header-field set for one file (no write). Returns a result
     dict; on a real change it also carries the in-memory OkFile under 'okf'."""
     name = sp.name
@@ -1382,7 +1391,8 @@ def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry):
     current = header.get(field)
     if f.size is not None and len(value) > f.size:
         return {"name": name, "status": "too_wide", "current": current, "new": value}
-    header.set(field, value)
+    header.set(field, value,
+               literal=config is not None and config.is_literal(okf.layout.name, field))
     new = header.get(field)
     if new == current:
         return {"name": name, "status": "unchanged", "current": current, "new": new}
@@ -1401,7 +1411,7 @@ def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry):
 def bulk_preview(paths, layout_name, field, value, registry, config) -> dict:
     results = []
     for p in paths or []:
-        r = _bulk_eval(Path(p), layout_name, field, value, registry)
+        r = _bulk_eval(Path(p), layout_name, field, value, registry, config)
         r.pop("okf", None)
         r["path"] = str(p)
         results.append(r)
@@ -1412,7 +1422,7 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
     results = []
     for p in paths or []:
         sp = Path(p)
-        r = _bulk_eval(sp, layout_name, field, value, registry)
+        r = _bulk_eval(sp, layout_name, field, value, registry, config)
         okf = r.pop("okf", None)
         r["path"] = str(p)
         if r["status"] == "change" and okf is not None:
@@ -1868,7 +1878,8 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         f = _header_field(okf.layout, hf["name"])
         if f is None or not f.size or header is None:
             continue
-        header.set(hf["name"], _spec_value(hf, f.size, hf["name"]))
+        header.set(hf["name"], _spec_value(hf, f.size, hf["name"]),
+                   literal=config is not None and config.is_literal(okf.layout.name, hf["name"]))
 
     # 4. user-chosen detail fields — a fresh value per ROW, not per file
     for df in spec.get("detail_fields") or []:
@@ -1877,7 +1888,8 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
             continue
         sec = next(s for s in okf.layout.sections if s.name == df["section"])
         for r in (r for r in okf.records if r.section is sec):
-            r.set(df["name"], _spec_value(df, f.size, df["name"]))
+            r.set(df["name"], _spec_value(df, f.size, df["name"]),
+                  literal=config is not None and config.is_literal(okf.layout.name, df["name"]))
 
 
 def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=None,

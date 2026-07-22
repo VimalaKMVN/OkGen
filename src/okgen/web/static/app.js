@@ -2,7 +2,7 @@
 
 // Build marker — shown in the Generate panel header so a cached copy of this
 // file is obvious at a glance ("build" in the UI vs the tag you deployed).
-const OKGEN_BUILD = "v0.26.0";
+const OKGEN_BUILD = "v0.27.0";
 
 // Nothing in this app should fail silently: surface JS errors and rejected
 // promises in the status bar, otherwise a thrown error inside a click handler
@@ -1210,8 +1210,25 @@ function makeControl(sec, rec, field) {
     // spaces for editing; the server re-pads to the field width on save
     // (okfile._fit), and untouched fields are never re-sent, so the file still
     // round-trips byte-for-byte.
-    orig = value.replace(/^ +| +$/g, "");
-    ctrl.value = orig;
+    //
+    // EXCEPT literal fields (messages, facts, descriptions…), where the spaces
+    // are the user's data: those are shown exactly as stored so what you see is
+    // what gets saved. To keep them comfortable to type in, the cursor is
+    // placed after the last non-space character on focus.
+    if (field.literal) {
+      orig = value;
+      ctrl.value = orig;
+      ctrl.classList.add("fval-literal");
+      ctrl.title = "Saved exactly as typed — leading, middle and trailing "
+                 + "spaces are kept, and nothing is zero-padded.";
+      ctrl.addEventListener("focus", () => {
+        const end = ctrl.value.replace(/ +$/, "").length;
+        try { ctrl.setSelectionRange(end, end); } catch (_) {}
+      });
+    } else {
+      orig = value.replace(/^ +| +$/g, "");
+      ctrl.value = orig;
+    }
     if (field.size != null) ctrl.maxLength = field.size;
   }
   ctrl.dataset.section = sec.index;

@@ -26,3 +26,60 @@ readonly:
   EUPreticket: [indicator]
   EUStyleHeader: [process]
   EUCartonLabel: [process]
+
+# Fields stored EXACTLY as the user typed them: never zero-padded, never
+# re-justified, leading/middle/trailing spaces preserved. Only the leftover
+# space at the END is filled (with spaces) — the record must keep its exact
+# length or every field after it shifts. The field width is still enforced:
+# a value longer than the field is rejected, not truncated.
+#
+# Why this list: these are free-text fields (messages, facts, descriptions,
+# sizes, weights, areas). OkGen otherwise GUESSES the padding style from the
+# layout's sample value, which misreads a sample like '01        ' as a
+# zero-padded number — typing 'AB' into EUPreticket message1 stored
+# '00000000AB'. Codes stay out of this list: `dept` remains zero-padded, so 7
+# is still stored as 07.
+#
+#   "*" applies to every layout; add a layout name for a narrower rule.
+literal:
+  "*":
+    - message1
+    - message2
+    - fact1
+    - fact2
+    - fact3
+    - item
+    - universal_item
+    - description
+    - area
+    - size
+    - size_code
+    - size_1
+    - size_2
+    - size_3
+    - size_4
+    - size_5
+    - size_6
+    - size_7
+    - size_8
+    - size_9
+    - size_10
+    - phys_size_1
+    - phys_size_2
+    - phys_size_3
+    - phys_size_4
+    - phys_size_5
+    - phys_size_6
+    - phys_size_7
+    - phys_size_8
+    - phys_size_9
+    - phys_size_10
+    - upp_weight
+    - header_asn_id
+    # Not present in any current layout, listed so they behave correctly the
+    # day they appear (Calgary JSON or a spec revision):
+    - total_weight
+    - vendor_style
+    - fiber
+    - approx_size
+    - country

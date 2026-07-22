@@ -571,3 +571,6 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .gen-build { opacity: 0.5; font-size: 11px; }
 .gen-field input.gen-list { width: 120px; }
 .bulk-list { font-family: ui-monospace, Menlo, Consolas, monospace; }
+/* Literal fields show their padding, so a monospace face makes the spaces
+   (and the field width) readable. */
+.fval-literal { font-family: ui-monospace, Menlo, Consolas, monospace; }

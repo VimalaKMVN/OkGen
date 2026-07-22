@@ -85,8 +85,17 @@ class Record:
             out[f.name] = self.raw[span[0]:span[1]] if span else None
         return out
 
-    def set(self, name: str, value: str) -> None:
-        """Overwrite a field's span, fitting ``value`` to the field width."""
+    def set(self, name: str, value: str, literal: bool = False) -> None:
+        """Overwrite a field's span, fitting ``value`` to the field width.
+
+        ``literal`` writes the value EXACTLY as given — no zero-padding and no
+        re-justifying — filling only the leftover space at the end. Free-text
+        fields (messages, descriptions, facts) need this: their leading, middle
+        and trailing spaces are meaningful, and the sample-based justification
+        guess can misread a value like '01        ' as a zero-padded number.
+        The field width is still enforced either way; a record must keep its
+        exact length or every field after it shifts.
+        """
         f = self._field(name)
         span = self._span(f)
         if span is None:
@@ -96,9 +105,17 @@ class Record:
             raise ValueError(
                 f"field {name!r} span {start}:{end} exceeds record length {len(self.raw)}"
             )
-        # Pad to the span's own width so a delimited token keeps its exact
-        # width (and the surrounding delimiters/terminator stay in place).
-        self.raw = self.raw[:start] + _fit(value, f, end - start) + self.raw[end:]
+        width = end - start
+        if literal:
+            if len(value) > width:
+                raise ValueError(
+                    f"value {value!r} too long for field {f.name!r} (size {width})")
+            fitted = value.ljust(width)     # keep their characters, fill the rest
+        else:
+            # Pad to the span's own width so a delimited token keeps its exact
+            # width (and the surrounding delimiters/terminator stay in place).
+            fitted = _fit(value, f, width)
+        self.raw = self.raw[:start] + fitted + self.raw[end:]
 
 
 def _fit(value: str, f: Field, width: Optional[int] = None) -> str:

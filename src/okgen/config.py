@@ -111,6 +111,7 @@ class Config:
         regions: Optional[Dict[str, str]] = None,
         hidden_fields: Optional[Dict[str, set]] = None,
         readonly_fields: Optional[Dict[str, set]] = None,
+        literal_fields: Optional[Dict[str, set]] = None,
         derived_fields: Optional[Dict[str, list]] = None,
         isolated_chain_groups: Optional[List[set]] = None,
     ):
@@ -132,6 +133,7 @@ class Config:
         # {layout: {field_name, ...}} for editor hide / read-only display.
         self._hidden_fields = hidden_fields or {}
         self._readonly_fields = readonly_fields or {}
+        self._literal_fields = literal_fields or {}
         # {layout: [spec, ...]} computed fields not present in the raw file.
         self._derived_fields = derived_fields or {}
         # Groups of chains isolated for editing — you cannot change a chain
@@ -284,6 +286,20 @@ class Config:
         """Field names shown but not editable for this layout."""
         return set(self._readonly_fields.get(layout, set())) if layout else set()
 
+    def literal_fields(self, layout: Optional[str]) -> set:
+        """Fields stored EXACTLY as typed — never zero-padded or re-justified.
+
+        The ``"*"`` key applies to every layout; a layout-specific list adds to
+        it, so a free-text field keeps the same behaviour wherever it appears.
+        """
+        names = set(self._literal_fields.get("*", set()))
+        if layout:
+            names |= set(self._literal_fields.get(layout, set()))
+        return names
+
+    def is_literal(self, layout: Optional[str], field: Optional[str]) -> bool:
+        return bool(field) and field in self.literal_fields(layout)
+
     # ----- derived (computed) fields -----
     def derived_fields(self, layout: Optional[str]) -> list:
         """Derived-field specs for this layout (list of dicts), or []."""
@@ -427,6 +443,7 @@ class Config:
 
         hidden_fields: Dict[str, set] = {}
         readonly_fields: Dict[str, set] = {}
+        literal_fields: Dict[str, set] = {}
         fd_path = cdir / "field_display.yaml"
         if fd_path.is_file():
             data = yaml.safe_load(fd_path.read_text(encoding="utf-8")) or {}
@@ -437,6 +454,10 @@ class Config:
             readonly_fields = {
                 str(l): {str(f) for f in (fs or [])}
                 for l, fs in (data.get("readonly") or {}).items()
+            }
+            literal_fields = {
+                str(l): {str(f) for f in (fs or [])}
+                for l, fs in (data.get("literal") or {}).items()
             }
 
         derived_fields: Dict[str, list] = {}
@@ -468,5 +489,5 @@ class Config:
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
                    nicelabel_warning, send_quips, send_done_quips, regions,
-                   hidden_fields, readonly_fields, derived_fields,
+                   hidden_fields, readonly_fields, literal_fields, derived_fields,
                    isolated_chain_groups)

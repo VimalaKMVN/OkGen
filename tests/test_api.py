@@ -1992,3 +1992,143 @@ def test_generate_rejects_too_wide_listed_value(tmp_path, registry, config):
             "name_parts": [{"type": "token", "name": "orig"}],
             "separator": "_"}, registry, config)
     assert not list(tmp_path.glob("generated_*"))
+
+
+# --------------------------------------------------------------------------- #
+# Literal fields — stored exactly as typed
+# --------------------------------------------------------------------------- #
+LITERAL_CASES = [
+    # sample, section, field, typed value
+    ("StyleHeader.OK", "Header", "message1", " HI "),
+    ("StyleHeader.OK", "Header", "message2", "A  B"),
+    ("StyleHeader.OK", "Header", "fact1", "  indented"),
+    ("StyleHeader.OK", "Header", "item", "RED SHIRT"),
+    ("StyleHeader.OK", "Header", "area", "AB"),
+    ("Preticket.OK", "Lane", "message1", " X "),
+    ("Preticket.OK", "Lane", "item", "TRAILING  "),
+    ("EUPreticket.OK", "Lane", "message1", "AB"),
+    ("EUPreticket.OK", "Lane", "message2", " C "),
+    ("EUStyleHeader.OK", "Header", "description", " Gucci pumps "),
+    ("EUStyleHeader.OK", "Header", "upp_weight", "12.5"),
+    ("EUCartonLabel.OK", "Header", "description", "  spaced  "),
+]
+
+
+@pytest.mark.parametrize("sample,section,field,typed", LITERAL_CASES)
+def test_literal_field_stored_exactly_as_typed(tmp_path, registry, config,
+                                               sample, section, field, typed):
+    """No zero-padding, no re-justifying: the value keeps its own spaces and
+    only the leftover at the END is filled."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+
+    view = service.parse_file_view(work, registry, config)
+    sec = next(s for s in view["sections"] if s["name"] == section)
+    meta = next(f for f in sec["fields"] if f["name"] == field)
+    assert meta["literal"] is True, f"{field} should be configured literal"
+
+    service.apply_edits(work, [{"section_index": sec["index"],
+                                "record_index": sec["records"][0]["index"],
+                                "field": field, "value": typed}],
+                        registry, config=config, backup=False)
+
+    after = service.parse_file_view(work, registry, config)
+    stored = next(s for s in after["sections"]
+                  if s["name"] == section)["records"][0]["values"][field]
+    assert stored == typed.ljust(meta["size"]), f"{stored!r} != {typed.ljust(meta['size'])!r}"
+    assert stored.startswith(typed)          # their characters, untouched, in place
+    assert "0" not in stored[len(typed):]    # the fill is spaces, never zeros
+    assert after["roundtrip_ok"]
+    assert len(stored) == meta["size"]       # record length unchanged
+
+
+def test_literal_fix_for_eupreticket_message1(tmp_path, registry, config):
+    """Regression: this field's sample is '01        ', which made OkGen guess
+    "zero-padded number" and store 'AB' as '00000000AB'."""
+    work = tmp_path / "EUPreticket.OK"
+    shutil.copy2(DATA_DIR / "EUPreticket.OK", work)
+    view = service.parse_file_view(work, registry, config)
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+
+    service.apply_edits(work, [{"section_index": lane["index"],
+                                "record_index": lane["records"][0]["index"],
+                                "field": "message1", "value": "AB"}],
+                        registry, config=config, backup=False)
+
+    stored = service.parse_file_view(work, registry, config)
+    got = next(s for s in stored["sections"]
+               if s["name"] == "Lane")["records"][0]["values"]["message1"]
+    assert got == "AB        ", got
+    assert not got.startswith("0")
+
+
+def test_code_fields_still_zero_pad(tmp_path, registry, config):
+    """dept is a code, deliberately NOT literal: 7 must still store as 07."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    assert config.is_literal("StyleHeader", "dept") is False
+
+    service.apply_edits(work, [{"section_index": 0, "record_index": 0,
+                                "field": "dept", "value": "7"}],
+                        registry, config=config, backup=False)
+    view = service.parse_file_view(work, registry, config)
+    assert view["sections"][0]["records"][0]["values"]["dept"] == "07"
+
+
+@pytest.mark.parametrize("sample,section,field", [(a, b, c) for a, b, c, _ in LITERAL_CASES])
+def test_literal_field_still_enforces_width(tmp_path, registry, config, sample, section, field):
+    """Too-long values are rejected, never truncated — a short record corrupts
+    every field after it."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    original = work.read_bytes()
+    view = service.parse_file_view(work, registry, config)
+    sec = next(s for s in view["sections"] if s["name"] == section)
+    size = next(f["size"] for f in sec["fields"] if f["name"] == field)
+
+    with pytest.raises(service.EditError):
+        service.apply_edits(work, [{"section_index": sec["index"],
+                                    "record_index": sec["records"][0]["index"],
+                                    "field": field, "value": "X" * (size + 1)}],
+                            registry, config=config, backup=False)
+    assert work.read_bytes() == original
+
+
+def test_literal_applies_to_bulk_and_generation(tmp_path, registry, config):
+    """The rule holds wherever a value is written, not just single-file edits."""
+    # bulk set
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    res = service._bulk_op_eval(work, "StyleHeader", "Header",
+                                {"type": "set", "field": "message1", "value": " HI "},
+                                registry, config)
+    assert res["status"] == "change"
+    res["okf"].save(work)
+    got = service.parse_file_view(work, registry, config)
+    assert got["sections"][0]["records"][0]["values"]["message1"] == " HI      "[:10].ljust(10)
+
+    # bulk "random from my list" — note the list itself is comma-separated, so
+    # entries are trimmed ('10, 20' must parse as two values). The chosen value
+    # is then written literally (left-aligned, space-filled, never zero-padded).
+    res2 = service._bulk_op_eval(work, "StyleHeader", "Header",
+                                 {"type": "list", "field": "message2", "values": [" A ", "B"]},
+                                 registry, config)
+    assert res2["status"] == "change"
+    res2["okf"].save(work)
+    v2 = service.parse_file_view(work, registry, config)
+    assert v2["sections"][0]["records"][0]["values"]["message2"] in ("A         ", "B         ")
+
+    # volume generation
+    gen = service.generate_apply(work, {
+        "count": 5,
+        "header_fields": [{"name": "message1", "values": "X,Y"}],
+        "name_parts": [{"type": "token", "name": "orig"}, {"type": "token", "name": "seq"}],
+        "separator": "_"}, registry, config)
+    for f in Path(gen["folder"]).glob("*.OK"):
+        val = service.parse_file_view(f, registry, config)["sections"][0]["records"][0]["values"]["message1"]
+        # literal: left-aligned and space-filled, never zero-padded
+        assert val in ("X         ", "Y         "), val
