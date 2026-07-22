@@ -1308,8 +1308,11 @@ function onEdit(e) {
 
 function updateSaveButtons() {
   const dirty = dirtyCount();   // field edits + staged row ops
+  // Both buttons gate identically, so they light up together the moment you
+  // change anything. Save As used to be enabled whenever a file was open, which
+  // read as "greyed out but somehow clickable" and confused users.
   $("#saveBtn").disabled = !state.file || dirty === 0;
-  $("#saveAsBtn").disabled = !state.file;
+  $("#saveAsBtn").disabled = !state.file || dirty === 0;
   updateDirtyIndicator();
   updateRawBanner();
   if (dirty) setStatus(`${dirty} unsaved edit(s)`, "dirty");
