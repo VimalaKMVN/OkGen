@@ -138,6 +138,7 @@ function emptyLi() { return el("li", "tree-empty", "(no .OK files)"); }
 async function openFolder(dir) {
   if (!dir) return;
   if (!confirmDiscardIfDirty()) return;
+  closeAllPanels();      // a new folder always starts from a clean editor
 
   const token = ++state.treeToken;
   if (state.treeAbort) state.treeAbort.abort();   // cancel any in-flight load
@@ -226,7 +227,9 @@ function renderFileNode(node) {
 
 // ---- multi-select ----
 function onFileClick(e, node, row) {
-  if (isRenameOpen()) exitRenameMode();    // clicking into the tree closes Bulk Rename
+  // Cmd/Ctrl- and Shift-click only ADJUST the selection — the user is still
+  // working in the bulk panel, so leave it open. A plain click opens a file
+  // (loadFile closes the panels).
   if (e.metaKey || e.ctrlKey) {            // toggle this file in the selection
     e.preventDefault();
     if (state.selection.has(node.path)) state.selection.delete(node.path);
@@ -287,6 +290,7 @@ function isRenameOpen() {
 async function enterBulkMode() {
   if (state.selection.size < 1) return;
   if (!confirmDiscardIfDirty()) return;
+  closeAllPanels("bulk");        // only one bulk mode open at a time
   state.file = null; state.view = null; state.edits = {}; state.ops = [];
   $("#editorTabs").classList.add("hidden");
   $("#editor").classList.add("hidden");
@@ -312,6 +316,12 @@ function exitBulkMode() {
   if (panel.classList.contains("hidden")) return;
   panel.classList.add("hidden");
   panel.innerHTML = "";
+  restoreEditorAfterPanel();
+}
+
+// Put the editor back the way a panel found it: show the open file's editor, or
+// the empty-state when no file is open.
+function restoreEditorAfterPanel() {
   $("#editor").classList.remove("hidden");
   if (state.view) {
     $("#editorTabs").classList.remove("hidden");
@@ -321,6 +331,17 @@ function exitBulkMode() {
     $("#rawView").classList.add("hidden");
     $("#editorEmpty").style.display = "";
   }
+}
+
+// Bulk Edit / Bulk Rename / Generate are full-screen modes that replace the
+// editor — only one may be open, and NONE may survive navigating to a file or
+// folder. Previously each panel closed under its own rules (rename on any tree
+// click, bulk only when the selection emptied, generate never), so a finished
+// bulk screen lingered under the editor.
+function closeAllPanels(keep) {
+  if (keep !== "bulk") exitBulkMode();
+  if (keep !== "rename") exitRenameMode();
+  if (keep !== "generate") exitGenerateMode();
 }
 
 function renderBulkPanel(scope) {
@@ -564,6 +585,7 @@ function renderBulkTable(host, results, applied) {
 async function enterRenameMode() {
   if (!state.selection.size) return;
   if (!confirmDiscardIfDirty()) return;
+  closeAllPanels("rename");      // only one bulk mode open at a time
   state.file = null; state.view = null; state.edits = {}; state.ops = [];
   $("#editorTabs").classList.add("hidden");
   $("#editor").classList.add("hidden");
@@ -587,9 +609,7 @@ function exitRenameMode() {
   const panel = $("#renamePanel");
   if (panel.classList.contains("hidden")) return;
   panel.classList.add("hidden"); panel.innerHTML = "";
-  $("#editor").classList.remove("hidden");
-  if (state.view) { $("#editorTabs").classList.remove("hidden"); $("#editorEmpty").style.display = "none"; }
-  else { $("#editorTabs").classList.add("hidden"); $("#rawView").classList.add("hidden"); $("#editorEmpty").style.display = ""; }
+  restoreEditorAfterPanel();
 }
 
 function jsBuildName(parts, sample, sep) {
@@ -821,8 +841,8 @@ function renderRenameTable(host, results, applied) {
 }
 
 async function toggleFolder(li, node, childUl) {
-  if (isRenameOpen()) exitRenameMode();   // clicking a folder closes Bulk Rename too
-  setSelection([]);   // clicking a folder clears any file multi-selection (and closes bulk)
+  closeAllPanels();   // clicking a folder leaves any bulk mode too
+  setSelection([]);   // clicking a folder clears any file multi-selection
   const willOpen = !li.classList.contains("open");
   li.classList.toggle("open");
   if (!willOpen || li.dataset.loaded) return;   // collapsing, or already loaded
@@ -866,6 +886,9 @@ function updateTreeBadge(path, chainInfo, chain) {
 // ---- editor ----
 async function loadFile(path) {
   try {
+    // Opening a file always leaves bulk mode — otherwise the finished bulk
+    // screen stays parked under the editor.
+    closeAllPanels();
     const view = await getParse(path);
     state.file = path;
     state.view = view;
@@ -1911,23 +1934,23 @@ if (last) { $("#folderPath").value = last; $("#folderPath").title = last; openFo
 // randomized header/detail fields and varying row counts. Names are built from
 // the same token model as Bulk Rename.
 function exitGenerateMode() {
-  const p = $("#generatePanel");
-  p.classList.add("hidden");
-  p.innerHTML = "";
-  $("#editorEmpty").style.display = "";
+  const panel = $("#generatePanel");
+  if (panel.classList.contains("hidden")) return;
+  panel.classList.add("hidden");
+  panel.innerHTML = "";
+  restoreEditorAfterPanel();
 }
 
 async function enterGenerateMode() {
   if (state.selection.size !== 1) return;
   if (!confirmDiscardIfDirty()) return;
   const path = [...state.selection][0];
+  closeAllPanels("generate");    // only one bulk mode open at a time
   state.file = null; state.view = null; state.edits = {}; state.ops = [];
   $("#editorTabs").classList.add("hidden");
   $("#editor").classList.add("hidden");
   $("#rawView").classList.add("hidden");
   $("#editorEmpty").style.display = "none";
-  $("#bulkPanel").classList.add("hidden");
-  $("#renamePanel").classList.add("hidden");
   $("#fileTitle").textContent = "";
   updateSaveButtons();
 
