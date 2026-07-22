@@ -325,6 +325,7 @@ def apply_edits(
     replay_ops(okf, ops, config)
     _apply_edits_to_okf(okf, edits, config)
 
+    _assert_layout_stable(okf)
     out = Path(target_path) if target_path else src
     if backup and out.exists() and target_path is None:
         shutil.copy2(out, out.with_suffix(out.suffix + ".bak"))
@@ -592,8 +593,34 @@ def _op_move(okf: OkFile, record_index, direction) -> None:
     recs[idx], recs[j] = recs[j], recs[idx]
 
 
+def _assert_layout_stable(okf: OkFile) -> None:
+    """Refuse to write a file that would no longer detect as its own layout.
+
+    Some header fields ARE the layout's detection signature (StyleHeader/
+    Preticket ``indicator``, DistLabels ``format``, CartonLabel ``picklist_pre``,
+    EUPreticket ``indicator``, EU GTA ``process``). Changing one makes the saved
+    file unopenable — or worse, silently detect as a *different* layout, so every
+    field then parses at the wrong offset.
+
+    ``config/field_display.yaml`` locks those fields in the editor and in bulk;
+    this is the backstop that holds if that list ever drifts (a new layout, a
+    renamed field), and it covers every write path rather than every UI.
+    """
+    head = okf.to_bytes().split(b"\n", 1)[0].decode(ENCODING).rstrip("\r\n")
+    det = detect_from_header(head)
+    if det.layout == okf.layout.name:
+        return
+    became = f"as {det.layout}" if det.layout else "as no known layout"
+    raise EditError(
+        f"this change would make the file detect {became} instead of "
+        f"{okf.layout.name} — the edited field is part of the layout's "
+        f"detection signature ({det.reason})"
+    )
+
+
 def _backup_and_save(okf, out: Path, backup: bool) -> None:
-    if backup and out.exists():
+    _assert_layout_stable(okf)          # check before the .bak, so a rejected
+    if backup and out.exists():         # write leaves nothing behind at all
         shutil.copy2(out, out.with_suffix(out.suffix + ".bak"))
     okf.save(out)
 
@@ -895,9 +922,10 @@ def _set_key(path: Path, registry, key_field: str, new_int: int, size: int, back
     if len(new_str) > size:
         raise EditError(f"no available key for {path.name} (width {size} overflow)")
     okf = parse_okfile(path, registry=registry)
+    okf.records[0].set(key_field, new_str)
+    _assert_layout_stable(okf)
     if backup and path.exists():
         shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
-    okf.records[0].set(key_field, new_str)
     okf.save(path)
     return new_str
 
@@ -996,14 +1024,19 @@ def _header_fields_for_layout(layout, config: Config) -> List[dict]:
     """Header-section field metadata for a layout, for the bulk-edit dropdowns.
 
     Excludes the layout's unique key field — bulk set-value would make every
-    file's key identical, which violates uniqueness (use Make Unique instead).
+    file's key identical, which violates uniqueness (use Make Unique instead) —
+    plus anything hidden or read-only for this layout, so a field locked in the
+    single-file editor (notably the layout's detection signature) cannot be
+    changed in bulk either. Bulk is where that would hurt most: one apply across
+    a selection would otherwise brick every file in it.
     """
     if not layout.sections:
         return []
     key = config.unique_field(layout.name)
+    locked = config.readonly_fields(layout.name) | config.hidden_fields(layout.name)
     out = []
     for f in layout.sections[0].fields:
-        if f.name == key:
+        if f.name == key or f.name in locked:
             continue
         opts = config.options(f.name, layout=layout.name)
         out.append({
@@ -1043,11 +1076,12 @@ def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
 def _detail_sections_for_layout(layout, config: Config) -> List[dict]:
     """Metadata for each non-header section, for the bulk record/field ops."""
     out = []
+    locked = config.readonly_fields(layout.name) | config.hidden_fields(layout.name)
     for sec in layout.sections[1:]:
         fields = [{
             "name": f.name, "size": f.size, "type": f.field_type,
             "options": config.options(f.name, layout=layout.name) or None,
-        } for f in sec.fields]
+        } for f in sec.fields if f.name not in locked]
         out.append({
             "name": sec.name,
             "fields": fields,
@@ -1220,11 +1254,12 @@ def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> 
         r["path"] = str(p)
         if r["status"] == "change" and okf is not None:
             try:
+                _assert_layout_stable(okf)
                 if backup and sp.exists():
                     shutil.copy2(sp, sp.with_suffix(sp.suffix + ".bak"))
                 okf.save(sp)
                 r["status"] = "changed"
-            except OSError as exc:
+            except (OSError, EditError) as exc:
                 r["status"] = "error"
                 r["error"] = str(exc)
         results.append(r)
@@ -1277,11 +1312,12 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
         r["path"] = str(p)
         if r["status"] == "change" and okf is not None:
             try:
+                _assert_layout_stable(okf)
                 if backup and sp.exists():
                     shutil.copy2(sp, sp.with_suffix(sp.suffix + ".bak"))
                 okf.save(sp)
                 r["status"] = "changed"
-            except OSError as exc:
+            except (OSError, EditError) as exc:
                 r["status"] = "error"
                 r["error"] = str(exc)
         results.append(r)

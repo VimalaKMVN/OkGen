@@ -15,5 +15,14 @@ hidden:
   EUCartonLabel: [marker, detail_marker]
 
 readonly:
+  # Layout DETECTION SIGNATURES — locked in the editor AND in bulk, because
+  # changing one makes the saved file unopenable or silently detect as another
+  # layout. Mirrors config/field_display.yaml; service._assert_layout_stable is
+  # the backstop if this list drifts.
+  StyleHeader: [indicator]
+  Preticket: [indicator]
+  DistLabels: [format]
+  CartonLabel: [picklist_pre]
+  EUPreticket: [indicator]
   EUStyleHeader: [process]
   EUCartonLabel: [process]

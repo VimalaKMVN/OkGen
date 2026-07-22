@@ -92,7 +92,8 @@ def test_bulk_excludes_key_field(registry, config):
     scope = service.bulk_scope([str(DATA_DIR / "StyleHeader.OK")], registry, config)
     names = [f["name"] for f in scope["header_fields"]["StyleHeader"]]
     assert "keytrol" not in names            # key field hidden from bulk set-value
-    assert "indicator" in names
+    assert "indicator" not in names          # detection signature — locked in bulk too
+    assert "dept" in names                   # ordinary fields still offered
 
 
 def test_build_tree_is_one_level_lazy(tmp_path, config):
@@ -211,20 +212,20 @@ def test_bulk_scope_and_preview_and_apply(tmp_path, registry, config):
 
     scope = service.bulk_scope(paths, registry, config)
     assert scope["layouts"] == {"StyleHeader": 2, "CartonLabel": 1}
-    assert any(f["name"] == "indicator" for f in scope["header_fields"]["StyleHeader"])
+    assert any(f["name"] == "dept" for f in scope["header_fields"]["StyleHeader"])
 
-    # Preview setting indicator -> 'Y' on StyleHeader (sample value is 'N').
-    pv = service.bulk_preview(paths, "StyleHeader", "indicator", "Y", registry, config)
+    # Preview setting dept -> '77' on StyleHeader.
+    pv = service.bulk_preview(paths, "StyleHeader", "dept", "77", registry, config)
     by = {r["name"]: r for r in pv["results"]}
-    assert by["a.OK"]["status"] == "change" and by["a.OK"]["new"] == "Y"
+    assert by["a.OK"]["status"] == "change" and by["a.OK"]["new"] == "77"
     assert by["c.OK"]["status"] == "skipped"          # other layout
     assert sh1.read_bytes() == DATA_DIR.joinpath("StyleHeader.OK").read_bytes()  # preview wrote nothing
 
     # Apply.
-    ap = service.bulk_apply(paths, "StyleHeader", "indicator", "Y", registry, config, backup=False)
+    ap = service.bulk_apply(paths, "StyleHeader", "dept", "77", registry, config, backup=False)
     changed = [r for r in ap["results"] if r["status"] == "changed"]
     assert len(changed) == 2
-    assert service.parse_file_view(sh1, registry, config)["sections"][0]["records"][0]["values"]["indicator"] == "Y"
+    assert service.parse_file_view(sh1, registry, config)["sections"][0]["records"][0]["values"]["dept"] == "77"
     assert cl.read_bytes() == DATA_DIR.joinpath("CartonLabel.OK").read_bytes()  # untouched
 
 
@@ -1032,3 +1033,70 @@ def test_save_as_leaves_original_untouched_every_layout(tmp_path, registry, conf
     assert work.read_bytes() == original
     saved = service.parse_file_view(other, registry, config)
     assert len(next(s for s in saved["sections"] if s["name"] == detail["name"])["records"]) == n_preview
+
+
+# --------------------------------------------------------------------------- #
+# Layout detection signatures — locked in the editor, in bulk, and on save
+# --------------------------------------------------------------------------- #
+# Each layout's header carries the byte(s) detect.py keys off. Editing one makes
+# the file unopenable, or (StyleHeader/Preticket) silently detect as DistLabels.
+SIGNATURE_FIELDS = [
+    ("StyleHeader.OK", "StyleHeader", "indicator"),
+    ("Preticket.OK", "Preticket", "indicator"),
+    ("DistLabels.OK", "DistLabels", "format"),
+    ("CartonLabel.OK", "CartonLabel", "picklist_pre"),
+    ("EUPreticket.OK", "EUPreticket", "indicator"),
+    ("EUStyleHeader.OK", "EUStyleHeader", "process"),
+    ("EUCartonLabel.OK", "EUCartonLabel", "process"),
+]
+
+
+@pytest.mark.parametrize("sample,layout,field", SIGNATURE_FIELDS)
+def test_signature_field_is_readonly_in_editor(registry, config, sample, layout, field):
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(DATA_DIR / sample, registry, config)
+    assert view["layout"] == layout
+    meta = next(f for f in view["sections"][0]["fields"] if f["name"] == field)
+    assert not meta["editable"], f"{layout}.{field} is the detection signature — must be read-only"
+
+
+@pytest.mark.parametrize("sample,layout,field", SIGNATURE_FIELDS)
+def test_signature_field_not_offered_in_bulk(registry, config, sample, layout, field):
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    scope = service.bulk_scope([str(DATA_DIR / sample)], registry, config)
+    names = [f["name"] for f in scope["header_fields"][layout]]
+    assert field not in names, f"bulk edit must not offer {layout}.{field}"
+
+
+@pytest.mark.parametrize("sample,layout,field", SIGNATURE_FIELDS)
+def test_save_refuses_to_break_detection(tmp_path, registry, config, sample, layout, field):
+    """The backstop: even bypassing the config lock, the write is rejected."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    original = work.read_bytes()
+
+    with pytest.raises(service.EditError, match="detection signature"):
+        service.apply_edits(
+            work, [{"section_index": 0, "record_index": 0, "field": field, "value": "8"}],
+            registry, config=config, backup=False)
+
+    assert work.read_bytes() == original                 # nothing written
+    assert not work.with_suffix(".OK.bak").exists()       # and no stray backup
+
+
+def test_bulk_apply_reports_signature_break_per_file(tmp_path, registry, config):
+    """A signature-breaking bulk apply errors per file instead of bricking them."""
+    a, b = tmp_path / "a.OK", tmp_path / "b.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", a)
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", b)
+    original = a.read_bytes()
+
+    res = service.bulk_apply([str(a), str(b)], "StyleHeader", "indicator", "Y",
+                             registry, config, backup=False)
+    assert [r["status"] for r in res["results"]] == ["error", "error"]
+    assert all("detection signature" in r["error"] for r in res["results"])
+    assert a.read_bytes() == original and b.read_bytes() == original

@@ -15,5 +15,17 @@ hidden:
   EUCartonLabel: [marker, detail_marker]
 
 readonly:
-  EUStyleHeader: [process]
-  EUCartonLabel: [process]
+  # --- layout DETECTION SIGNATURES — do not unlock ---
+  # Each of these fields IS the byte(s) detect.py keys off to identify the file's
+  # layout, so editing one makes the saved file unopenable — or worse, silently
+  # detect as a DIFFERENT layout (StyleHeader/Preticket 'indicator' -> a digit
+  # reads as DistLabels, and every field then parses at the wrong offset).
+  # Locking them here also removes them from Bulk Edit. A save-time check
+  # (service._assert_layout_stable) backstops this list if it ever drifts.
+  StyleHeader: [indicator]      # 'N' at raw pos 4
+  Preticket: [indicator]        # 'Y' at raw pos 4
+  DistLabels: [format]          # '7'/'9' at raw pos 4
+  CartonLabel: [picklist_pre]   # 'C:' at raw pos 5..6
+  EUPreticket: [indicator]      # 'P' in the '¦P|' delimited header signature
+  EUStyleHeader: [process]      # 'D' at raw pos 2
+  EUCartonLabel: [process]      # 'H' at raw pos 2
