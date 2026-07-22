@@ -2151,52 +2151,62 @@ def _empty_then_seed(work, section, registry, config):
 
 
 @pytest.mark.parametrize("sample", ALL_SAMPLES)
-def test_seeded_first_row_is_blank_not_placeholder(tmp_path, registry, config, sample):
-    """Adding the first row to an emptied section gives a CLEAN template, not the
-    layout's baked placeholder values (Preticket's were 'MESSAGES01', 'Fact1…').
-
-    Only the record-type marker ('#'/'&', a hidden structural field) may carry a
-    value; every visible field must be blank (spaces or zeros), the row must
-    route to its own section (not '(unassigned)'), and the file must round-trip.
+def test_seeded_first_row_is_aligned_to_the_field_grid(tmp_path, registry, config, sample):
+    """Adding the first row to an emptied section reproduces a real row's field
+    values EXACTLY — same alignment — both in the staged preview (no save) and
+    after saving. A one-char offset error (the reported 'right-moved' symptom)
+    shifts every field and shows only while the added row is still unsaved.
     """
     if not (DATA_DIR / sample).exists():
         pytest.skip(f"no sample for {sample}")
     view = service.parse_file_view(DATA_DIR / sample, registry, config)
-    hidden = config.hidden_fields(view["layout"])
 
     for sec in view["sections"]:
         if sec["is_header"] or not sec["records"]:
             continue
+        want = dict(sec["records"][0]["values"])   # a genuine first row
+
         work = tmp_path / f"{sec['name']}_{sample}"
         shutil.copy2(DATA_DIR / sample, work)
+        while True:
+            rows = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                        if s["name"] == sec["name"])["records"]
+            if not rows:
+                break
+            service.delete_record(work, rows[0]["index"], [], registry, config, backup=False)
+        si = next(s["index"] for s in service.parse_file_view(work, registry, config)["sections"]
+                  if s["name"] == sec["name"])
 
-        seeded = _empty_then_seed(work, sec["name"], registry, config)
-        names = [s["name"] for s in seeded["sections"]]
-        assert "(unassigned)" not in names, f"{sec['name']}: seeded row was orphaned"
-        assert seeded["roundtrip_ok"]
+        preview = service.add_record(work, si, [], registry, config, preview=True)
+        assert "(unassigned)" not in [s["name"] for s in preview["sections"]]
+        pv_row = next(s for s in preview["sections"]
+                      if s["name"] == sec["name"])["records"][0]["values"]
+        assert pv_row == want, f"{sec['name']} preview misaligned"
 
-        rows = next(s for s in seeded["sections"] if s["name"] == sec["name"])["records"]
-        assert len(rows) == 1
-        for field, value in rows[0]["values"].items():
-            if field in hidden:
-                continue                     # the '#'/'&' marker legitimately stays
-            assert (value or "").strip("0 ") == "", \
-                f"{view['layout']}/{sec['name']}: field {field} seeded as {value!r}, not blank"
+        service.add_record(work, si, [], registry, config, backup=False)
+        saved = service.parse_file_view(work, registry, config)
+        assert saved["roundtrip_ok"]
+        sv_row = next(s for s in saved["sections"]
+                      if s["name"] == sec["name"])["records"][0]["values"]
+        assert sv_row == want, f"{sec['name']} saved misaligned"
 
 
-def test_seeded_row_fields_are_aligned(tmp_path, registry, config):
-    """Preticket's seed must align to field positions (the reported 'right-moved'
-    symptom): every field parses to its own blank slot, none bleeds into the
-    next. A one-char offset error would push values across field boundaries."""
+def test_seeded_preticket_row_not_shifted(tmp_path, registry, config):
+    """Regression for the exact report: Preticket's Lane is marker-less, so its
+    seed offset must be 0. A hardcoded 1 shifted the staged view — page read
+    '010' instead of '001', message1 'ESSAGES01M' instead of 'MESSAGES01'."""
     work = tmp_path / "Preticket.OK"
     shutil.copy2(DATA_DIR / "Preticket.OK", work)
-    seeded = _empty_then_seed(work, "Lane", registry, config)
-    lane = next(s for s in seeded["sections"] if s["name"] == "Lane")
-    vals = lane["records"][0]["values"]
+    while True:
+        rows = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                    if s["name"] == "Lane")["records"]
+        if not rows:
+            break
+        service.delete_record(work, rows[0]["index"], [], registry, config, backup=False)
+    si = next(s["index"] for s in service.parse_file_view(work, registry, config)["sections"]
+              if s["name"] == "Lane")
 
-    # numeric fields blank to zeros, text/size fields to spaces, each exactly its
-    # own width — proof the row is byte-aligned to the field grid.
-    assert vals["page"] == "000" and vals["line"] == "000"
-    assert vals["message1"] == " " * 10 and vals["message2"] == " " * 10
-    assert vals["item"] == " " * 20 and vals["fact1"] == " " * 20
-    assert seeded["roundtrip_ok"]
+    preview = service.add_record(work, si, [], registry, config, preview=True)
+    vals = next(s for s in preview["sections"] if s["name"] == "Lane")["records"][0]["values"]
+    assert vals["page"] == "001", f"shifted: page={vals['page']!r}"
+    assert vals["message1"] == "MESSAGES01", f"shifted: message1={vals['message1']!r}"
