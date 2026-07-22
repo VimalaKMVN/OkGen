@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.25.5-generate-tdz-fix`.
+> Baseline: top of `main` = tag `v0.26.0-value-lists`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -78,7 +78,12 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.25.5-generate-tdz-fix`.** **Tests: 237 passing** (236 Python + 1 Node smoke suite).
+- **Top of `main` = tag `v0.26.0-value-lists`.** **Tests: 250 passing** (249 Python + 1 Node smoke suite).
+  **"Random value from my list"** — a new value mode wherever OkGen writes generated values, so output is constrained to a set the user approves instead of an open numeric range. Enter comma-separated values (`10, 20, 30`); each target gets one at random, never anything else.
+  - **Bulk Edit:** new `list` op in `_bulk_op_eval`, offered on **every section of every layout** — including the **header**, which previously only offered "Set value". Header sections hold one record so each **file** gets a pick; detail sections get a pick per **row**. Values are validated against the field width (`too_wide` per file, nothing written) and an empty list is rejected.
+  - **Volume generation:** every header/detail field row gains a value-list input beside min/max. `_spec_value` picks from the list when present, otherwise falls back to the range — **the list always wins**, so a stale range can't leak unlisted values.
+  - Shared helpers `_clean_values` (accepts a comma string or a real list, trims, drops blanks) and `_pick_value` (width-validated random choice).
+- **Prior top of `main` = tag `v0.25.5-generate-tdz-fix`** (237 passing) — fixed the TDZ error that aborted the Generate panel render, and added the `tests/js/` browser-side harness.
   **Fixed the Generate panel doing nothing.** Root cause was a JS temporal-dead-zone error: the default filename chips call `refresh()` *during* panel construction, but `let timer` was declared ~50 lines later — reading a `let` before its declaration throws, so `renderGeneratePanel` aborted mid-render. Everything after that point (the sticky action bar, the results area, **every click handler**) never existed. That is why there was no bottom button at all, and why the header button added in v0.25.2 appeared but did nothing. Declarations are now hoisted to the top of the function.
   - **New: browser-side test harness** (`tests/js/`) — a dependency-free DOM stub plus a Node script that executes the real `app.js`, renders the Generate panel and drives its buttons, asserting the panel builds, results sit above the sticky bar, the first click arms the inline confirmation and the second POSTs `/api/generate/apply` with the right spec. Run by pytest via `tests/test_js_panels.py` (skips if `node` is absent, so the offline Windows boxes are unaffected). **Verified it reproduces the TDZ bug when reintroduced.** This is the first automated coverage of client-side code — previously all 236 tests were server-only, which is exactly how this shipped.
   - Supporting fixes while chasing it: results moved above the sticky footer (messages were rendering off-screen behind it); global `error`/`unhandledrejection` handlers so a thrown handler no longer looks like a dead button — **this is what finally surfaced the real error**; `SEND_FILE_MAX_AGE_DEFAULT = 0` so a cached `app.js` can't make a fix look unapplied; and a build marker in the panel header (`OKGEN_BUILD`) so the loaded build is visible.
@@ -135,7 +140,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 237
+.venv/bin/python -m pytest tests/ -q              # currently 250
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```

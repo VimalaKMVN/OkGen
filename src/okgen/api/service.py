@@ -1208,7 +1208,7 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
     if not recs and t != "add":
         return {"name": name, "status": "no_section"}
 
-    if t in ("set", "random", "unique"):
+    if t in ("set", "random", "unique", "list"):
         field = op.get("field")
         fdef = next((x for x in sec.fields if x.name == field), None)
         if fdef is None:
@@ -1233,6 +1233,25 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
             detail = (f"{field}: {first_old!r} -> {value!r}" if before == 1
                       else f"set {field} on {changed}/{before} row(s)")
             return {"name": name, "status": "change", "detail": detail, "okf": okf}
+
+        if t == "list":
+            # Pick from a user-supplied set of allowed values — one pick per
+            # ROW for a detail section, and (since the header section holds a
+            # single record) one pick per FILE for the header.
+            values = _clean_values(op.get("values"))
+            if not values:
+                return {"name": name, "status": "error",
+                        "error": "give at least one value to choose from"}
+            too_wide = [v for v in values if len(v) > size]
+            if too_wide:
+                return {"name": name, "status": "too_wide",
+                        "detail": f"value(s) too long for {field} ({size}): "
+                                  + ", ".join(repr(v) for v in too_wide[:3])}
+            for r in recs:
+                r.set(field, random.choice(values))
+            return {"name": name, "status": "change",
+                    "detail": f"{field} from {len(values)} allowed value(s) "
+                              f"on {before} row(s)", "okf": okf}
 
         if t == "random":
             hi = 10 ** size - 1
@@ -1744,6 +1763,28 @@ def _generate_folder(template: Path, count: int, dest=None, dry=False) -> Path:
     return out
 
 
+def _clean_values(raw) -> List[str]:
+    """Normalise a user-supplied value list.
+
+    Accepts either a real list or one comma-separated string, trims each entry
+    and drops blanks, preserving the order the user typed.
+    """
+    if raw is None:
+        return []
+    items = raw.split(",") if isinstance(raw, str) else list(raw)
+    return [str(v).strip() for v in items if str(v).strip() != ""]
+
+
+def _pick_value(values: List[str], size: int, field: str) -> str:
+    """One random choice from ``values``, validated against the field width."""
+    too_wide = [v for v in values if len(v) > size]
+    if too_wide:
+        raise EditError(
+            f"value(s) too long for {field} (max {size}): "
+            + ", ".join(repr(v) for v in too_wide[:3]))
+    return random.choice(values)
+
+
 def _rand_padded(size: int, lo, hi) -> str:
     """A random number as a zero-padded string that fits ``size`` characters."""
     ceiling = 10 ** size - 1
@@ -1752,6 +1793,15 @@ def _rand_padded(size: int, lo, hi) -> str:
     if low > high:
         raise EditError(f"min {low} is greater than max {high}")
     return str(random.randint(low, high)).zfill(size)
+
+
+def _spec_value(spec: dict, size: int, field: str) -> str:
+    """The value for one generated field: a pick from the user's list if they
+    supplied one, otherwise a random number in their min/max range."""
+    values = _clean_values(spec.get("values"))
+    if values:
+        return _pick_value(values, size, field)
+    return _rand_padded(size, spec.get("min"), spec.get("max"))
 
 
 def _field_in_section(layout, section_name: str, field_name: str):
@@ -1813,12 +1863,12 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         header.set(key_field, _format_key(kp.prefix, key_int, key_size,
                                           kp.suffix, kp.width))
 
-    # 3. user-chosen header fields
+    # 3. user-chosen header fields — one value per FILE
     for hf in spec.get("header_fields") or []:
         f = _header_field(okf.layout, hf["name"])
         if f is None or not f.size or header is None:
             continue
-        header.set(hf["name"], _rand_padded(f.size, hf.get("min"), hf.get("max")))
+        header.set(hf["name"], _spec_value(hf, f.size, hf["name"]))
 
     # 4. user-chosen detail fields — a fresh value per ROW, not per file
     for df in spec.get("detail_fields") or []:
@@ -1827,7 +1877,7 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
             continue
         sec = next(s for s in okf.layout.sections if s.name == df["section"])
         for r in (r for r in okf.records if r.section is sec):
-            r.set(df["name"], _rand_padded(f.size, df.get("min"), df.get("max")))
+            r.set(df["name"], _spec_value(df, f.size, df["name"]))
 
 
 def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=None,

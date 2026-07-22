@@ -1851,3 +1851,144 @@ def test_key_spaces_are_per_prefix_and_suffix(tmp_path, registry, config):
     assert _keytrol(plain, registry, config).strip() == "0000007"
     assert _keytrol(pref, registry, config).strip() == "C:7"
     assert _keytrol(suff, registry, config).strip() == "7Q"
+
+
+# --------------------------------------------------------------------------- #
+# "Random value from my list" — bulk ops and volume generation
+# --------------------------------------------------------------------------- #
+def test_clean_values_accepts_string_or_list():
+    """Users type 'a, b, c'; the API may also be handed a real list."""
+    assert service._clean_values("10, 20 ,30") == ["10", "20", "30"]
+    assert service._clean_values(["A", " B ", ""]) == ["A", "B"]
+    assert service._clean_values("  5  ") == ["5"]
+    assert service._clean_values("10,,20") == ["10", "20"]      # blanks dropped
+    assert service._clean_values("") == []
+    assert service._clean_values(None) == []
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_bulk_list_op_every_layout_and_section(tmp_path, registry, config, sample):
+    """The list op works on every section of every layout — header included.
+
+    Header sections hold one record, so each FILE gets one pick; detail sections
+    get a pick per ROW. Every value written must come from the user's list.
+    """
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(DATA_DIR / sample, registry, config)
+    layout = view["layout"]
+
+    for sec in view["sections"]:
+        if not sec["records"]:
+            continue
+        field = next((f for f in sec["fields"]
+                      if f.get("size") and f["size"] >= 2 and not f.get("hidden")
+                      and not f.get("derived") and f.get("editable")), None)
+        if field is None:
+            continue
+        allowed = ["11", "22", "33"]
+
+        work = tmp_path / f"{sec['name']}_{sample}"
+        shutil.copy2(DATA_DIR / sample, work)
+        res = service._bulk_op_eval(work, layout, sec["name"],
+                                    {"type": "list", "field": field["name"], "values": allowed},
+                                    registry, config)
+        assert res["status"] == "change", (sec["name"], field["name"], res)
+        res["okf"].save(work)
+
+        after = service.parse_file_view(work, registry, config)
+        assert after["layout"] == layout and after["roundtrip_ok"]
+        rows = next(s for s in after["sections"] if s["name"] == sec["name"])["records"]
+        for r in rows:
+            got = r["values"][field["name"]].strip().lstrip("0") or "0"
+            assert got in [a.lstrip("0") for a in allowed], \
+                f"{layout}/{sec['name']}/{field['name']} wrote {got!r}, not from {allowed}"
+
+
+def test_bulk_list_op_spreads_across_files(tmp_path, registry, config):
+    """Across many files the picks vary, and never leave the allowed set."""
+    paths = []
+    for i in range(30):
+        p = tmp_path / f"f{i}.OK"
+        shutil.copy2(DATA_DIR / "StyleHeader.OK", p)
+        paths.append(str(p))
+
+    seen = set()
+    for p in paths:
+        res = service._bulk_op_eval(Path(p), "StyleHeader", "Header",
+                                    {"type": "list", "field": "dept", "values": ["11", "22", "33"]},
+                                    registry, config)
+        assert res["status"] == "change"
+        res["okf"].save(Path(p))
+        seen.add(service.parse_file_view(p, registry, config)
+                 ["sections"][0]["records"][0]["values"]["dept"].strip())
+
+    assert seen <= {"11", "22", "33"}
+    assert len(seen) > 1, "30 files should not all draw the same value"
+
+
+def test_bulk_list_op_rejects_empty_and_too_wide(tmp_path, registry, config):
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    original = work.read_bytes()
+
+    empty = service._bulk_op_eval(work, "StyleHeader", "Header",
+                                  {"type": "list", "field": "dept", "values": []},
+                                  registry, config)
+    assert empty["status"] == "error"
+
+    wide = service._bulk_op_eval(work, "StyleHeader", "Header",
+                                 {"type": "list", "field": "dept", "values": ["1", "123456"]},
+                                 registry, config)
+    assert wide["status"] == "too_wide"
+    assert work.read_bytes() == original
+
+
+def test_generate_uses_only_listed_values(tmp_path, registry, config):
+    """Volume generation: listed values only, for header AND detail fields."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+
+    res = service.generate_apply(work, {
+        "count": 30,
+        "header_fields": [{"name": "dept", "values": "11,22,33"}],
+        "detail_fields": [{"section": "Size", "name": "qty", "values": ["5", "10", "15"]}],
+        "name_parts": [{"type": "token", "name": "orig"}, {"type": "token", "name": "seq"}],
+        "separator": "_"}, registry, config)
+
+    depts, qtys = set(), set()
+    for f in Path(res["folder"]).glob("*.OK"):
+        view = service.parse_file_view(f, registry, config)
+        depts.add(view["sections"][0]["records"][0]["values"]["dept"].strip())
+        for r in next(s for s in view["sections"] if s["name"] == "Size")["records"]:
+            qtys.add(r["values"]["qty"].strip().lstrip("0") or "0")
+
+    assert depts <= {"11", "22", "33"} and len(depts) > 1, depts
+    assert qtys <= {"5", "10", "15"} and len(qtys) > 1, qtys
+
+
+def test_generate_list_takes_precedence_over_range(tmp_path, registry, config):
+    """When both are given the list wins — the range can't leak other values."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    res = service.generate_apply(work, {
+        "count": 20,
+        "header_fields": [{"name": "dept", "min": "70", "max": "99", "values": "11,22"}],
+        "name_parts": [{"type": "token", "name": "orig"}, {"type": "token", "name": "seq"}],
+        "separator": "_"}, registry, config)
+    seen = {service.parse_file_view(f, registry, config)
+            ["sections"][0]["records"][0]["values"]["dept"].strip()
+            for f in Path(res["folder"]).glob("*.OK")}
+    assert seen <= {"11", "22"}, seen
+
+
+def test_generate_rejects_too_wide_listed_value(tmp_path, registry, config):
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    with pytest.raises(service.EditError, match="too long"):
+        service.generate_apply(work, {
+            "count": 3,
+            "header_fields": [{"name": "dept", "values": "11,999999"}],
+            "name_parts": [{"type": "token", "name": "orig"}],
+            "separator": "_"}, registry, config)
+    assert not list(tmp_path.glob("generated_*"))

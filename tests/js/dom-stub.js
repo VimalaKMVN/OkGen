@@ -39,6 +39,11 @@ function mkEl(tag = "div") {
     querySelector(sel) { return this.querySelectorAll(sel)[0] || mkEl(); },
     querySelectorAll(sel) { return descendants(this).filter((e) => matches(e, sel)); },
     contains() { return false; },
+    closest(sel) {
+      let n = el;
+      while (n) { if (matches(n, sel)) return n; n = n.parentNode; }
+      return null;
+    },
     focus() {}, blur() {}, setAttribute() {}, getAttribute() { return null; },
   };
   el.classList = mkClassList(el);

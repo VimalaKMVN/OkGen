@@ -569,3 +569,5 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .gen-err { color: var(--err); }
 .gen-results { margin: 10px 0; }
 .gen-build { opacity: 0.5; font-size: 11px; }
+.gen-field input.gen-list { width: 120px; }
+.bulk-list { font-family: ui-monospace, Menlo, Consolas, monospace; }

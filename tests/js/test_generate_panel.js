@@ -98,6 +98,21 @@ const armedLabel = /click again/i.test(btn.textContent);
 console.log(`  ${armedLabel ? "PASS" : "FAIL"}  first click arms the confirmation ("${btn.textContent}")`);
 if (!armedLabel) process.exit(1);
 
+// Tick a header field and give it a VALUE LIST — the spec must carry it, and
+// the min/max range must go disabled so only listed values can be produced.
+const fieldRows = all.filter((e) => e.classList.contains("gen-field"));
+const firstRow = fieldRows[0];
+const cb = firstRow.children.find((e) => e.classList.contains("gen-on"));
+const listInput = firstRow.children.find((e) => e.classList.contains("gen-list"));
+const minInput = firstRow.children.find((e) => e.classList.contains("gen-min"));
+cb.checked = true;
+(cb._handlers.change || []).forEach((f) => f({}));
+listInput.value = "11, 22, 33";
+(listInput._handlers.input || []).forEach((f) => f({}));
+const listOk = minInput.disabled === true;
+console.log(`  ${listOk ? "PASS" : "FAIL"}  a value list disables the min/max range`);
+if (!listOk) process.exit(1);
+
 // Second click must actually POST the write request.
 btn.click();
 
@@ -113,5 +128,9 @@ setTimeout(() => {
   const ok4 = spec.count === 100 && Array.isArray(spec.name_parts) && spec.name_parts.length === 3;
   console.log(`  ${ok4 ? "PASS" : "FAIL"}  spec carries count + name parts (${JSON.stringify(spec.name_parts)})`);
   if (!ok4) process.exit(1);
+  const hf = (spec.header_fields || [])[0];
+  const ok5 = hf && hf.values === "11, 22, 33";
+  console.log(`  ${ok5 ? "PASS" : "FAIL"}  spec carries the value list (${hf && JSON.stringify(hf.values)})`);
+  if (!ok5) process.exit(1);
   console.log(`\nAll checks passed (build ${api.OKGEN_BUILD})`);
 }, 400);

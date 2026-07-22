@@ -2,7 +2,7 @@
 
 // Build marker — shown in the Generate panel header so a cached copy of this
 // file is obvious at a glance ("build" in the UI vs the tag you deployed).
-const OKGEN_BUILD = "v0.25.4";
+const OKGEN_BUILD = "v0.26.0";
 
 // Nothing in this app should fail silently: surface JS errors and rejected
 // promises in the status bar, otherwise a thrown error inside a click handler
@@ -425,9 +425,15 @@ function renderBulkPanel(scope) {
   const reset = () => { applyBtn.disabled = true; previewBox.innerHTML = ""; resultsBox.innerHTML = ""; };
 
   function opsForSection(sec) {
-    if (sec.isHeader) return [{ v: "set", t: "Set value" }];
+    if (sec.isHeader) {
+      return [
+        { v: "set", t: "Set value" },
+        { v: "list", t: "Random value from my list (each file)" },
+      ];
+    }
     return [
       { v: "set", t: "Set value (all rows)" },
+      { v: "list", t: "Random value from my list (each row)" },
       { v: "random", t: "Set random value (each row)" },
       { v: "unique", t: "Set unique value (each row)" },
       { v: "add", t: "Add rows" },
@@ -439,7 +445,7 @@ function renderBulkPanel(scope) {
     row2.innerHTML = "";
     const sec = curSection(); if (!sec) return;
     const op = opSel.value;
-    if (op === "set" || op === "random" || op === "unique") {
+    if (op === "set" || op === "random" || op === "unique" || op === "list") {
       const fieldSel = el("select", "bulk-field");
       sec.fields.forEach((f) => fieldSel.appendChild(new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
       row2.appendChild(el("span", "bulk-label", "Field:"));
@@ -469,6 +475,17 @@ function renderBulkPanel(scope) {
         row2.appendChild(el("span", "bulk-label", "Start at:"));
         row2.appendChild(startInp);
         row2.appendChild(el("span", "bulk-section", "· each row gets the next number (per file)"));
+        fieldSel.addEventListener("change", reset);
+      } else if (op === "list") {
+        const listInp = el("input", "bulk-value bulk-list");
+        listInp.type = "text";
+        listInp.placeholder = "e.g. 10, 20, 30";
+        listInp.style.width = "260px";
+        row2.appendChild(el("span", "bulk-label", "Allowed values:"));
+        row2.appendChild(listInp);
+        row2.appendChild(el("span", "bulk-section",
+          `· comma separated — each ${sec.isHeader ? "file" : "row"} gets one of them at random`));
+        listInp.addEventListener("input", reset);
         fieldSel.addEventListener("change", reset);
       } else {  // random
         const rmin = el("input", "bulk-value bulk-rmin"); rmin.type = "number"; rmin.min = "0"; rmin.placeholder = "min"; rmin.style.width = "90px";
@@ -521,6 +538,11 @@ function renderBulkPanel(scope) {
       if (mx !== "") o.max = Number(mx);
       return o;
     }
+    if (op === "list") {
+      const raw = (row2.querySelector(".bulk-list") || {}).value || "";
+      return { type: "list", field: fieldSel.value,
+               values: raw.split(",").map((v) => v.trim()).filter((v) => v !== "") };
+    }
     if (op === "unique") {
       return { type: "unique", field: fieldSel.value, start: Number(row2.querySelector(".bulk-value").value || 0) };
     }
@@ -532,6 +554,11 @@ function renderBulkPanel(scope) {
     if (op.type === "random") {
       const rng = (op.min != null || op.max != null) ? ` in [${op.min != null ? op.min : 0}..${op.max != null ? op.max : "max"}]` : "";
       return `${sec}: set ${op.field} to a random value${rng} on every row`;
+    }
+    if (op.type === "list") {
+      return `${sec}: set ${op.field} randomly from ${op.values.length} value(s)`
+             + (op.values.length ? ` [${op.values.slice(0, 6).join(", ")}` +
+                (op.values.length > 6 ? ", …]" : "]") : "");
     }
     if (op.type === "unique") return `${sec}: set ${op.field} to unique values from ${op.start}`;
     if (op.type === "add") return `${sec}: add ${op.count} row(s)`;
@@ -2034,16 +2061,30 @@ function renderGeneratePanel(panel, path, scope) {
       cb.dataset.field = f.name; cb.dataset.size = f.size;
       const min = el("input", "gen-min"); min.type = "number"; min.placeholder = "min"; min.disabled = true;
       const max = el("input", "gen-max"); max.type = "number"; max.placeholder = "max"; max.disabled = true;
+      // A value list wins over the min/max range when it is filled in, so the
+      // generated files only ever contain values the user allowed.
+      const list = el("input", "gen-list"); list.type = "text";
+      list.placeholder = "or list: 10,20,30"; list.disabled = true;
+      list.title = "Comma-separated. When filled, values are picked from this "
+                 + "list instead of the min/max range.";
+      const syncRange = () => {
+        const usingList = list.value.trim() !== "";
+        min.disabled = max.disabled = !cb.checked || usingList;
+        list.disabled = !cb.checked;
+      };
       cb.addEventListener("change", () => {
-        min.disabled = max.disabled = !cb.checked;
-        if (cb.checked && min.value === "") { min.value = "1"; max.value = String(Math.pow(10, f.size) - 1); }
+        if (cb.checked && min.value === "" && list.value.trim() === "") {
+          min.value = "1"; max.value = String(Math.pow(10, f.size) - 1);
+        }
+        syncRange();
         refresh();
       });
       min.addEventListener("input", refresh);
       max.addEventListener("input", refresh);
+      list.addEventListener("input", () => { syncRange(); refresh(); });
       row.appendChild(cb);
       row.appendChild(el("span", "gen-name", `${f.name} (${f.size})`));
-      row.appendChild(min); row.appendChild(max);
+      row.appendChild(min); row.appendChild(max); row.appendChild(list);
       box.appendChild(row);
     });
     box.classList.add(hostClass);
@@ -2148,6 +2189,7 @@ function renderGeneratePanel(panel, path, scope) {
         name: cb.dataset.field,
         min: row.querySelector(".gen-min").value,
         max: row.querySelector(".gen-max").value,
+        values: row.querySelector(".gen-list").value,
       });
     });
     panel.querySelectorAll(".gen-detail").forEach((box) => {
@@ -2158,6 +2200,7 @@ function renderGeneratePanel(panel, path, scope) {
           section, name: cb.dataset.field,
           min: row.querySelector(".gen-min").value,
           max: row.querySelector(".gen-max").value,
+          values: row.querySelector(".gen-list").value,
         });
       });
       const on = box.querySelector(".gen-rows-on");
