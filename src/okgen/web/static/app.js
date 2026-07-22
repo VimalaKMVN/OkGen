@@ -1975,6 +1975,8 @@ function renderGeneratePanel(panel, path, scope) {
   head.appendChild(el("h3", null, `Generate volume files — ${scope.name}`));
   head.appendChild(el("span", "bulk-label",
     `${scope.layout} · key ${scope.key_field} is assigned uniquely to every file`));
+  const topGen = el("button", "btn btn-primary", "Generate");
+  head.appendChild(topGen);
   const close = el("button", "btn", "Close");
   close.addEventListener("click", exitGenerateMode);
   head.appendChild(close);
@@ -2002,6 +2004,7 @@ function renderGeneratePanel(panel, path, scope) {
     box.appendChild(el("div", "bulk-label", title));
     if (!fields.length) {
       box.appendChild(el("div", "bulk-note", "No numeric fields available here."));
+      box.classList.add(hostClass);   // still scanned for its row-count setting
       return box;
     }
     fields.forEach((f) => {
@@ -2099,13 +2102,15 @@ function renderGeneratePanel(panel, path, scope) {
   ["layout", "key", "seq"].forEach(addPart);        // sensible default pattern
 
   // --- preview + generate ---------------------------------------------------
-  const actions = el("div", "bulk-actions");
-  const genBtn = el("button", "btn btn-primary", "Generate");
+  const actions = el("div", "bulk-actions gen-actions");
+  const genBtn = el("button", "btn btn-primary gen-go", "Generate");
   actions.appendChild(genBtn);
   const folderNote = el("span", "bulk-label", "");
   actions.appendChild(folderNote);
   panel.appendChild(actions);
   const results = el("div"); panel.appendChild(results);
+  // Both Generate buttons (header + sticky bar) do the same thing.
+  topGen.addEventListener("click", () => genBtn.click());
 
   function buildSpec() {
     const spec = {
@@ -2159,7 +2164,10 @@ function renderGeneratePanel(panel, path, scope) {
       results.appendChild(el("div", "bulk-note", "Preview failed: " + e.message));
       return;
     }
-    folderNote.textContent = `→ ${pv.folder.split(/[\\/]/).pop()}/`;
+    folderNote.textContent =
+      `${pv.count} file(s) → ${pv.folder.split(/[\\/]/).pop()}/`;
+    genBtn.textContent = `Generate ${pv.count} files`;
+    topGen.textContent = `Generate ${pv.count} files`;
     results.innerHTML = "";
     results.appendChild(el("div", "bulk-summary",
       `Preview of the first ${pv.sample.length} of ${pv.count} files — nothing written yet`));
@@ -2191,7 +2199,7 @@ function renderGeneratePanel(panel, path, scope) {
     if (!beginBusy(`Generating ${spec.count} files…`)) {
       setStatus("Please wait — an operation is already running…", "dirty"); return;
     }
-    genBtn.disabled = true;
+    genBtn.disabled = true; topGen.disabled = true;
     try {
       const res = await postJSON("/api/generate/apply", { path, spec });
       setStatus(`Generated ${res.written} file(s)`, "ok");
@@ -2204,7 +2212,7 @@ function renderGeneratePanel(panel, path, scope) {
       setStatus("Generate failed: " + e.message, "err");
       results.appendChild(el("div", "bulk-note", "Generate failed: " + e.message));
     } finally {
-      state.busy = false; genBtn.disabled = false;
+      state.busy = false; genBtn.disabled = false; topGen.disabled = false;
     }
   });
 

@@ -543,3 +543,18 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
   cursor: pointer; padding: 0; font-size: 11px;
 }
 .gen-chip-x:hover { color: var(--err); }
+
+/* The Generate action must never scroll out of reach behind long field lists:
+   pin it to the bottom of the panel (a second copy sits in the panel header). */
+.gen-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  margin: 0 -2px 12px;
+  padding: 10px 12px;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.35);
+}
+.gen-go { font-weight: 600; padding: 7px 18px; }
