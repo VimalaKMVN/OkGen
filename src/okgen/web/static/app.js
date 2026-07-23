@@ -1714,7 +1714,8 @@ function showToscaResult(res) {
   card.appendChild(el("h3", "modal-title", `TOSCA '${res.script}' — ${res.written} row(s) written`));
   card.appendChild(el("div", "modal-dest", res.workbook));
   if (res.launched) {
-    const ok = el("div", "tosca-launch ok", "▶ TOSCA started (fire-and-forget) — it runs on its own.");
+    const ok = el("div", "tosca-launch ok",
+      "▶ TOSCA started (fire-and-forget). Launched .bat: " + (res.bat || "?"));
     card.appendChild(ok);
   } else if (res.launch_error) {
     const bad = el("div", "tosca-launch warn", "TOSCA not started: " + res.launch_error);
