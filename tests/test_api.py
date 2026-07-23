@@ -2676,3 +2676,66 @@ def test_generation_blank_in_value_list(tmp_path, registry, config):
             seen.add(r["values"]["size"].strip())
     assert seen <= {"XS", "S", ""}
     assert "" in seen, "over 25 files, the blank choice should appear at least once"
+
+
+def test_blank_token_writes_spaces_on_numeric_field(tmp_path, registry, config):
+    """The explicit blank token writes SPACES on any field — including a numeric
+    one that would otherwise zero-fill — because the user typed spaces and asked
+    for a visually blank field."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    view = service.parse_file_view(work, registry, config)
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+    idx = lane["records"][0]["index"]
+
+    # 'qty' is a numeric field: a plain "" would zero-fill, but '   ' -> spaces
+    service.apply_edits(work, [{"section_index": lane["index"], "record_index": idx,
+                                "field": "qty", "value": "'   '"}],
+                        registry, config=config, backup=False)
+    val = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+               if s["name"] == "Lane")["records"][0]["values"]["qty"]
+    assert val.strip() == "" and set(val) == {" "}, repr(val)   # spaces, not zeros
+
+
+@pytest.mark.parametrize("sample,section,field", [
+    ("StyleHeader.OK", "Size", "size"),
+    ("Preticket.OK", "Lane", "size"),
+    ("EUPreticket.OK", "Lane", "size"),
+    ("EUStyleHeader.OK", "Detail", "size_code"),
+    ("EUCartonLabel.OK", "Detail", "size_code"),
+])
+def test_blank_size_every_layout(tmp_path, registry, config, sample, section, field):
+    """The real merchandise size field blanks to spaces via ' ' on every layout
+    that has one — single-file edit and bulk set."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(DATA_DIR / sample, registry, config)
+    sec = next((s for s in view["sections"] if s["name"] == section and s["records"]), None)
+    if sec is None:
+        pytest.skip(f"{sample} has no {section} rows")
+
+    # single-file
+    a = tmp_path / f"a_{sample}"; shutil.copy2(DATA_DIR / sample, a)
+    service.apply_edits(a, [{"section_index": sec["index"],
+                             "record_index": sec["records"][0]["index"],
+                             "field": field, "value": "' '"}],
+                        registry, config=config, backup=False)
+    va = next(s for s in service.parse_file_view(a, registry, config)["sections"]
+              if s["name"] == section)["records"][0]["values"][field]
+    assert va.strip() == "" and set(va) == {" "}
+    assert service.parse_file_view(a, registry, config)["roundtrip_ok"]
+
+    # bulk set — in a zero-filled section (Preticket Lane) bulk ops touch only
+    # the REAL rows; the all-zero filler rows keep their reference content.
+    b = tmp_path / f"b_{sample}"; shutil.copy2(DATA_DIR / sample, b)
+    res = service.bulk_op_apply([str(b)], view["layout"], section,
+                                {"type": "set", "field": field, "value": "'   '"},
+                                registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+    fill_managed = bool(config.zero_fill(view["layout"], section))
+    for r in next(s for s in service.parse_file_view(b, registry, config)["sections"]
+                  if s["name"] == section)["records"]:
+        is_blank_row = all((v or "").strip("0 ") == "" for v in r["values"].values())
+        if fill_managed and is_blank_row:
+            continue                              # untouched filler row
+        assert r["values"][field].strip() == "" and set(r["values"][field]) == {" "}

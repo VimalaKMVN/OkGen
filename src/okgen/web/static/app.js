@@ -2,7 +2,7 @@
 
 // Build marker — shown in the Generate panel header so a cached copy of this
 // file is obvious at a glance ("build" in the UI vs the tag you deployed).
-const OKGEN_BUILD = "v0.30.1";
+const OKGEN_BUILD = "v0.30.2";
 
 // Nothing in this app should fail silently: surface JS errors and rejected
 // promises in the status bar, otherwise a thrown error inside a click handler

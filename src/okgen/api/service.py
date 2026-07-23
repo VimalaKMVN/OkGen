@@ -412,8 +412,10 @@ def _unquote_blank(value):
 
 def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
     """Validate field widths, then apply edits in place. Raises EditError."""
-    for e in edits:                     # '' / "" -> explicit blank
-        e["value"] = _unquote_blank(e.get("value"))
+    for e in edits:                     # ' ' / '' / "" -> explicit blank (spaces)
+        if isinstance(e.get("value"), str) and _is_blank_token(e["value"]):
+            e["value"] = ""
+            e["_blank"] = True          # force a SPACE-filled blank, not zeros
     by_index = {r.index: r for r in okf.records}
     errors: List[dict] = []
     for e in edits:
@@ -445,7 +447,10 @@ def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
         raise EditError(str(errors))
     for e in edits:
         rec = by_index[e["record_index"]]
-        literal = config is not None and config.is_literal(okf.layout.name, e["field"])
+        # An explicit blank token writes spaces (a visually blank field) on ANY
+        # field, numeric included — the user typed spaces and asked for blank.
+        literal = e.get("_blank") or (config is not None
+                                      and config.is_literal(okf.layout.name, e["field"]))
         rec.set(e["field"], e["value"], literal=literal)
 
 
@@ -1371,12 +1376,15 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
             return {"name": name, "status": "error", "error": f"{field} has no fixed width"}
 
         if t == "set":
-            value = _unquote_blank(op.get("value", ""))     # '' / "" -> blank
+            raw = op.get("value", "")
+            blank = isinstance(raw, str) and _is_blank_token(raw)   # ' ' -> blank spaces
+            value = "" if blank else raw
             if len(value) > size:
                 return {"name": name, "status": "too_wide", "detail": f"value too long for {field}"}
             changed = 0
             first_old = recs[0].get(field) if recs else None
-            literal = config is not None and config.is_literal(layout_name, field)
+            # a blank token writes spaces on any field (numeric included)
+            literal = blank or (config is not None and config.is_literal(layout_name, field))
             for r in recs:
                 cur = r.get(field)
                 r.set(field, value, literal=literal)
@@ -1401,9 +1409,11 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
                 return {"name": name, "status": "too_wide",
                         "detail": f"value(s) too long for {field} ({size}): "
                                   + ", ".join(repr(v) for v in too_wide[:3])}
-            literal = config is not None and config.is_literal(layout_name, field)
+            base_literal = config is not None and config.is_literal(layout_name, field)
             for r in recs:
-                r.set(field, random.choice(values), literal=literal)
+                pick = random.choice(values)
+                # a blank ("") choice writes spaces on any field
+                r.set(field, pick, literal=base_literal or pick == "")
             return {"name": name, "status": "change",
                     "detail": f"{field} from {len(values)} allowed value(s) "
                               f"on {before} row(s)", "okf": okf}
@@ -2077,8 +2087,9 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         f = _header_field(okf.layout, hf["name"])
         if f is None or not f.size or header is None:
             continue
-        header.set(hf["name"], _spec_value(hf, f.size, hf["name"]),
-                   literal=config is not None and config.is_literal(okf.layout.name, hf["name"]))
+        val = _spec_value(hf, f.size, hf["name"])
+        base = config is not None and config.is_literal(okf.layout.name, hf["name"])
+        header.set(hf["name"], val, literal=base or val == "")   # blank pick -> spaces
 
     # 4. user-chosen detail fields — a fresh value per ROW, not per file
     for df in spec.get("detail_fields") or []:
@@ -2086,9 +2097,10 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         if f is None or not f.size:
             continue
         sec = next(s for s in okf.layout.sections if s.name == df["section"])
+        base = config is not None and config.is_literal(okf.layout.name, df["name"])
         for r in (r for r in okf.records if r.section is sec):
-            r.set(df["name"], _spec_value(df, f.size, df["name"]),
-                  literal=config is not None and config.is_literal(okf.layout.name, df["name"]))
+            val = _spec_value(df, f.size, df["name"])
+            r.set(df["name"], val, literal=base or val == "")    # blank pick -> spaces
 
 
 def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder=None,
