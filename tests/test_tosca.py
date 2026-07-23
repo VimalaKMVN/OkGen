@@ -277,6 +277,24 @@ def test_workbook_and_bat_accept_folder_paths(tmp_path, registry, config):
     assert marker.exists()
 
 
+def test_bat_glob_picks_named_file(tmp_path, registry, config):
+    """A glob pattern picks the .bat by name even when the folder holds several
+    (e.g. point at *ExecutionScript*.bat)."""
+    bat_dir = tmp_path / "batdir"; bat_dir.mkdir()
+    (bat_dir / "Setup.bat").write_text("x")
+    marker = tmp_path / "ran.marker"
+    target = bat_dir / "ThermalExecutionScript.bat"
+    target.write_text(f"#!/bin/sh\ntouch '{marker}'\n"); target.chmod(0o755)
+
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    _set_bat(config, "Thermal", bat_dir / "*ExecutionScript*.bat")   # glob
+
+    res = tosca.run([str(FIXJ / "styleheader_fmtB.json")], "Thermal", registry, config)
+    assert res["launched"] is True
+    assert res["bat"].endswith("ThermalExecutionScript.bat")
+
+
 def test_folder_with_multiple_bats_is_ambiguous(tmp_path, registry, config):
     bat_dir = tmp_path / "batdir"; bat_dir.mkdir()
     for n in ("a.bat", "b.bat"):

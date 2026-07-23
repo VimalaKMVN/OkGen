@@ -40,22 +40,31 @@ _BAT_EXTS = (".bat", ".cmd")
 
 
 def _resolve_one(raw: str, exts, kind: str) -> Path:
-    """Resolve a config path that may be a full FILE path OR a FOLDER holding a
-    single matching file (each TOSCA folder has exactly one .xlsm / one .bat).
+    """Resolve a config path that may be:
+      * a full FILE path (used as-is), or
+      * a GLOB pattern (e.g. ``…\\*ExecutionScript*.bat``) — the single match, or
+      * a FOLDER holding one matching file (``.xlsm`` / ``.bat``).
     Raises ToscaError with a clear message if it's missing or ambiguous."""
     p = Path(raw)
     if p.is_file():
         return p
-    if p.is_dir():
-        hits = sorted(f for f in p.iterdir()
-                      if f.is_file() and f.suffix.lower() in exts
-                      and not f.name.startswith("~$"))
+
+    def _pick(hits, where):
+        hits = sorted(h for h in hits
+                      if h.is_file() and h.suffix.lower() in exts
+                      and not h.name.startswith("~$"))
         if len(hits) == 1:
             return hits[0]
         if not hits:
-            raise ToscaError(f"no {kind} ({'/'.join(exts)}) in folder: {p}")
-        raise ToscaError(f"multiple {kind} files in {p} — give the full file path: "
-                         + ", ".join(h.name for h in hits))
+            raise ToscaError(f"no {kind} ({'/'.join(exts)}) {where}")
+        raise ToscaError(f"multiple {kind} files {where} — narrow it with a full "
+                         f"path or a name pattern: " + ", ".join(h.name for h in hits))
+
+    if any(ch in p.name for ch in "*?[") and not p.is_dir():   # glob pattern
+        parent = p.parent
+        return _pick(parent.glob(p.name) if parent.is_dir() else [], f"matching {raw}")
+    if p.is_dir():
+        return _pick(p.iterdir(), f"in folder: {p}")
     raise ToscaError(f"{kind} path not found: {raw}")
 
 
