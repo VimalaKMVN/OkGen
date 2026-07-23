@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Optional
 
-from okgen.layout.compiler import compile_dir
+from okgen.layout.compiler import compile_dir, load_json_layouts
 from okgen.layout.models import Layout
 
 
@@ -17,7 +17,9 @@ class LayoutRegistry:
 
     @classmethod
     def from_dir(cls, data_dir) -> "LayoutRegistry":
-        return cls({l.name: l for l in compile_dir(Path(data_dir))})
+        data_dir = Path(data_dir)
+        layouts = compile_dir(data_dir) + load_json_layouts(data_dir)
+        return cls({l.name: l for l in layouts})
 
     def get(self, name: str) -> Optional[Layout]:
         return self._layouts.get(name)

@@ -156,8 +156,14 @@ class OkFile:
     records: List[Record]
     trailing_newline: bool
     newline: str = "\n"           # join separator (data carries its own '\r')
+    # JSON engine only: the shared parse state (source text + span map + staged
+    # value edits). When present, serialization goes through it (byte-exact
+    # splice of only the changed values) instead of the raw-line join below.
+    json_state: object = None
 
     def to_bytes(self) -> bytes:
+        if self.json_state is not None:
+            return self.json_state.serialize()
         text = self.newline.join(r.raw for r in self.records)
         if self.trailing_newline:
             text += self.newline
@@ -346,7 +352,6 @@ def parse_okfile(path, layout: Optional[Layout] = None, registry=None) -> OkFile
     """Parse an OK file, detecting its layout if not supplied."""
     path = Path(path)
     data = path.read_bytes()
-    text = data.decode(ENCODING)
 
     if layout is None:
         det = detect_layout(path)
@@ -356,6 +361,15 @@ def parse_okfile(path, layout: Optional[Layout] = None, registry=None) -> OkFile
             raise ValueError("layout not given and no registry to resolve detected layout")
         layout = registry[det.layout]
 
+    # JSON engine (3rd mode): records are addressed by key path, not byte span.
+    if getattr(layout, "json_mode", False):
+        from okgen import jsonengine
+        text = data.decode(jsonengine.ENCODING)
+        state, records = jsonengine.parse(text, layout)
+        return OkFile(path=path, layout=layout, records=records,
+                      trailing_newline=False, json_state=state)
+
+    text = data.decode(ENCODING)
     parts = text.split("\n")
     trailing_newline = len(parts) > 0 and parts[-1] == ""
     if trailing_newline:

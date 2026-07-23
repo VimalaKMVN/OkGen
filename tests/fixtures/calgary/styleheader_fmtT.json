@@ -1,0 +1,113 @@
+{
+    "data": {
+        "type": "styleHeaders",
+        "timestamp": "2026-01-14T13:20:17.520305515Z",
+        "header": {
+            "chain": "04",
+            "format": "T",
+            "purchaseOrderNumber": "40381128",
+            "keytrol": "140145",
+            "headerSuffix": "A",
+            "headerASNid": "S403811288940672A",
+            "sequenceCode": "",
+            "packId": "",
+            "adIndicator": "N",
+            "style": "008608",
+            "laneRecords": null,
+            "noZoneRecords": null,
+            "department": "92",
+            "transmitDate": "2026-01-14",
+            "version": "INITIAL",
+            "storeLines": " ",
+            "price": "999.99",
+            "area": "WLAPL",
+            "instructions": "",
+            "vendorStyle": "BT23070A",
+            "description": "Foot Item 1",
+            "category": "205",
+            "totalQuantity": "10",
+            "lineCount": " ",
+            "blockNumber": " ",
+            "numberOfBlocks": " ",
+            "totalRetail": " ",
+            "pickListPrefix": " ",
+            "pickListId": " ",
+            "pickListSequence": " ",
+            "distroDate": " ",
+            "numberOfpacks": " ",
+            "numberOfStores": " ",
+            "aisle": " ",
+            "slot": " ",
+            "tier": " ",
+            "locator": " ",
+            "packSize": " ",
+            "mdseDept": null,
+            "tjmStyle": null,
+            "markdown": " ",
+            "distroType": " ",
+            "adDate": " ",
+            "packType": " ",
+            "nested": "",
+            "partial": " ",
+            "suppress": " ",
+            "coordinateIndicator": "N",
+            "houseNumber": "",
+            "retailPrice": "799.99",
+            "lanes": [
+                {
+                    "lane": ""
+                }
+            ],
+            "sizes": [
+                {
+                    "size": null,
+                    "quantity": "100"
+                }
+            ],
+            "stores": [
+                {
+                    "store": "",
+                    "puertoRicoFlag": " ",
+                    "units": " ",
+                    "distroType": " ",
+                    "date": " ",
+                    "storeQuantity": " ",
+                    "cartonSequence": " ",
+                    "numberOfPacks": " ",
+                    "adDate": " ",
+                    "suppress": " ",
+                    "qtyToPrint": null,
+                    "puertoRicoStoreSeq": null,
+                    "puertoRicoStore": null
+                }
+            ]
+        },
+        "details": [
+            {
+                "pageNumber": "001",
+                "lineNumber": "001",
+                "style": "008608",
+                "type": "5",
+                "pastSeasonIndicator": " ",
+                "messageCode1": "",
+                "messageCode2": "",
+                "compareAtPrice": "000099999",
+                "compareAtUp": "false",
+                "retailPrice": "000079999",
+                "quantity": "0000010",
+                "houseNumber": "",
+                "pieces": "00",
+                "ladderPlanMMYY": "0426",
+                "ladderPlan": "20260401",
+                "frenchDescription": null,
+                "englishNoun": "",
+                "frenchNoun": "",
+                "category": "205",
+                "item": "",
+                "fact1": "",
+                "fact2": "",
+                "fact3": ""
+            }
+        ]
+    }
+}

@@ -92,9 +92,46 @@ def detect_from_header(header: str) -> DetectionResult:
     )
 
 
+# Calgary JSON layouts are identified by the ``data.type`` discriminator, not by
+# a positional header rule (JSON has no fixed byte layout).
+_JSON_TYPE_TO_LAYOUT = {
+    "styleHeaders": "CalgaryStyleHeader",
+    "cartonLabels": "CalgaryCartonLabel",
+    "distributionLabels": "CalgaryDistLabel",
+}
+
+
+def _detect_json(path: Path) -> Optional[DetectionResult]:
+    """Detect a Calgary JSON layout by its ``data.type``, or None if not JSON.
+
+    JSON is multi-line (a pretty-printed doc's first line is just ``{``), so this
+    reads the whole (small) file rather than the header line."""
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(64)
+    except OSError:
+        return None
+    if head.lstrip(_UTF8_BOM.encode("latin-1")).lstrip()[:1] != b"{":
+        return None                        # not a JSON document
+    try:
+        import json
+        text = Path(path).read_text(encoding="utf-8")
+        jtype = json.loads(text).get("data", {}).get("type")
+    except (ValueError, OSError):
+        return None
+    name = _JSON_TYPE_TO_LAYOUT.get(jtype)
+    if name is None:
+        return None
+    return DetectionResult(name, f"JSON data.type == {jtype!r}", "{", text[:80])
+
+
 def detect_layout(path) -> DetectionResult:
     """Detect the layout for an OK file at ``path``."""
-    header = read_header_line(Path(path))
+    path = Path(path)
+    js = _detect_json(path)
+    if js is not None:
+        return js
+    header = read_header_line(path)
     return detect_from_header(header)
 
 

@@ -1676,8 +1676,11 @@ def test_no_direct_record_construction_outside_okfile():
     """Rows must be built via okfile.new_record so delimited spans are computed.
 
     A bare ``Record(...)`` elsewhere silently reintroduces the marker-clobbering
-    bug, and only on delimited layouts — cheap to guard statically.
+    bug, and only on delimited layouts — cheap to guard statically. The JSON
+    engine's own ``JsonRecord`` (a distinct, byte-span-free class) is exempt —
+    the word-boundary match below only catches the fixed-width ``Record``.
     """
+    import re
     src = Path(__file__).resolve().parents[1] / "src" / "okgen"
     offenders = []
     for py in src.rglob("*.py"):
@@ -1685,7 +1688,7 @@ def test_no_direct_record_construction_outside_okfile():
             continue                            # parsing + new_record live here
         for i, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
             stripped = line.strip()
-            if "Record(" in stripped and "new_record(" not in stripped \
+            if re.search(r"\bRecord\(", stripped) and "new_record(" not in stripped \
                     and not stripped.startswith("#"):
                 offenders.append(f"{py.name}:{i}: {stripped}")
     assert not offenders, "build rows with okfile.new_record():\n" + "\n".join(offenders)

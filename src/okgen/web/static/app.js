@@ -228,6 +228,11 @@ function renderFileNode(node) {
   const nameEl = el("span", "file-name", node.name);
   nameEl.title = node.name;            // full name on hover (names truncate)
   row.appendChild(badge);
+  if (node.json) {                     // Calgary JSON layout — flag the format
+    const jtag = el("span", "json-tag", "JSON");
+    jtag.title = "JSON layout (" + (node.layout || "") + ")";
+    row.appendChild(jtag);
+  }
   row.appendChild(nameEl);
   if (node.duplicate) {
     const warn = el("span", "dup-warn", "⚠");

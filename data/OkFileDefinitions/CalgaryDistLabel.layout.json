@@ -1,0 +1,499 @@
+{
+  "name": "CalgaryDistLabel",
+  "json_mode": true,
+  "json_type": "distributionLabels",
+  "sections": [
+    {
+      "name": "Header",
+      "json_kind": "object",
+      "json_path": [
+        "header"
+      ],
+      "fields": [
+        {
+          "name": "type",
+          "size": 20,
+          "json_path": [
+            "type"
+          ],
+          "readonly": true
+        },
+        {
+          "name": "timestamp",
+          "json_path": [
+            "timestamp"
+          ],
+          "readonly": true
+        },
+        {
+          "name": "chain",
+          "size": 2,
+          "json_path": [
+            "header",
+            "chain"
+          ]
+        },
+        {
+          "name": "format",
+          "size": 1,
+          "json_path": [
+            "header",
+            "format"
+          ]
+        },
+        {
+          "name": "purchaseOrderNumber",
+          "size": 8,
+          "json_path": [
+            "header",
+            "purchaseOrderNumber"
+          ]
+        },
+        {
+          "name": "keytrol",
+          "size": 6,
+          "json_path": [
+            "header",
+            "keytrol"
+          ]
+        },
+        {
+          "name": "headerSuffix",
+          "size": 3,
+          "json_path": [
+            "header",
+            "headerSuffix"
+          ]
+        },
+        {
+          "name": "headerASNid",
+          "size": 20,
+          "json_path": [
+            "header",
+            "headerASNid"
+          ]
+        },
+        {
+          "name": "sequenceCode",
+          "size": 1,
+          "json_path": [
+            "header",
+            "sequenceCode"
+          ]
+        },
+        {
+          "name": "packId",
+          "size": 20,
+          "json_path": [
+            "header",
+            "packId"
+          ]
+        },
+        {
+          "name": "adIndicator",
+          "json_path": [
+            "header",
+            "adIndicator"
+          ]
+        },
+        {
+          "name": "style",
+          "size": 6,
+          "json_path": [
+            "header",
+            "style"
+          ]
+        },
+        {
+          "name": "laneRecords",
+          "size": 2,
+          "json_path": [
+            "header",
+            "laneRecords"
+          ]
+        },
+        {
+          "name": "noZoneRecords",
+          "json_path": [
+            "header",
+            "noZoneRecords"
+          ]
+        },
+        {
+          "name": "department",
+          "size": 2,
+          "json_path": [
+            "header",
+            "department"
+          ]
+        },
+        {
+          "name": "transmitDate",
+          "size": 10,
+          "json_path": [
+            "header",
+            "transmitDate"
+          ]
+        },
+        {
+          "name": "version",
+          "size": 10,
+          "json_path": [
+            "header",
+            "version"
+          ]
+        },
+        {
+          "name": "storeLines",
+          "json_path": [
+            "header",
+            "storeLines"
+          ]
+        },
+        {
+          "name": "price",
+          "size": 6,
+          "json_path": [
+            "header",
+            "price"
+          ]
+        },
+        {
+          "name": "area",
+          "size": 5,
+          "json_path": [
+            "header",
+            "area"
+          ]
+        },
+        {
+          "name": "instructions",
+          "size": 10,
+          "json_path": [
+            "header",
+            "instructions"
+          ]
+        },
+        {
+          "name": "vendorStyle",
+          "size": 8,
+          "json_path": [
+            "header",
+            "vendorStyle"
+          ]
+        },
+        {
+          "name": "description",
+          "size": 25,
+          "json_path": [
+            "header",
+            "description"
+          ]
+        },
+        {
+          "name": "category",
+          "size": 4,
+          "json_path": [
+            "header",
+            "category"
+          ]
+        },
+        {
+          "name": "totalQuantity",
+          "size": 7,
+          "json_path": [
+            "header",
+            "totalQuantity"
+          ]
+        },
+        {
+          "name": "lineCount",
+          "json_path": [
+            "header",
+            "lineCount"
+          ]
+        },
+        {
+          "name": "blockNumber",
+          "json_path": [
+            "header",
+            "blockNumber"
+          ]
+        },
+        {
+          "name": "numberOfBlocks",
+          "json_path": [
+            "header",
+            "numberOfBlocks"
+          ]
+        },
+        {
+          "name": "totalRetail",
+          "json_path": [
+            "header",
+            "totalRetail"
+          ]
+        },
+        {
+          "name": "pickListPrefix",
+          "size": 2,
+          "json_path": [
+            "header",
+            "pickListPrefix"
+          ]
+        },
+        {
+          "name": "pickListId",
+          "size": 5,
+          "json_path": [
+            "header",
+            "pickListId"
+          ]
+        },
+        {
+          "name": "pickListSequence",
+          "size": 4,
+          "json_path": [
+            "header",
+            "pickListSequence"
+          ]
+        },
+        {
+          "name": "distroDate",
+          "size": 8,
+          "json_path": [
+            "header",
+            "distroDate"
+          ]
+        },
+        {
+          "name": "numberOfpacks",
+          "size": 3,
+          "json_path": [
+            "header",
+            "numberOfpacks"
+          ]
+        },
+        {
+          "name": "numberOfStores",
+          "size": 4,
+          "json_path": [
+            "header",
+            "numberOfStores"
+          ]
+        },
+        {
+          "name": "aisle",
+          "size": 3,
+          "json_path": [
+            "header",
+            "aisle"
+          ]
+        },
+        {
+          "name": "slot",
+          "size": 3,
+          "json_path": [
+            "header",
+            "slot"
+          ]
+        },
+        {
+          "name": "tier",
+          "size": 2,
+          "json_path": [
+            "header",
+            "tier"
+          ]
+        },
+        {
+          "name": "locator",
+          "json_path": [
+            "header",
+            "locator"
+          ]
+        },
+        {
+          "name": "packSize",
+          "size": 3,
+          "json_path": [
+            "header",
+            "packSize"
+          ]
+        },
+        {
+          "name": "mdseDept",
+          "json_path": [
+            "header",
+            "mdseDept"
+          ]
+        },
+        {
+          "name": "tjmStyle",
+          "json_path": [
+            "header",
+            "tjmStyle"
+          ]
+        },
+        {
+          "name": "markdown",
+          "size": 1,
+          "json_path": [
+            "header",
+            "markdown"
+          ]
+        },
+        {
+          "name": "distroType",
+          "size": 2,
+          "json_path": [
+            "header",
+            "distroType"
+          ]
+        },
+        {
+          "name": "adDate",
+          "size": 4,
+          "json_path": [
+            "header",
+            "adDate"
+          ]
+        },
+        {
+          "name": "packType",
+          "size": 2,
+          "json_path": [
+            "header",
+            "packType"
+          ]
+        },
+        {
+          "name": "nested",
+          "size": 1,
+          "json_path": [
+            "header",
+            "nested"
+          ]
+        },
+        {
+          "name": "partial",
+          "size": 1,
+          "json_path": [
+            "header",
+            "partial"
+          ]
+        },
+        {
+          "name": "suppress",
+          "size": 1,
+          "json_path": [
+            "header",
+            "suppress"
+          ]
+        },
+        {
+          "name": "coordinateIndicator",
+          "size": 1,
+          "json_path": [
+            "header",
+            "coordinateIndicator"
+          ]
+        },
+        {
+          "name": "houseNumber",
+          "size": 9,
+          "json_path": [
+            "header",
+            "houseNumber"
+          ]
+        },
+        {
+          "name": "retailPrice",
+          "size": 6,
+          "json_path": [
+            "header",
+            "retailPrice"
+          ]
+        },
+        {
+          "name": "lanes",
+          "json_path": [
+            "header",
+            "lanes"
+          ]
+        },
+        {
+          "name": "sizes",
+          "json_path": [
+            "header",
+            "sizes"
+          ]
+        },
+        {
+          "name": "lpn",
+          "size": 20,
+          "json_path": [
+            "header",
+            "lpn"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Stores",
+      "json_kind": "array",
+      "json_path": [
+        "header",
+        "stores"
+      ],
+      "fields": [
+        {
+          "name": "store",
+          "size": 4
+        },
+        {
+          "name": "puertoRicoFlag"
+        },
+        {
+          "name": "units",
+          "size": 5
+        },
+        {
+          "name": "distroType",
+          "size": 2
+        },
+        {
+          "name": "date"
+        },
+        {
+          "name": "storeQuantity",
+          "size": 5
+        },
+        {
+          "name": "cartonSequence"
+        },
+        {
+          "name": "numberOfPacks",
+          "size": 3
+        },
+        {
+          "name": "adDate",
+          "size": 4
+        },
+        {
+          "name": "suppress",
+          "size": 1
+        },
+        {
+          "name": "qtyToPrint"
+        },
+        {
+          "name": "puertoRicoStoreSeq"
+        },
+        {
+          "name": "puertoRicoStore"
+        }
+      ]
+    }
+  ]
+}

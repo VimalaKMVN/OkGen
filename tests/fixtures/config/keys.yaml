@@ -7,3 +7,6 @@ unique_fields:
   EUPreticket: po
   EUStyleHeader: keytrol
   EUCartonLabel: keytrol
+  CalgaryStyleHeader: headerASNid
+  CalgaryDistLabel: headerASNid
+  CalgaryCartonLabel: pickListId

@@ -24,6 +24,12 @@ def is_ok_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() == OK_SUFFIX
 
 
+def _is_json_file(path: Path) -> bool:
+    # Calgary layout specs (*.layout.json) live in the data dir, not the tree.
+    return (path.is_file() and path.suffix.lower() == ".json"
+            and not path.name.endswith(".layout.json"))
+
+
 # --------------------------------------------------------------------------- #
 # File tree
 # --------------------------------------------------------------------------- #
@@ -54,6 +60,10 @@ def build_tree(root, config: Config, registry=None) -> dict:
             })
         elif is_ok_file(entry):
             children.append(_file_node(entry, config, registry))
+        elif _is_json_file(entry):
+            node = _file_node(entry, config, registry)
+            if node.get("layout"):        # only list JSON that detects as a layout
+                children.append(node)
 
     _flag_duplicate_keys(children)
     return {
@@ -117,25 +127,44 @@ def _delim_header_value(header: str, layout, field_name) -> Optional[str]:
     return toks[idx] if idx < len(toks) else None
 
 
+def _json_header(path: Path) -> dict:
+    """The flat ``data.header`` object of a Calgary JSON file (cheap, no parse)."""
+    import json
+    data = json.loads(Path(path).read_text(encoding="utf-8")).get("data", {})
+    return data.get("header", {}) or {}
+
+
 def _file_node(path: Path, config: Config, registry=None) -> dict:
     chain = ""
     layout = None
     key_field = None
     key_value = None
+    is_json = False
     try:
-        header = read_header_line(path)
-        layout = detect_from_header(header).layout
+        det = detect_layout(path)          # handles .OK (positional) and .json (data.type)
+        layout = det.layout
         reg_layout = registry.get(layout) if (layout and registry is not None) else None
-        delimited = bool(reg_layout is not None and getattr(reg_layout, "delimited", False))
-        # Delimited (EU) headers carry the chain in a token, not a fixed slice.
-        chain = (_delim_header_value(header, reg_layout, "chain") if delimited
-                 else header[1:3]) or ""
-        if reg_layout is not None:
+        if layout and _is_json_file(path):
+            # JSON: chain/key are named keys in data.header, not byte slices.
+            is_json = True
+            header = _json_header(path)
+            chain = (header.get("chain") or "").strip()
             key_field = config.unique_field(layout)
             if key_field:
-                key_value = (_delim_header_value(header, reg_layout, key_field) if delimited
-                             else _key_from_header(header, reg_layout,
-                                                   _header_field(reg_layout, key_field)))
+                v = header.get(key_field)
+                key_value = None if v is None else str(v).strip()
+        else:
+            header = read_header_line(path)
+            delimited = bool(reg_layout is not None and getattr(reg_layout, "delimited", False))
+            # Delimited (EU) headers carry the chain in a token, not a fixed slice.
+            chain = (_delim_header_value(header, reg_layout, "chain") if delimited
+                     else header[1:3]) or ""
+            if reg_layout is not None:
+                key_field = config.unique_field(layout)
+                if key_field:
+                    key_value = (_delim_header_value(header, reg_layout, key_field) if delimited
+                                 else _key_from_header(header, reg_layout,
+                                                       _header_field(reg_layout, key_field)))
     except Exception:
         pass
     info = config.chain(chain)
@@ -147,6 +176,7 @@ def _file_node(path: Path, config: Config, registry=None) -> dict:
         "chain": chain,
         "chain_info": chain_info,
         "layout": layout,
+        "json": is_json,
         "key_field": key_field,
         "key_value": key_value,
         "duplicate": False,
@@ -193,7 +223,7 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
             readonly = config.readonly_fields(layout_name)
             for f in sec.fields:
                 opts = config.options(f.name, chain=chain, layout=layout_name, fmt=fmt)
-                editable = f.name not in readonly
+                editable = f.name not in readonly and not getattr(f, "readonly", False)
                 # Chain edits can't cross an isolation boundary (e.g. Europe):
                 # offer only chains the current one may become; lock it when the
                 # only option is itself.
@@ -269,7 +299,18 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
     # marker shows as Latin-1 mojibake ("ï»¿Â¦" instead of "¦"). The on-disk
     # bytes are untouched; this only affects what the verify tab displays.
     raw_bytes = content
-    if getattr(okf.layout, "delimited", False):
+    if getattr(okf.layout, "json_mode", False):
+        # Raw tab is DISPLAY-ONLY: always pretty-print (indent) so a minified
+        # file reads vertically instead of one long line. The file on disk keeps
+        # its own formatting and still saves byte-exact — this reformats only the
+        # view. Reflects staged edits (raw_bytes == okf.to_bytes()).
+        import json as _json
+        try:
+            raw_text = _json.dumps(_json.loads(raw_bytes.decode("utf-8")),
+                                   indent=2, ensure_ascii=False)
+        except ValueError:
+            raw_text = raw_bytes.decode("utf-8", errors="replace")
+    elif getattr(okf.layout, "delimited", False):
         raw_text = raw_bytes.decode("utf-8-sig", errors="replace")
     else:
         raw_text = raw_bytes.decode(ENCODING)
@@ -669,6 +710,10 @@ def _assert_layout_stable(okf: OkFile) -> None:
     this is the backstop that holds if that list ever drifts (a new layout, a
     renamed field), and it covers every write path rather than every UI.
     """
+    # JSON layouts detect on the ``data.type`` discriminator (a readonly field),
+    # not a positional header signature — the header-line check doesn't apply.
+    if getattr(okf.layout, "json_mode", False):
+        return
     head = okf.to_bytes().split(b"\n", 1)[0].decode(ENCODING).rstrip("\r\n")
     det = detect_from_header(head)
     if det.layout == okf.layout.name:
@@ -1127,8 +1172,7 @@ def _format_key(prefix: str, value: int, size: int, suffix: str = "",
 def _read_key_int(path: Path, registry, config):
     """(layout, key_field, int_value | None, KeyParts) for a file's unique key."""
     try:
-        header = read_header_line(path)
-        layout = detect_from_header(header).layout
+        layout = detect_layout(path).layout        # .OK (positional) or .json (data.type)
     except Exception:
         return (None, None, None, KeyParts("", None, "", 0))
     if not layout:
@@ -1137,11 +1181,14 @@ def _read_key_int(path: Path, registry, config):
     if not kf:
         return (layout, None, None, KeyParts("", None, "", 0))
     reg_layout = registry.get(layout)
-    if getattr(reg_layout, "delimited", False):
-        raw = _delim_header_value(header, reg_layout, kf)
+    if getattr(reg_layout, "json_mode", False):
+        # JSON: the key is a named header value, not a header-line slice.
+        raw = _json_header(path).get(kf)
+    elif getattr(reg_layout, "delimited", False):
+        raw = _delim_header_value(read_header_line(path), reg_layout, kf)
     else:
-        f = _header_field(reg_layout, kf)
-        raw = _key_from_header(header, reg_layout, f)
+        raw = _key_from_header(read_header_line(path), reg_layout,
+                               _header_field(reg_layout, kf))
     parts = _split_key(raw)
     return (layout, kf, parts.value, parts)
 
@@ -1184,7 +1231,7 @@ def _folder_key_state(folder: Path, registry, config, exclude: set):
     used: Dict[tuple, set] = {}
     maxv: Dict[tuple, int] = {}
     for entry in folder.iterdir():
-        if not is_ok_file(entry) or entry.resolve() in exclude:
+        if not (is_ok_file(entry) or _is_json_file(entry)) or entry.resolve() in exclude:
             continue
         layout, kf, val, parts = _read_key_int(entry, registry, config)
         if layout and kf and val is not None:
@@ -1229,7 +1276,8 @@ def make_unique_in_folder(folder, registry, config, backup=True) -> dict:
     folder = Path(folder)
     if not folder.is_dir():
         raise EditError(f"not a folder: {folder}")
-    files = sorted([p for p in folder.iterdir() if is_ok_file(p)], key=lambda p: p.name.lower())
+    files = sorted([p for p in folder.iterdir() if is_ok_file(p) or _is_json_file(p)],
+                   key=lambda p: p.name.lower())
     used: Dict[tuple, set] = {}
     maxv: Dict[tuple, int] = {}
     rekeyed = []

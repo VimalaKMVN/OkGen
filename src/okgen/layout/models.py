@@ -27,6 +27,13 @@ class Field:
     sample_value: Optional[str] = None         # Value column (expected slice)
     field_id: Optional[str] = None
     issues: List[str] = field(default_factory=list)
+    # JSON engine only: absolute key path from ``data`` to this field's value
+    # (e.g. ["header", "chain"] or ["type"]). None for fixed-width/delimited
+    # fields and for array-section fields (which are addressed by name within
+    # their element). ``readonly`` marks a field the editor shows but never edits
+    # (e.g. the ``type`` discriminator, ``timestamp``).
+    json_path: Optional[List[str]] = None
+    readonly: bool = False
 
     @property
     def end(self) -> Optional[int]:
@@ -71,6 +78,12 @@ class Section:
     # blank row is present in the file being edited to copy from. None when the
     # reference has no filler row.
     filler_raw: Optional[str] = None
+    # JSON engine only. ``json_path`` is the key path from ``data`` to this
+    # section's location (e.g. ["header"] or ["header", "stores"] or ["details"]).
+    # ``json_kind`` is "object" (a single record over that object, e.g. the flat
+    # header) or "array" (one record per element of that array).
+    json_path: Optional[List[str]] = None
+    json_kind: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +94,8 @@ class Section:
             "marker": self.marker,
             "sample_raw": self.sample_raw,
             "filler_raw": self.filler_raw,
+            "json_path": self.json_path,
+            "json_kind": self.json_kind,
             "ignored_fields": self.ignored_fields,
             "issues": self.issues,
             "fields": [f.to_dict() for f in self.fields],
@@ -102,6 +117,12 @@ class Layout:
     delimited: bool = False
     delimiter: str = "|"
     record_terminator: str = "\\"
+    # JSON engine (3rd mode): records are addressed by key path into a parsed
+    # JSON document, not by byte span. ``json_type`` is the ``data.type``
+    # discriminator this layout matches (styleHeaders / cartonLabels /
+    # distributionLabels). Fixed-width and delimited layouts leave these off.
+    json_mode: bool = False
+    json_type: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -111,6 +132,8 @@ class Layout:
             "delimited": self.delimited,
             "delimiter": self.delimiter,
             "record_terminator": self.record_terminator,
+            "json_mode": self.json_mode,
+            "json_type": self.json_type,
             "issues": self.issues,
             "sections": [s.to_dict() for s in self.sections],
         }

@@ -358,3 +358,48 @@ def compile_dir(data_dir: Path) -> List[Layout]:
     for xlsx in sorted(data_dir.glob("*.xlsx")):
         layouts.append(compile_layout(xlsx))
     return layouts
+
+
+def load_json_layouts(data_dir: Path) -> List[Layout]:
+    """Load hand-authored JSON-engine layout specs (``*.layout.json``).
+
+    These layouts have no byte positions — each field is addressed by key path
+    into a parsed JSON document (see the JSON engine). The spec is a small JSON
+    file (Calgary StyleHeader/CartonLabel/DistLabel) listing sections, each with
+    a ``json_path``/``json_kind`` and its fields (name, optional max-length
+    ``size``, optional absolute ``json_path``, ``readonly``)."""
+    import json
+
+    data_dir = Path(data_dir)
+    layouts: List[Layout] = []
+    for spec_path in sorted(data_dir.glob("*.layout.json")):
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        sections = []
+        for s in spec.get("sections", []):
+            fields = [
+                Field(
+                    name=f["name"],
+                    field_name=f.get("field_name", f["name"]),
+                    size=f.get("size"),
+                    start=None,                       # JSON has no byte positions
+                    field_type=f.get("field_type", "char"),
+                    json_path=f.get("json_path"),
+                    readonly=f.get("readonly", False),
+                )
+                for f in s.get("fields", [])
+            ]
+            sections.append(Section(
+                name=s["name"],
+                tab=s.get("tab", s["name"]),
+                fields=fields,
+                json_path=s.get("json_path"),
+                json_kind=s.get("json_kind"),
+            ))
+        layouts.append(Layout(
+            name=spec["name"],
+            source_file=spec_path.name,
+            sections=sections,
+            json_mode=True,
+            json_type=spec.get("json_type"),
+        ))
+    return layouts

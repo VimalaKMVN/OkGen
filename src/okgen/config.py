@@ -117,6 +117,11 @@ class Config:
         isolated_chain_groups: Optional[List[set]] = None,
     ):
         self._chains = chains
+        # Calgary JSON files carry the chain as a code ("04") OR a name
+        # ("Winners"/"HomeSense"), so resolve a name back to its banner too.
+        self._chain_by_name = {
+            info.name.strip().lower(): info for info in (chains or {}).values()
+        }
         self._rules = rules
         self._limits = limits or {}
         self._unique_fields = unique_fields or {}
@@ -146,7 +151,10 @@ class Config:
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
         if code is None:
             return None
-        return self._chains.get(code)
+        info = self._chains.get(code)
+        if info is None:                       # accept a chain NAME (Calgary JSON)
+            info = self._chain_by_name.get(str(code).strip().lower())
+        return info
 
     def chains(self) -> Dict[str, ChainInfo]:
         return dict(self._chains)

@@ -194,6 +194,20 @@ body {
 }
 .file-name { overflow: hidden; text-overflow: ellipsis; }
 .dup-warn { margin-left: 5px; color: #e0b000; cursor: help; flex: 0 0 auto; }
+.json-tag {
+  margin-left: 4px;
+  padding: 0 4px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 3px;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #fff;
+  background: #6b21a8;   /* distinct from the chain badge */
+  flex: 0 0 auto;
+}
 
 /* Bulk Edit button draws attention while files are multi-selected */
 #bulkBtn:not(.hidden) {
