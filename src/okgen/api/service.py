@@ -2091,14 +2091,21 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         base = config is not None and config.is_literal(okf.layout.name, hf["name"])
         header.set(hf["name"], val, literal=base or val == "")   # blank pick -> spaces
 
-    # 4. user-chosen detail fields — a fresh value per ROW, not per file
+    # 4. user-chosen detail fields — a fresh value per ROW, not per file. In a
+    # zero-filled section (Preticket Lane) the trailing all-zero filler rows are
+    # structural padding, not data, so they are SKIPPED — otherwise randomizing
+    # a field would "activate" the filler rows into real ones.
+    hidden = config.hidden_fields(okf.layout.name) if config else set()
     for df in spec.get("detail_fields") or []:
         f = _field_in_section(okf.layout, df["section"], df["name"])
         if f is None or not f.size:
             continue
         sec = next(s for s in okf.layout.sections if s.name == df["section"])
+        fm = config is not None and config.zero_fill(okf.layout.name, df["section"])
         base = config is not None and config.is_literal(okf.layout.name, df["name"])
         for r in (r for r in okf.records if r.section is sec):
+            if fm and _is_blank_row(r, hidden):
+                continue                          # leave filler rows untouched
             val = _spec_value(df, f.size, df["name"])
             r.set(df["name"], val, literal=base or val == "")    # blank pick -> spaces
 

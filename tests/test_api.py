@@ -3051,3 +3051,55 @@ def test_instructions_is_literal_exact(tmp_path, registry, config):
         assert got == typed.ljust(width), f"{typed!r} -> {got!r}"
         assert "0" not in got[len(typed):], f"tail zero-padded: {got!r}"   # spaces only
         assert service.parse_file_view(w, registry, config)["roundtrip_ok"]
+
+
+def test_generation_does_not_touch_filler_rows(tmp_path, registry, config):
+    """Regression: randomizing a detail field during volume generation must NOT
+    write into the Preticket zero-filler rows (that would 'activate' them into
+    real rows and inflate line_count). Only the real rows get values."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    res = service.generate_apply(work, {
+        "count": 4,
+        "detail_fields": [{"section": "Lane", "name": "size", "values": "XS,S,M"},
+                          {"section": "Lane", "name": "message1", "values": "AA,BB"}],
+        "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"},
+        registry, config)
+
+    for f in Path(res["folder"]).glob("*.OK"):
+        view = service.parse_file_view(f, registry, config)
+        real, filler = _lane_split(view)
+        assert len(real) == 4 and len(filler) == 10
+        assert _line_count(view) == "04", _line_count(view)
+        # real rows got the randomized values, from the allowed sets
+        for r in real:
+            assert r["values"]["size"].strip() in ("XS", "S", "M")
+            assert r["values"]["message1"].strip() in ("AA", "BB")
+        # filler rows are still genuine all-zero rows (untouched)
+        for r in filler:
+            for name, val in r["values"].items():
+                assert (val or "").strip("0 ") == "", f"filler {name}={val!r} not blank"
+        assert view["roundtrip_ok"]
+
+
+def test_generation_row_count_variation_keeps_filler_clean(tmp_path, registry, config):
+    """Row-count variation + field randomization: real rows vary and carry the
+    random values, filler stays all-zero and line_count = real count."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    res = service.generate_apply(work, {
+        "count": 6,
+        "detail_fields": [{"section": "Lane", "name": "size", "values": "XS,S"}],
+        "row_counts": [{"section": "Lane", "min": 2, "max": 6}],
+        "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"},
+        registry, config)
+
+    for f in Path(res["folder"]).glob("*.OK"):
+        view = service.parse_file_view(f, registry, config)
+        real, filler = _lane_split(view)
+        assert 2 <= len(real) <= 6
+        assert len(filler) == 10
+        assert _line_count(view) == str(len(real)).zfill(2)
+        assert all(r["values"]["size"].strip() in ("XS", "S") for r in real)
+        for r in filler:
+            assert all((v or "").strip("0 ") == "" for v in r["values"].values())
