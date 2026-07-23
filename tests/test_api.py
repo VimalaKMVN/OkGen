@@ -2361,6 +2361,86 @@ def test_fill_add_first_row_to_empty_lane(tmp_path, registry, config):
     assert view["roundtrip_ok"]
 
 
+def test_fill_bulk_add_grows_real_rows(tmp_path, registry, config):
+    """Regression: bulk 'add' on Preticket's Lane must add REAL rows, not clone
+    a trailing zero-filler row (which _apply_detail_fill re-absorbs, so nothing
+    was actually added). 4 real -> add 3 -> 7 real + 10 filler, line_count 07."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    real0, _ = _lane_split(service.parse_file_view(work, registry, config))
+    assert len(real0) == 4
+
+    res = service.bulk_op_apply([str(work)], "Preticket", "Lane",
+                                {"type": "add", "count": 3}, registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+    view = service.parse_file_view(work, registry, config)
+    real, filler = _lane_split(view)
+    assert len(real) == 7, f"real rows did not grow: {len(real)}"   # 4 + 3
+    assert len(filler) == 10
+    assert _line_count(view) == "07"
+    assert view["roundtrip_ok"]
+
+
+def test_fill_single_add_after_filler_row_still_adds_real(tmp_path, registry, config):
+    """Regression: single-file add in a fill-managed section adds a REAL row even
+    when the anchor is a filler row, or when no anchor is given (section append)
+    — both used to clone the all-zero filler and net zero real rows added."""
+    base = service.parse_file_view(DATA_DIR / "Preticket.OK", registry, config)
+    si = next(s["index"] for s in base["sections"] if s["name"] == "Lane")
+    lane = next(s for s in base["sections"] if s["name"] == "Lane")["records"]
+    filler_idx = next(r["index"] for r in lane
+                      if all((v or "").strip("0 ") == "" for v in r["values"].values()))
+
+    for label, anchor in [("after-filler", filler_idx), ("section-append", None)]:
+        work = tmp_path / f"Preticket_{label}.OK"
+        shutil.copy2(DATA_DIR / "Preticket.OK", work)
+        real0, _ = _lane_split(service.parse_file_view(work, registry, config))
+        service.add_record(work, section_index=si, registry=registry, config=config,
+                           after_index=anchor, backup=False)
+        view = service.parse_file_view(work, registry, config)
+        real, filler = _lane_split(view)
+        assert len(real) == len(real0) + 1, f"{label}: real {len(real0)} -> {len(real)}"
+        assert len(filler) == 10
+        assert view["roundtrip_ok"]
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_bulk_add_grows_real_rows_every_section_all_layouts(tmp_path, registry, config, sample):
+    """Bulk 'add' adds REAL (non-blank) rows in EVERY non-header section of EVERY
+    layout — never silently clones a filler/blank row. A section at its
+    max_records limit reports 'unchanged'; a section with no seed template (the
+    known DistLabels/TSticker gap) reports 'error'. Neither is the filler bug."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(DATA_DIR / sample, registry, config)
+    layout = view["layout"]
+    header_name = view["sections"][0]["name"]
+
+    def real_count(v, secname):
+        rows = next(s for s in v["sections"] if s["name"] == secname)["records"]
+        return sum(1 for r in rows
+                   if any((x or "").strip("0 ") for x in r["values"].values()))
+
+    exercised = 0
+    for sec in view["sections"]:
+        if sec["name"] == header_name:
+            continue
+        work = tmp_path / f"{sec['name']}_{sample}"
+        shutil.copy2(DATA_DIR / sample, work)
+        before = real_count(service.parse_file_view(work, registry, config), sec["name"])
+        res = service.bulk_op_apply([str(work)], layout, sec["name"],
+                                    {"type": "add", "count": 2}, registry, config, backup=False)
+        st = res["results"][0]["status"]
+        after = real_count(service.parse_file_view(work, registry, config), sec["name"])
+        if st in ("unchanged", "error"):
+            continue                                   # at-limit or no-template (not the bug)
+        assert st == "changed", f"{layout}/{sec['name']}: {res['results'][0]}"
+        assert after == before + 2, \
+            f"{layout}/{sec['name']}: real rows {before} -> {after} (bulk add cloned filler?)"
+        exercised += 1
+    assert exercised > 0, f"{layout}: no section exercised a real add"
+
+
 def test_fill_generation_produces_filler(tmp_path, registry, config):
     work = tmp_path / "Preticket.OK"
     shutil.copy2(DATA_DIR / "Preticket.OK", work)

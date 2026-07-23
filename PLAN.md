@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.31.0-list-quoted-spaces`.
+> Baseline: top of `main` = tag `v0.31.1-bulk-add-real-rows`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -83,7 +83,9 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.31.0-list-quoted-spaces`.** **Tests: 352 passing, 4 skipped** (351 Python + 1 Node smoke suite).
+- **Top of `main` = tag `v0.31.1-bulk-add-real-rows`.** **Tests: 361 passing, 4 skipped** (360 Python + 1 Node smoke suite).
+  **Bulk "Add row" (and single-file add) now add REAL rows in a fill-managed section** (fixes a D16 interaction). On Preticket, "Bulk Edit → Add row" appeared to do nothing — real rows never grew. Root cause: the Lane's trailing all-zero **filler** rows are the section's last rows, and the add path cloned the *last* row (`recs[-1]`) = a filler row; that all-zero clone was then re-absorbed by `_apply_detail_fill`, so nothing real was added. Fix: bulk add now clones the last **real** (non-blank) row and counts/limits against real rows (the fill pass re-establishes the 10 filler after); single-file `_op_add` likewise redirects away from a filler anchor (or a section-only append) to the last real row, seeding fresh only if the section holds no real rows. Only **Preticket** (`zeros>0`) was affected — every other layout's add already worked, but the fix is general. **Swept across all 7 layouts × every non-header section**: Preticket Lane 4→6, StyleHeader Size/Lane (Lane correctly "at limit"), DistLabels Store (TSticker still the known no-seed-data gap), CartonLabel store, EUPreticket Lane, EU GTA Lane/Detail — all grow real rows or cap/err correctly. Pinned by regression tests **verified to fail on the pre-fix code** (real rows 4→4).
+- **Prior top of `main` = tag `v0.31.0-list-quoted-spaces`** (352 passing).
   **Significant spaces now survive in value lists and the editor** (D19). Yesterday's literal-field work (D15) kept spaces on the single-value paths, but the **bulk "random from list"** and **volume generate** value lists silently trimmed every entry (client pre-split+trimmed, then server `_clean_values.strip()`), and the section **editor** filled a literal input to full width so `maxLength` blocked typing a leading space. Fixes:
   - **Leading/trailing spaces in a list** → wrap the entry in quotes: `'   msg01'`, `'msg01  '`. `_unwrap_quoted` generalizes the D18 blank token — quoted entries are kept verbatim; bare entries stay trimmed (`10, 20, 30` unaffected); an all-spaces interior is still the blank `""`. The list/generate `literal=` decision also fires on any space-padded pick, so quoted spaces write literally on **any** field type (never zero-padded).
   - **Middle spaces** (`msg  01`) need **no quotes anywhere** — trimming only touches the ends. Works bare in single edit, bulk set, bulk list, and generation.
@@ -176,7 +178,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 352
+.venv/bin/python -m pytest tests/ -q              # currently 361
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```

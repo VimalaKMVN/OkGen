@@ -589,6 +589,23 @@ def _op_add(okf: OkFile, config: Config, section_index=None, after_index=None) -
             seeded = True
 
     sec = template.section
+    # Fill-managed section (Preticket Lane): never clone a filler (all-zero) row —
+    # whether it was the chosen anchor or the section's last row, the fill pass
+    # re-absorbs an all-zero clone on save, so nothing is actually added. Redirect
+    # to the last REAL row (or seed a fresh one when the section holds only filler).
+    if not seeded and config is not None and sec is not None \
+            and config.zero_fill(okf.layout.name, sec.name):
+        hidden = config.hidden_fields(okf.layout.name)
+        if _is_blank_row(template, hidden):
+            real = [r for r in okf.records if r.section is sec and not _is_blank_row(r, hidden)]
+            if real:
+                template = real[-1]
+            else:
+                template = _seed_record(okf, sec, config)
+                if template is None:
+                    raise EditError(f"section '{sec.name}' has no template to seed a row")
+                seeded = True
+
     sec_count = sum(1 for r in okf.records if r.section is sec)
     limit = config.max_records(okf.layout.name, sec.name) if config else None
     if limit is not None and sec_count >= limit:
@@ -1470,32 +1487,48 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
         n = int(op.get("count", 0))
 
         if t == "add":
+            # In a FILL-MANAGED section (Preticket Lane) the trailing all-zero
+            # rows are structural filler, not data. `recs` here still includes
+            # them (the filler exclusion above only covers set/random/unique/list),
+            # so cloning the last row would clone a FILLER row — another all-zero
+            # row that `_apply_detail_fill` re-absorbs, adding nothing real. Clone
+            # the last REAL row instead, and count/limit against real rows; the
+            # fill pass re-establishes the filler block (real + N filler) after.
+            fill_managed = config is not None and config.zero_fill(layout_name, section_name)
+            if fill_managed:
+                hidden = config.hidden_fields(layout_name)
+                real = [r for r in recs if not _is_blank_row(r, hidden)]
+            else:
+                real = recs
+            base = len(real)
             limit = config.max_records(layout_name, section_name)
-            room = max(0, (limit - before)) if limit is not None else n
+            room = max(0, (limit - base)) if limit is not None else n
             to_add = min(n, room)
             if to_add <= 0:
-                note = "at limit" if (limit is not None and before >= limit) else "nothing to add"
-                return {"name": name, "status": "unchanged", "detail": f"{before} row(s); {note}"}
-            if recs:
-                template = recs[-1]
+                note = "at limit" if (limit is not None and base >= limit) else "nothing to add"
+                return {"name": name, "status": "unchanged", "detail": f"{base} row(s); {note}"}
+            if real:
+                template = real[-1]                       # clone the last REAL row
                 insert_at = okf.records.index(template) + 1
+                seeded = 0
             else:
-                # Empty section: seed the first row from the reference line and
-                # place it in canonical section order.
+                # No real rows (empty section, or only filler): seed the first row
+                # from the reference line and place it in canonical section order.
                 template = _seed_record(okf, sec, config)
                 if template is None:
                     return {"name": name, "status": "error",
                             "error": f"section '{section_name}' has no template to seed a row"}
                 insert_at = _insert_in_section_order(okf, template, sec) + 1
-            for i in range(to_add if recs else to_add - 1):
+                seeded = 1
+            for i in range(to_add - seeded):
                 clone = new_record(template.raw.rstrip("\r"), template.section, okf.layout,
                                    offset=template.offset, index=template.index)
                 okf.records.insert(insert_at + i, clone)
             _normalize_eols(okf)
-            new_count = before + to_add
+            new_count = base + to_add
             _sync_count(okf, layout_name, section_name, new_count, config)
             capped = n - to_add
-            detail = f"{before} -> {new_count}" + (f"  (capped, {capped} not added)" if capped else "")
+            detail = f"{base} -> {new_count}" + (f"  (capped, {capped} not added)" if capped else "")
             return {"name": name, "status": "change", "detail": detail, "okf": okf}
 
         # keep first N
