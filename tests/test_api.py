@@ -2845,3 +2845,90 @@ def test_blank_every_size_field_all_sections(tmp_path, registry, config, sample)
     # every layout except DistLabels has at least one size field
     if layout != "DistLabels":
         assert tested > 0, f"{layout}: no size field exercised"
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_blank_every_message_field_all_sections(tmp_path, registry, config, sample):
+    """Exhaustive, mirroring the size sweep: for EVERY layout, discover EVERY
+    message-like editable field in EVERY section (message1/message2 on
+    StyleHeader/Preticket/EUPreticket; message_code_1/2 on the EU GTA Detail)
+    and assert it blanks to spaces via the ' ' token in single-file edit, bulk
+    set, bulk 'random from list' (blank as a choice), and volume generation."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(DATA_DIR / sample, registry, config)
+    layout = view["layout"]
+
+    def spaces(v):
+        return v.strip() == "" and set(v) == {" "}
+
+    def is_filler(r):
+        return all((v or "").strip("0 ") == "" for v in r["values"].values())
+
+    for sec in view["sections"]:
+        fields = [f for f in sec["fields"]
+                  if "message" in f["name"].lower() and f.get("size")
+                  and not f.get("hidden") and not f.get("derived") and f.get("editable")]
+        if not sec["records"] or not fields:
+            continue
+        fm = bool(config.zero_fill(layout, sec["name"]))
+        for f in fields:
+            fname = f["name"]
+
+            # single-file edit
+            a = tmp_path / f"a_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, a)
+            s = next(x for x in service.parse_file_view(a, registry, config)["sections"]
+                     if x["name"] == sec["name"])
+            service.apply_edits(a, [{"section_index": sec["index"],
+                                     "record_index": s["records"][0]["index"],
+                                     "field": fname, "value": "' '"}],
+                                registry, config=config, backup=False)
+            av = service.parse_file_view(a, registry, config)
+            got = next(x for x in av["sections"] if x["name"] == sec["name"])["records"][0]["values"][fname]
+            assert spaces(got), f"{layout}/{sec['name']}/{fname} single -> {got!r}"
+            assert av["roundtrip_ok"]
+
+            # bulk set
+            b = tmp_path / f"b_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, b)
+            res = service.bulk_op_apply([str(b)], layout, sec["name"],
+                                        {"type": "set", "field": fname, "value": "'   '"},
+                                        registry, config, backup=False)
+            assert res["results"][0]["status"] in ("changed", "unchanged")
+            for r in next(x for x in service.parse_file_view(b, registry, config)["sections"]
+                          if x["name"] == sec["name"])["records"]:
+                if fm and is_filler(r):
+                    continue
+                assert spaces(r["values"][fname]), f"{layout}/{sec['name']}/{fname} bulk -> {r['values'][fname]!r}"
+
+            # bulk 'random from list' with a blank choice
+            c = tmp_path / f"c_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, c)
+            service.bulk_op_apply([str(c)], layout, sec["name"],
+                                  {"type": "list", "field": fname, "values": ["AA", "' '"]},
+                                  registry, config, backup=False)
+            vals = {r["values"][fname].strip()
+                    for r in next(x for x in service.parse_file_view(c, registry, config)["sections"]
+                                  if x["name"] == sec["name"])["records"]
+                    if not (fm and is_filler(r))}
+            assert vals <= {"AA", ""}, f"{layout}/{sec['name']}/{fname} list -> {vals}"
+
+            # volume generation with a blank choice
+            g = tmp_path / f"g_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, g)
+            spec = {"count": 12, "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"}
+            if sec["is_header"]:
+                spec["header_fields"] = [{"name": fname, "values": "AA,' '"}]
+            else:
+                spec["detail_fields"] = [{"section": sec["name"], "name": fname, "values": "AA,' '"}]
+            res = service.generate_apply(g, spec, registry, config)
+            seen = set()
+            for gf in Path(res["folder"]).glob("*.OK"):
+                gs = next(x for x in service.parse_file_view(gf, registry, config)["sections"]
+                          if x["name"] == sec["name"])
+                for r in gs["records"]:
+                    if fm and is_filler(r):
+                        continue
+                    seen.add(r["values"][fname].strip())
+            assert seen <= {"AA", ""}, f"{layout}/{sec['name']}/{fname} gen -> {seen}"
