@@ -261,12 +261,18 @@ def _launch_bat(bat: Path) -> None:
     and does its own reporting)."""
     folder = str(bat.parent)
     if os.name == "nt":
-        # Open the .bat in its OWN console window — like double-clicking it — with
-        # its folder as the working directory, so the user SEES TOSCA run (and any
-        # error). ``start "" /D <dir> <bat>``: the empty "" is the window title so
-        # a quoted path isn't mistaken for it. The launching cmd exits at once.
-        subprocess.Popen(["cmd", "/c", "start", "", "/D", folder, str(bat)],
-                         close_fds=True)
+        # Force a NEW, VISIBLE console window for the .bat so the user sees the
+        # "TOSCA started" screen (and any error). CREATE_NEW_CONSOLE makes Windows
+        # allocate a fresh console regardless of whether OkGen itself has one;
+        # ``cmd /k`` keeps the window open so a quick failure doesn't vanish. cwd
+        # = the bat's folder. Fire-and-forget. Falls back to the shell "open"
+        # (like double-clicking) if that ever fails.
+        CREATE_NEW_CONSOLE = 0x00000010
+        try:
+            subprocess.Popen(["cmd", "/k", str(bat)], cwd=folder,
+                             creationflags=CREATE_NEW_CONSOLE, close_fds=True)
+        except Exception:                               # noqa: BLE001
+            os.startfile(str(bat))                      # last resort
     else:
         # Non-Windows (dev/CI): run the script directly in a new session. A real
         # .bat won't execute here, but an executable stub does — enough to prove
