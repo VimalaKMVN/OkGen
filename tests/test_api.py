@@ -2520,3 +2520,75 @@ def test_preticket_over_99_rows_keeps_count_and_filler(tmp_path, registry, confi
     assert len(filler) == 10                              # filler still maintained
     assert _line_count(view) == before_lc                # count left as-is (frozen)
     assert view["roundtrip_ok"]
+
+
+# --------------------------------------------------------------------------- #
+# Volume generation from MULTIPLE templates
+# --------------------------------------------------------------------------- #
+def _three_styleheader_templates(tmp_path, registry, config):
+    paths = []
+    for i, kt in enumerate(["550001", "550002", "550003"]):
+        p = tmp_path / f"t{i}.OK"
+        shutil.copy2(DATA_DIR / "StyleHeader.OK", p)
+        service.apply_edits(p, [{"section_index": 0, "record_index": 0,
+                                 "field": "keytrol", "value": kt}],
+                            registry, config=config, backup=False)
+        paths.append(str(p))
+    return paths
+
+
+def test_generate_scope_accepts_multiple_templates(tmp_path, registry, config):
+    paths = _three_styleheader_templates(tmp_path, registry, config)
+    scope = service.generate_scope(paths, registry, config)
+    assert scope["template_count"] == 3
+    assert scope["layout"] == "StyleHeader"
+    assert scope["paths"] == paths
+
+
+def test_generate_from_pool_uses_all_templates_unique_keys(tmp_path, registry, config):
+    paths = _three_styleheader_templates(tmp_path, registry, config)
+    res = service.generate_apply(paths, {
+        "count": 30,
+        "name_parts": [{"type": "token", "name": "orig"}, {"type": "token", "name": "seq"}],
+        "separator": "_"}, registry, config)
+
+    files = sorted(Path(res["folder"]).glob("*.OK"))
+    assert len(files) == 30
+    keys, origins = set(), set()
+    for f in files:
+        view = service.parse_file_view(f, registry, config)
+        assert view["layout"] == "StyleHeader" and view["roundtrip_ok"]
+        keys.add(view["sections"][0]["records"][0]["values"]["keytrol"].strip())
+        origins.add(f.name.split("_")[0])            # the 'orig' token = template stem
+    assert len(keys) == 30, "keys must be unique across the whole batch"
+    assert len(origins) > 1, "a pool of 3 should draw from more than one template"
+
+
+def test_generate_rejects_mixed_layout_templates(tmp_path, registry, config):
+    a = tmp_path / "a.OK"; shutil.copy2(DATA_DIR / "StyleHeader.OK", a)
+    b = tmp_path / "b.OK"; shutil.copy2(DATA_DIR / "CartonLabel.OK", b)
+    with pytest.raises(service.EditError, match="same layout"):
+        service.generate_scope([str(a), str(b)], registry, config)
+    with pytest.raises(service.EditError, match="same layout"):
+        service.generate_apply([str(a), str(b)], {"count": 3}, registry, config)
+
+
+def test_generate_single_template_backward_compatible(tmp_path, registry, config):
+    """A bare path string still works (single-template path)."""
+    p = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", p)
+    scope = service.generate_scope(str(p), registry, config)
+    assert scope["template_count"] == 1
+    res = service.generate_apply(str(p), {
+        "count": 4, "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"},
+        registry, config)
+    assert res["written"] == 4
+
+
+def test_generate_pool_preview_names_template(tmp_path, registry, config):
+    paths = _three_styleheader_templates(tmp_path, registry, config)
+    pv = service.generate_preview(paths, {
+        "count": 8, "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"},
+        registry, config)
+    assert pv["templates"] == 3
+    assert all(r["template"] for r in pv["sample"])   # each row records its source

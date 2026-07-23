@@ -54,12 +54,13 @@ const scope = {
     { name: "NoNumeric", rows: 0, max_records: null, fields: [] },
   ],
   palette: { derived: ["brand", "layout"], header_fields: ["chain", "dept"], custom: {} },
+  template_count: 1,
   default_folder: "/tmp/generated_StyleHeader_0",
 };
 
 const panel = doc.querySelector("#generatePanel");
 try {
-  api.renderGeneratePanel(panel, scope.path, scope);
+  api.renderGeneratePanel(panel, [scope.path], scope);
 } catch (e) {
   console.error("FAIL: renderGeneratePanel threw:", e.message);
   process.exit(1);
@@ -118,12 +119,14 @@ btn.click();
 
 setTimeout(() => {
   const applied = calls.filter((c) => c.url.includes("/api/generate/apply"));
+  const usesPaths = applied.length && Array.isArray(applied[0].body.paths);
   const previewed = calls.filter((c) => c.url.includes("/api/generate/preview"));
   const ok2 = applied.length === 1;
   const ok3 = previewed.length >= 1;
   console.log(`  ${ok3 ? "PASS" : "FAIL"}  preview request issued (${previewed.length})`);
   console.log(`  ${ok2 ? "PASS" : "FAIL"}  second click POSTs /api/generate/apply (${applied.length})`);
-  if (!ok2 || !ok3) process.exit(1);
+  console.log(`  ${usesPaths ? "PASS" : "FAIL"}  apply request carries a paths[] array`);
+  if (!ok2 || !ok3 || !usesPaths) process.exit(1);
   const spec = applied[0].body.spec;
   const ok4 = spec.count === 100 && Array.isArray(spec.name_parts) && spec.name_parts.length === 3;
   console.log(`  ${ok4 ? "PASS" : "FAIL"}  spec carries count + name parts (${JSON.stringify(spec.name_parts)})`);

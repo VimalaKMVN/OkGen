@@ -151,7 +151,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def generate_scope():
         body = request.get_json(force=True, silent=True) or {}
         try:
-            return jsonify(service.generate_scope(body.get("path"), registry, config))
+            return jsonify(service.generate_scope(
+                body.get("paths") or body.get("path"), registry, config))
         except FileNotFoundError:
             return _err(f"not found: {body.get('path')}", 404)
         except ValueError as exc:
@@ -162,7 +163,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         try:
             return jsonify(service.generate_preview(
-                body.get("path"), body.get("spec") or {}, registry, config))
+                body.get("paths") or body.get("path"), body.get("spec") or {},
+                registry, config))
         except service.EditError as exc:
             return _err(str(exc), 422)
         except FileNotFoundError:
@@ -173,7 +175,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         try:
             return jsonify(service.generate_apply(
-                body.get("path"), body.get("spec") or {}, registry, config))
+                body.get("paths") or body.get("path"), body.get("spec") or {},
+                registry, config))
         except service.EditError as exc:
             return _err(str(exc), 422)
         except FileNotFoundError:

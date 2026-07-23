@@ -1841,18 +1841,52 @@ def rename_file(src, dst) -> dict:
 GENERATE_MAX = 5000        # hard ceiling; the UI offers 100/200/500/1000
 
 
-def generate_scope(path, registry: LayoutRegistry, config: Config) -> dict:
-    """What can be varied when generating volume files from ONE template.
+def _as_paths(paths) -> List[Path]:
+    """Normalise a single path or a list of paths to a list of Path."""
+    if paths is None:
+        return []
+    if isinstance(paths, (str, Path)):
+        return [Path(paths)]
+    return [Path(p) for p in paths]
 
-    Returns the template's layout/key plus the randomizable fields — header and
-    per detail section — and the rename-token palette used to name the output.
+
+def _templates_layout(paths: List[Path], registry, config):
+    """The single shared layout of a template set. Raises if they differ, since
+    one batch draws from one field set / key space."""
+    layouts = []
+    for p in paths:
+        try:
+            lay = detect_layout(p).layout
+        except Exception:
+            lay = None
+        if lay and lay not in layouts:
+            layouts.append(lay)
+    if not layouts:
+        raise EditError("could not detect a layout for the selected template(s)")
+    if len(layouts) > 1:
+        raise EditError(
+            "all selected templates must be the same layout to generate together "
+            f"(got {', '.join(layouts)})")
+    return layouts[0]
+
+
+def generate_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
+    """What can be varied when generating volume files from one OR MORE templates.
+
+    With several templates each generated file draws its base record from a
+    RANDOM template of the set — but they must all be the same layout, since the
+    randomizable fields, key space and name palette come from that one layout.
+
     Locked fields (a layout's detection signature, hidden markers) and the key
     field are excluded: the key is always assigned uniquely, and a randomized
     signature byte would make every generated file undetectable.
     """
-    sp = Path(path)
+    tpaths = _as_paths(paths)
+    if not tpaths:
+        raise FileNotFoundError("no template selected")
+    layout_name = _templates_layout(tpaths, registry, config)
+    sp = tpaths[0]
     view = parse_file_view(sp, registry, config)
-    layout_name = view["layout"]
     layout = registry.get(layout_name)
     key_field = config.unique_field(layout_name)
     locked = config.readonly_fields(layout_name) | config.hidden_fields(layout_name)
@@ -1877,6 +1911,8 @@ def generate_scope(path, registry: LayoutRegistry, config: Config) -> dict:
     return {
         "path": str(sp),
         "name": sp.name,
+        "paths": [str(p) for p in tpaths],
+        "template_count": len(tpaths),
         "layout": layout_name,
         "key_field": key_field,
         "key_size": getattr(_header_field(layout, key_field), "size", None),
@@ -1884,16 +1920,20 @@ def generate_scope(path, registry: LayoutRegistry, config: Config) -> dict:
         "sections": sections,
         "palette": rename_scope([str(sp)], registry, config)["palette"],
         "max_count": GENERATE_MAX,
-        "default_folder": str(_generate_folder(sp, 0, dry=True)),
+        "default_folder": str(_generate_folder(tpaths, 0, layout_name, dry=True)),
     }
 
 
-def _generate_folder(template: Path, count: int, dest=None, dry=False) -> Path:
-    """Destination folder for a batch: an auto-named subfolder beside the
-    template, e.g. ``generated_StyleHeader_1000``. Suffixed if it exists."""
+def _generate_folder(templates, count: int, layout_name: str, dest=None, dry=False) -> Path:
+    """Destination folder for a batch: an auto-named subfolder beside the first
+    template. Named for the single template's stem, or the layout when several
+    templates feed the batch. Suffixed if it exists."""
+    templates = _as_paths(templates)
     if dest:
         return Path(dest)
-    base = template.parent / f"generated_{template.stem}_{count}"
+    first = templates[0]
+    label = first.stem if len(templates) == 1 else layout_name
+    base = first.parent / f"generated_{label}_{count}"
     if dry:
         return base
     out, n = base, 2
@@ -2022,38 +2062,42 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
                   literal=config is not None and config.is_literal(okf.layout.name, df["name"]))
 
 
-def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=None,
+def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder=None,
                     write: bool = False):
-    """Build ``count`` generated files. Yields (filename, okf, notes) per file.
+    """Build ``count`` generated files from ONE OR MORE templates. Yields
+    (filename, okf, notes) per file.
 
-    Shared by preview (write=False, small count) and apply, so what you preview
-    is exactly what gets written.
+    Each file draws its base record from a RANDOM template of the set. Shared by
+    preview (write=False, small count) and apply, so what you preview matches
+    what gets written (bar the randomness, which differs run to run).
     """
-    sp = Path(path)
-    template = parse_okfile(sp, registry=registry)
-    layout_name = template.layout.name
+    tpaths = _as_paths(paths)
+    layout_name = _templates_layout(tpaths, registry, config)
+    layout = registry.get(layout_name)
     key_field = config.unique_field(layout_name)
-    key_f = _header_field(template.layout, key_field)
-    key_size = getattr(key_f, "size", None)
+    key_size = getattr(_header_field(layout, key_field), "size", None)
 
-    # Start keys above anything already used near the template — the source
-    # folder AND its immediate subfolders, because earlier batches live in
-    # generated_* subfolders. Without this a second batch restarts at the same
-    # key as the first and every file collides.
-    # The template's own key prefix (e.g. 'C:') is inherited by every generated
-    # file, and numbering happens within that prefix's space.
-    _lay, _kf, _val, key_parts = _read_key_int(sp, registry, config)
+    # Each template's key parts (prefix/suffix) — a generated file inherits its
+    # picked template's, and keys are numbered per (layout, prefix, suffix) space.
+    key_parts_by_path = {p: _read_key_int(p, registry, config)[3] for p in tpaths}
+
+    # Start keys above anything already used near the templates — each template's
+    # source folder AND its immediate subfolders (earlier batches live in
+    # generated_* subfolders), else a later batch collides with an earlier one.
     maxv: Dict[tuple, int] = {}
-    scan = [sp.parent] + [d for d in sp.parent.iterdir() if d.is_dir()]
+    scan_dirs = set()
+    for p in tpaths:
+        scan_dirs.add(p.parent)
+        scan_dirs.update(d for d in p.parent.iterdir() if d.is_dir())
     if dest_folder:
-        scan.append(Path(dest_folder))
-    for folder in scan:
+        scan_dirs.add(Path(dest_folder))
+    for folder in scan_dirs:
         if not folder.is_dir():
             continue
         _u, m = _folder_key_state(folder, registry, config, set())
         for key, hi in m.items():
             maxv[key] = max(maxv.get(key, -1), hi)
-    next_key = _next_key_int(maxv, layout_name, key_parts.space)
+    next_key: Dict[tuple, int] = {}     # (layout, prefix, suffix) -> next int
 
     parts = spec.get("name_parts") or [{"type": "token", "name": "orig"},
                                        {"type": "token", "name": "seq"}]
@@ -2062,14 +2106,21 @@ def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=
     seen_names: set = set()
 
     for i in range(count):
-        okf = parse_okfile(sp, layout=template.layout, registry=registry)
-        _generate_one(okf, spec, config, key_field, key_size, next_key + i,
-                      key_parts=key_parts)
+        src = random.choice(tpaths) if len(tpaths) > 1 else tpaths[0]
+        key_parts = key_parts_by_path[src]
+        space = key_parts.space
+        if space not in next_key:
+            next_key[space] = _next_key_int(maxv, layout_name, space)
+        k = next_key[space]
+        next_key[space] += 1
+
+        okf = parse_okfile(src, layout=layout, registry=registry)
+        _generate_one(okf, spec, config, key_field, key_size, k, key_parts=key_parts)
         _apply_detail_fill(okf, config)          # keep Preticket-style filler rows
         _assert_layout_stable(okf)          # a random value must never break detection
 
-        toks = _tokens_from_okf(okf, config, orig_stem=sp.stem, custom={})
-        stem = _build_name(parts, toks, separator, i + 1, label_names=label_names) or sp.stem
+        toks = _tokens_from_okf(okf, config, orig_stem=src.stem, custom={})
+        stem = _build_name(parts, toks, separator, i + 1, label_names=label_names) or src.stem
         name = f"{stem}.OK"
         if name.lower() in seen_names:      # names need not be unique — keys are
             name = f"{stem}_{i + 1}.OK"
@@ -2077,12 +2128,12 @@ def _generate_batch(path, spec: dict, registry, config, count: int, dest_folder=
 
         if write:
             okf.save(Path(dest_folder) / name)
-        yield name, okf, {"key": _format_key(key_parts.prefix, next_key + i, key_size,
+        yield name, okf, {"key": _format_key(key_parts.prefix, k, key_size,
                                              key_parts.suffix, key_parts.width)
-                          if key_size else ""}
+                          if key_size else "", "template": src.name}
 
 
-def generate_preview(path, spec, registry: LayoutRegistry, config: Config,
+def generate_preview(paths, spec, registry: LayoutRegistry, config: Config,
                      sample: int = 5) -> dict:
     """Build the first few files IN MEMORY so the user can check names/values."""
     count = int(spec.get("count") or 0)
@@ -2091,9 +2142,10 @@ def generate_preview(path, spec, registry: LayoutRegistry, config: Config,
     if count > GENERATE_MAX:
         raise EditError(f"count {count} exceeds the {GENERATE_MAX}-file limit")
 
-    sp = Path(path)
+    tpaths = _as_paths(paths)
+    layout_name = _templates_layout(tpaths, registry, config)
     rows = []
-    for name, okf, note in _generate_batch(sp, spec, registry, config,
+    for name, okf, note in _generate_batch(tpaths, spec, registry, config,
                                            min(sample, count), write=False):
         header = okf.records[0] if okf.records else None
         shown = {}
@@ -2102,18 +2154,21 @@ def generate_preview(path, spec, registry: LayoutRegistry, config: Config,
                 shown[hf["name"]] = (header.get(hf["name"]) or "").strip()
         counts = {s.name: sum(1 for r in okf.records if r.section is s)
                   for s in okf.layout.sections[1:]}
-        rows.append({"name": name, "key": note["key"], "values": shown, "rows": counts})
+        rows.append({"name": name, "key": note["key"], "values": shown,
+                     "rows": counts, "template": note.get("template")})
 
     return {
         "count": count,
-        "folder": str(_generate_folder(sp, count, spec.get("dest"), dry=True)),
+        "templates": len(tpaths),
+        "folder": str(_generate_folder(tpaths, count, layout_name, spec.get("dest"), dry=True)),
         "sample": rows,
         "truncated": count > len(rows),
     }
 
 
-def generate_apply(path, spec, registry: LayoutRegistry, config: Config) -> dict:
-    """Write ``count`` generated files into a fresh folder. All-or-nothing on
+def generate_apply(paths, spec, registry: LayoutRegistry, config: Config) -> dict:
+    """Write ``count`` generated files into a fresh folder, drawing each file's
+    base record from a random one of the templates. All-or-nothing on
     validation: the spec is checked by building the first file before any IO."""
     count = int(spec.get("count") or 0)
     if count < 1:
@@ -2121,16 +2176,20 @@ def generate_apply(path, spec, registry: LayoutRegistry, config: Config) -> dict
     if count > GENERATE_MAX:
         raise EditError(f"count {count} exceeds the {GENERATE_MAX}-file limit")
 
-    sp = Path(path)
-    if not sp.is_file():
-        raise FileNotFoundError(f"not found: {sp}")
-    next(_generate_batch(sp, spec, registry, config, 1, write=False))   # validate
+    tpaths = _as_paths(paths)
+    if not tpaths:
+        raise FileNotFoundError("no template selected")
+    for p in tpaths:
+        if not p.is_file():
+            raise FileNotFoundError(f"not found: {p}")
+    layout_name = _templates_layout(tpaths, registry, config)
+    next(_generate_batch(tpaths, spec, registry, config, 1, write=False))   # validate
 
-    folder = _generate_folder(sp, count, spec.get("dest"))
+    folder = _generate_folder(tpaths, count, layout_name, spec.get("dest"))
     folder.mkdir(parents=True, exist_ok=True)
 
     written, errors = [], []
-    for name, _okf, note in _generate_batch(sp, spec, registry, config, count,
+    for name, _okf, note in _generate_batch(tpaths, spec, registry, config, count,
                                             dest_folder=folder, write=True):
         written.append({"name": name, "key": note["key"]})
     return {
@@ -2138,5 +2197,5 @@ def generate_apply(path, spec, registry: LayoutRegistry, config: Config) -> dict
         "written": len(written),
         "files": written[:50],          # a sample for the results table
         "errors": errors,
-        "template": sp.name,
+        "templates": [p.name for p in tpaths],
     }

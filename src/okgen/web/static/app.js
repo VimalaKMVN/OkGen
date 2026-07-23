@@ -2,7 +2,7 @@
 
 // Build marker — shown in the Generate panel header so a cached copy of this
 // file is obvious at a glance ("build" in the UI vs the tag you deployed).
-const OKGEN_BUILD = "v0.28.0";
+const OKGEN_BUILD = "v0.29.0";
 
 // Nothing in this app should fail silently: surface JS errors and rejected
 // promises in the status bar, otherwise a thrown error inside a click handler
@@ -1925,8 +1925,8 @@ function showBulkMenu() {
   add(`Bulk Rename (${n})`, () => enterRenameMode());
   add(`Make keys unique (${n})`, () => makeUniqueSelection());
   // Volume generation works from exactly ONE template file.
-  add(n === 1 ? "Generate volume files…" : "Generate volume files… (select 1 file)",
-      () => enterGenerateMode(), n !== 1);
+  add(n === 1 ? "Generate volume files…" : `Generate volume files… (${n} templates)`,
+      () => enterGenerateMode());
   menu.appendChild(el("div", "ctx-sep"));
   add(`🏷️  Send ${n} to NiceLabel`, () => sendToNiceLabel());
   const r = $("#bulkBtn").getBoundingClientRect();
@@ -2001,9 +2001,9 @@ function exitGenerateMode() {
 }
 
 async function enterGenerateMode() {
-  if (state.selection.size !== 1) return;
+  if (state.selection.size < 1) return;
   if (!confirmDiscardIfDirty()) return;
-  const path = [...state.selection][0];
+  const paths = [...state.selection];
   closeAllPanels("generate");    // only one bulk mode open at a time
   state.file = null; state.view = null; state.edits = {}; state.ops = [];
   $("#editorTabs").classList.add("hidden");
@@ -2015,30 +2015,34 @@ async function enterGenerateMode() {
 
   const panel = $("#generatePanel");
   panel.classList.remove("hidden");
-  panel.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Reading template…</div>";
+  panel.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Reading template(s)…</div>";
 
   let scope;
   try {
-    scope = await postJSON("/api/generate/scope", { path });
+    scope = await postJSON("/api/generate/scope", { paths });
   } catch (e) {
     panel.innerHTML = "";
-    panel.appendChild(el("div", "bulk-note", "Could not read the template: " + e.message));
+    panel.appendChild(el("div", "bulk-note", "Could not read the template(s): " + e.message));
     return;
   }
-  renderGeneratePanel(panel, path, scope);
+  renderGeneratePanel(panel, paths, scope);
 }
 
-function renderGeneratePanel(panel, path, scope) {
+function renderGeneratePanel(panel, paths, scope) {
   panel.innerHTML = "";
   // Declared first: refresh() runs while the panel is still being built (the
   // default filename chips call it), so these must already be initialised —
   // reading a `let` before its declaration throws and aborts the whole render.
   let timer = null;
   let armed = false, armTimer = null;
+  const nTemplates = scope.template_count || (Array.isArray(paths) ? paths.length : 1);
   const head = el("div", "bulk-head");
-  head.appendChild(el("h3", null, `Generate volume files — ${scope.name}`));
+  head.appendChild(el("h3", null,
+    nTemplates === 1 ? `Generate volume files — ${scope.name}`
+                     : `Generate volume files — ${nTemplates} templates (${scope.layout})`));
   head.appendChild(el("span", "bulk-label",
-    `${scope.layout} · key ${scope.key_field} is assigned uniquely to every file`));
+    (nTemplates === 1 ? "" : "each file drawn from a random template · ") +
+    `key ${scope.key_field} is assigned uniquely to every file`));
   head.appendChild(el("span", "bulk-label gen-build", `build ${OKGEN_BUILD}`));
   const topGen = el("button", "btn btn-primary", "Generate");
   head.appendChild(topGen);
@@ -2239,7 +2243,7 @@ function renderGeneratePanel(panel, path, scope) {
     if (!spec.count) { results.innerHTML = ""; return; }
     let pv;
     try {
-      pv = await postJSON("/api/generate/preview", { path, spec });
+      pv = await postJSON("/api/generate/preview", { paths, spec });
     } catch (e) {
       results.innerHTML = "";
       results.appendChild(el("div", "bulk-note", "Preview failed: " + e.message));
@@ -2254,10 +2258,12 @@ function renderGeneratePanel(panel, path, scope) {
     results.innerHTML = "";
     results.appendChild(el("div", "bulk-summary",
       `Preview of the first ${pv.sample.length} of ${pv.count} files — nothing written yet`));
+    const multi = (pv.templates || 1) > 1;
     const table = el("table", "bulk-table");
-    const cols = ["file name", "key"].concat(
-      Object.keys(pv.sample[0] ? pv.sample[0].values : {}),
-      Object.keys(pv.sample[0] ? pv.sample[0].rows : {}).map((s) => s + " rows"));
+    const cols = ["file name", "key"]
+      .concat(multi ? ["from template"] : [])
+      .concat(Object.keys(pv.sample[0] ? pv.sample[0].values : {}),
+              Object.keys(pv.sample[0] ? pv.sample[0].rows : {}).map((s) => s + " rows"));
     const thead = el("thead"); const htr = el("tr");
     cols.forEach((c) => htr.appendChild(el("th", null, c)));
     thead.appendChild(htr); table.appendChild(thead);
@@ -2266,6 +2272,7 @@ function renderGeneratePanel(panel, path, scope) {
       const tr = el("tr", "st-change");
       tr.appendChild(el("td", "mono", r.name));
       tr.appendChild(el("td", "mono", r.key));
+      if (multi) tr.appendChild(el("td", "mono", r.template || ""));
       Object.keys(r.values).forEach((k) => tr.appendChild(el("td", "mono", r.values[k])));
       Object.keys(r.rows).forEach((k) => tr.appendChild(el("td", null, String(r.rows[k]))));
       tb.appendChild(tr);
@@ -2325,7 +2332,7 @@ function renderGeneratePanel(panel, path, scope) {
     }
     genBtn.disabled = true; topGen.disabled = true; cancelBtn.disabled = true;
     try {
-      const res = await postJSON("/api/generate/apply", { path, spec });
+      const res = await postJSON("/api/generate/apply", { paths, spec });
       setStatus(`Generated ${res.written} file(s)`, "ok");
       activityResult(`Generated ${res.written} files`, "ok");
       panelMessage(`Wrote ${res.written} file(s) into ${res.folder}`);
