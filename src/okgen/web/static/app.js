@@ -2,7 +2,7 @@
 
 // Build marker — shown in the Generate panel header so a cached copy of this
 // file is obvious at a glance ("build" in the UI vs the tag you deployed).
-const OKGEN_BUILD = "v0.29.0";
+const OKGEN_BUILD = "v0.29.1";
 
 // Nothing in this app should fail silently: surface JS errors and rejected
 // promises in the status bar, otherwise a thrown error inside a click handler
@@ -1925,7 +1925,7 @@ function showBulkMenu() {
   add(`Bulk Rename (${n})`, () => enterRenameMode());
   add(`Make keys unique (${n})`, () => makeUniqueSelection());
   // Volume generation works from exactly ONE template file.
-  add(n === 1 ? "Generate volume files…" : `Generate volume files… (${n} templates)`,
+  add(n === 1 ? "Generate volume files…" : `Generate volume files… (${n} source files)`,
       () => enterGenerateMode());
   menu.appendChild(el("div", "ctx-sep"));
   add(`🏷️  Send ${n} to NiceLabel`, () => sendToNiceLabel());
@@ -2015,14 +2015,14 @@ async function enterGenerateMode() {
 
   const panel = $("#generatePanel");
   panel.classList.remove("hidden");
-  panel.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Reading template(s)…</div>";
+  panel.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Reading source file(s)…</div>";
 
   let scope;
   try {
     scope = await postJSON("/api/generate/scope", { paths });
   } catch (e) {
     panel.innerHTML = "";
-    panel.appendChild(el("div", "bulk-note", "Could not read the template(s): " + e.message));
+    panel.appendChild(el("div", "bulk-note", "Could not read the source file(s): " + e.message));
     return;
   }
   renderGeneratePanel(panel, paths, scope);
@@ -2039,9 +2039,9 @@ function renderGeneratePanel(panel, paths, scope) {
   const head = el("div", "bulk-head");
   head.appendChild(el("h3", null,
     nTemplates === 1 ? `Generate volume files — ${scope.name}`
-                     : `Generate volume files — ${nTemplates} templates (${scope.layout})`));
+                     : `Generate volume files — ${nTemplates} source files (${scope.layout})`));
   head.appendChild(el("span", "bulk-label",
-    (nTemplates === 1 ? "" : "each file drawn from a random template · ") +
+    (nTemplates === 1 ? "" : "each file drawn from a random source file · ") +
     `key ${scope.key_field} is assigned uniquely to every file`));
   head.appendChild(el("span", "bulk-label gen-build", `build ${OKGEN_BUILD}`));
   const topGen = el("button", "btn btn-primary", "Generate");
@@ -2261,7 +2261,7 @@ function renderGeneratePanel(panel, paths, scope) {
     const multi = (pv.templates || 1) > 1;
     const table = el("table", "bulk-table");
     const cols = ["file name", "key"]
-      .concat(multi ? ["from template"] : [])
+      .concat(multi ? ["from source file"] : [])
       .concat(Object.keys(pv.sample[0] ? pv.sample[0].values : {}),
               Object.keys(pv.sample[0] ? pv.sample[0].rows : {}).map((s) => s + " rows"));
     const thead = el("thead"); const htr = el("tr");
