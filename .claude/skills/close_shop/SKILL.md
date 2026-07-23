@@ -51,12 +51,13 @@ Prefer updating an existing file over creating a near-duplicate.
   committed and tagged (`git status` summary + proposed `vMAJOR.MINOR.PATCH-label`).
 - **Wait for the user's explicit OK.** Only then invoke the **checkpoint** skill
   with `push` (e.g. `/checkpoint <label> push`), which handles commit + annotated
-  tag + push. Pushing this repo requires the **VimalaKMVN** GitHub account, not the
-  default `praveendx` — the checkpoint/push must switch accounts:
+  tag + push. **OkGen uses the `VimalaKMVN` GitHub account ONLY — always.** The
+  default `praveendx` has no access, so set VimalaKMVN active before pushing:
   `gh auth switch --user VimalaKMVN && gh auth setup-git` → push branch + tag →
-  verify with `git ls-remote --tags origin <tag>` → restore
-  `gh auth switch --user praveendx && gh auth setup-git`.
-  (Symptom if skipped: HTTP 403 "Permission … denied to praveendx".)
+  verify with `git ls-remote --tags origin <tag>`. **Leave the account on
+  VimalaKMVN — do NOT switch back to praveendx** (the user's standing rule for
+  OkGen; see the github-account memory). (Symptom if the wrong account is active:
+  HTTP 403 "Permission … denied to praveendx".)
 
 ## 5. Print the "next session starts here" summary
 

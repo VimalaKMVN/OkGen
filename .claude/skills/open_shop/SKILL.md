@@ -40,19 +40,29 @@ git -C "$ROOT" log --oneline -5
 - If the tree is dirty or HEAD is detached / not on `main`, say so up front — that
   is the first thing to reconcile before new work.
 
-## 3. Check remote drift (optional, read-only)
+## 3. Set the GitHub account to VimalaKMVN (always) + check remote drift
 
-Only if another machine/session might have advanced the remote. Pushing/pulling
-this **private** repo requires the **VimalaKMVN** GitHub account (default
-`praveendx` gets 404/403 — see the github-account memory). To fetch:
+**OkGen uses the `VimalaKMVN` GitHub account ONLY — always, every session.** The
+other logged-in account, `praveendx`, has NO access to this repo (404/403 —
+"Repository not found"). Make VimalaKMVN active at the start of the session and
+**leave it active** — do NOT switch back to praveendx at any point (an older
+version of this skill did; that was wrong — see the github-account memory):
 ```bash
-gh auth switch --user VimalaKMVN && gh auth setup-git
+gh auth switch --user VimalaKMVN && gh auth setup-git   # set once; leave it active
+```
+`switch` alone is not enough — always run `setup-git` too so git's credential
+helper picks up the token.
+
+Then, if another machine/session might have advanced the remote, check drift
+(read-only):
+```bash
 git -C "$ROOT" fetch origin --tags --quiet
 git -C "$ROOT" rev-list --left-right --count origin/main...main   # behind<TAB>ahead
-gh auth switch --user praveendx && gh auth setup-git              # restore default
 ```
 Report if local `main` is behind (pull before working) or ahead (unpushed commits).
-Skip this step for a quick solo ramp; do it when collaboration/other machines are in play.
+Skip the fetch for a quick solo ramp; do it when collaboration/other machines are
+in play. Either way, still set VimalaKMVN active — it is the standing account for
+every push/pull/PR this session.
 
 ## 4. Prove the baseline is green + absorb the "why"
 
@@ -86,8 +96,9 @@ handing the user a clear starting point and a proposed next action.
 ## Guardrails
 
 - **Read-only.** open_shop may run tests and read git/files; it must not commit,
-  push, tag, branch, or edit. (Remote *fetch* in step 3 is read-only and restores
-  the default gh account.)
+  push, tag, branch, or edit. (Setting the gh account to VimalaKMVN and the remote
+  *fetch* in step 3 are the only side effects — the account is left ON VimalaKMVN,
+  never restored to praveendx.)
 - Trust **git + a real test run** over what any doc claims; when they disagree, the
   doc is stale — report it (and it becomes a close_shop fix later).
 - Keep the briefing short. The goal is a fast, correct start — not a wall of text.
