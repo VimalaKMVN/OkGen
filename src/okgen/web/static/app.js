@@ -295,6 +295,10 @@ function updateSelectionUI() {
   // (a plain click already selects the file it opens), so the button shows
   // for 1+ files. It only hides when nothing is selected.
   if (btn) { btn.classList.toggle("hidden", n < 1); btn.textContent = `Bulk Actions (${n}) ▾`; }
+  // Run TOSCA Script — separate from Bulk (a fundamentally different action);
+  // shows for any non-empty selection, like Bulk Actions.
+  const tb = $("#toscaBtn");
+  if (tb) { tb.classList.toggle("hidden", n < 1); tb.textContent = `▶ Run TOSCA (${n})`; }
   // Close the bulk panel only when the selection is emptied.
   if (isBulkOpen() && n < 1) exitBulkMode();
 }
@@ -1478,6 +1482,7 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Bulk Rename (${count})…` : "Bulk Rename…", () => enterRenameMode());
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   add(count > 1 ? `🏷️  Send ${count} to NiceLabel` : "🏷️  Send to NiceLabel", () => sendToNiceLabel());
+  add(count > 1 ? `▶  Run TOSCA Script (${count})` : "▶  Run TOSCA Script", () => runTosca());
   menu.appendChild(el("div", "ctx-sep"));
   add("Rename…", () => renameFile(node), count > 1);
   add(count > 1 ? `Delete ${count} files` : "Delete",
@@ -1645,6 +1650,120 @@ async function sendToNiceLabel() {
     await minOnScreen;
     hideCopyAnimation();
     setStatus("Send failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
+}
+
+// ---- Run TOSCA Script ----
+// Pick a configured script (workbook), then POST the selected files; the server
+// writes one row per unique Chain/Process/Format into that workbook's data sheet.
+function pickTosca(scripts, count, warning) {
+  return new Promise((resolve) => {
+    const ov = el("div", "modal-overlay");
+    const card = el("div", "modal-card");
+    card.appendChild(el("h3", "modal-title", `Run TOSCA on ${count} file(s)`));
+    card.appendChild(el("div", "modal-dest", "Choose the script whose input sheet to populate, then run:"));
+    const list = el("div", "tosca-scripts");
+    scripts.forEach((s, i) => {
+      const lab = el("label", "tosca-choice");
+      const rb = el("input"); rb.type = "radio"; rb.name = "tosca-script"; rb.value = s.name;
+      if (i === 0) rb.checked = true;
+      lab.appendChild(rb);
+      lab.appendChild(el("span", null, s.name));
+      list.appendChild(lab);
+    });
+    card.appendChild(list);
+
+    // Production action — warn about the common PowerForms-link mistake and gate
+    // Run behind an acknowledgement checkbox (like Send to NiceLabel).
+    if (warning) {
+      const box = el("div", "modal-warn");
+      box.appendChild(el("span", "modal-warn-icon", "⚠"));
+      box.appendChild(el("span", "modal-warn-text", warning));
+      card.appendChild(box);
+    }
+    const check = el("label", "modal-check");
+    const cb = el("input"); cb.type = "checkbox";
+    check.appendChild(cb);
+    check.appendChild(el("span", null, "I've verified the correct PowerForms link is in the input sheet."));
+    card.appendChild(check);
+
+    const acts = el("div", "modal-actions");
+    const cancel = el("button", "btn", "Cancel");
+    const run = el("button", "btn btn-primary", "Run TOSCA");
+    run.disabled = true;
+    cb.addEventListener("change", () => { run.disabled = !cb.checked; });
+    acts.appendChild(cancel); acts.appendChild(run);
+    card.appendChild(acts);
+    ov.appendChild(card); document.body.appendChild(ov);
+    const close = (val) => { ov.remove(); resolve(val); };
+    cancel.addEventListener("click", () => close(null));
+    ov.addEventListener("click", (e) => { if (e.target === ov) close(null); });
+    run.addEventListener("click", () => {
+      if (run.disabled) return;
+      const sel = card.querySelector("input[name=tosca-script]:checked");
+      close(sel ? sel.value : null);
+    });
+  });
+}
+
+function showToscaResult(res) {
+  const ov = el("div", "modal-overlay");
+  const card = el("div", "modal-card");
+  card.appendChild(el("h3", "modal-title", `TOSCA '${res.script}' — ${res.written} row(s) written`));
+  card.appendChild(el("div", "modal-dest", res.workbook));
+  if (res.launched) {
+    const ok = el("div", "tosca-launch ok", "▶ TOSCA started (fire-and-forget) — it runs on its own.");
+    card.appendChild(ok);
+  } else if (res.launch_error) {
+    const bad = el("div", "tosca-launch warn", "TOSCA not started: " + res.launch_error);
+    card.appendChild(bad);
+  }
+  const rows = res.rows || [];
+  if (rows.length) {
+    const tbl = el("div", "tosca-rows");
+    rows.forEach((r) => tbl.appendChild(
+      el("div", "tosca-row", `${r.chain} · ${r.process} · ${r.format}`)));
+    card.appendChild(tbl);
+  }
+  const errs = res.errors || [];
+  if (errs.length) {
+    const box = el("div", "modal-warn");
+    box.appendChild(el("span", "modal-warn-icon", "⚠"));
+    box.appendChild(el("span", "modal-warn-text",
+      `${errs.length} file(s) skipped: ` + errs.map((e) => `${e.file} (${e.error})`).join("; ")));
+    card.appendChild(box);
+  }
+  const acts = el("div", "modal-actions");
+  const ok = el("button", "btn btn-primary", "Close");
+  acts.appendChild(ok); card.appendChild(acts);
+  ov.appendChild(card); document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ok.addEventListener("click", close);
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
+}
+
+async function runTosca() {
+  const paths = [...state.selection];
+  if (!paths.length) return;
+  let info;
+  try { info = await api("/api/tosca/scripts"); }
+  catch (e) { setStatus("Could not load TOSCA scripts: " + e.message, "err"); return; }
+  const scripts = info.scripts || [];
+  if (!scripts.length) { setStatus("No TOSCA scripts configured (config/tosca.yaml)", "err"); return; }
+  const script = await pickTosca(scripts, paths.length, info.warning);
+  if (!script) return;
+  if (!beginBusy("Running TOSCA…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+  try {
+    const res = await postJSON("/api/tosca/run", { paths, script });
+    const er = (res.errors || []).length;
+    const launch = res.launched ? " — TOSCA started" : (res.launch_error ? " — not started" : "");
+    setStatus(`TOSCA '${script}': wrote ${res.written} row(s)` + (er ? `, ${er} skipped` : "") + launch,
+              res.launch_error ? "dirty" : "ok");
+    showToscaResult(res);
+  } catch (e) {
+    setStatus("TOSCA run failed: " + e.message, "err");
   } finally {
     state.busy = false;
   }
@@ -1919,6 +2038,7 @@ $("#tabRendered").addEventListener("click", () => switchTab("rendered"));
 $("#tabRaw").addEventListener("click", () => switchTab("raw"));
 $("#openBtn").addEventListener("click", browseFolder);
 $("#bulkBtn").addEventListener("click", (e) => { e.stopPropagation(); showBulkMenu(); });
+$("#toscaBtn").addEventListener("click", (e) => { e.stopPropagation(); runTosca(); });
 
 // Dropdown of bulk actions, anchored under the "Bulk Actions" button —
 // mirrors the right-click menu so both places offer the same options.

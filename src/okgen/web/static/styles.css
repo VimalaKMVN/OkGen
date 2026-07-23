@@ -194,6 +194,13 @@ body {
 }
 .file-name { overflow: hidden; text-overflow: ellipsis; }
 .dup-warn { margin-left: 5px; color: #e0b000; cursor: help; flex: 0 0 auto; }
+.tosca-scripts { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.tosca-choice { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.tosca-rows { max-height: 200px; overflow-y: auto; margin: 8px 0; font-size: 12px; }
+.tosca-row { padding: 3px 6px; border-bottom: 1px solid var(--border, #333); }
+.tosca-launch { margin: 8px 0; padding: 6px 8px; border-radius: 4px; font-size: 12px; }
+.tosca-launch.ok { background: rgba(40,160,80,0.15); }
+.tosca-launch.warn { background: rgba(224,176,0,0.15); }
 .json-tag {
   margin-left: 4px;
   padding: 0 4px;

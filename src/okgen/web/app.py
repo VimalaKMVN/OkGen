@@ -227,6 +227,19 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except service.EditError as exc:
             return _err(str(exc), 422)
 
+    @app.get("/api/tosca/scripts")
+    def tosca_scripts():
+        return jsonify(service.tosca_scripts(config))
+
+    @app.post("/api/tosca/run")
+    def tosca_run():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.run_tosca_script(
+                body.get("paths", []), body.get("script", ""), registry, config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     @app.post("/api/file/copy")
     def file_copy():
         body = request.get_json(force=True, silent=True) or {}

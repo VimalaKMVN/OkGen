@@ -115,7 +115,9 @@ class Config:
         detail_fill: Optional[Dict[str, dict]] = None,
         derived_fields: Optional[Dict[str, list]] = None,
         isolated_chain_groups: Optional[List[set]] = None,
+        tosca: Optional[dict] = None,
     ):
+        self._tosca = tosca or {}
         self._chains = chains
         # Calgary JSON files carry the chain as a code ("04") OR a name
         # ("Winners"/"HomeSense"), so resolve a name back to its banner too.
@@ -148,6 +150,17 @@ class Config:
         self._isolated_chain_groups = [set(g) for g in (isolated_chain_groups or [])]
 
     # ----- chains -----
+    def tosca(self) -> dict:
+        """The full TOSCA config block (scripts + column/mapping settings)."""
+        return self._tosca
+
+    def tosca_scripts(self) -> List[dict]:
+        """Configured TOSCA scripts: [{name, workbook, data_sheet}, …]."""
+        return list(self._tosca.get("scripts") or [])
+
+    def tosca_script(self, name: str) -> Optional[dict]:
+        return next((s for s in self.tosca_scripts() if s.get("name") == name), None)
+
     def chain(self, code: Optional[str]) -> Optional[ChainInfo]:
         if code is None:
             return None
@@ -516,8 +529,19 @@ class Config:
                     "parts": parts,
                 })
 
+        tosca: dict = {}
+        tosca_path = cdir / "tosca.yaml"
+        if tosca_path.is_file():
+            tosca = yaml.safe_load(tosca_path.read_text(encoding="utf-8")) or {}
+            # Resolve each script's workbook + bat paths relative to the config dir.
+            for scr in (tosca.get("scripts") or []):
+                for key in ("workbook", "bat"):
+                    val = str(scr.get(key, ""))
+                    if val and not Path(val).is_absolute():
+                        scr[key] = str((cdir / val).resolve())
+
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
                    nicelabel_warning, send_quips, send_done_quips, regions,
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
-                   derived_fields, isolated_chain_groups)
+                   derived_fields, isolated_chain_groups, tosca)

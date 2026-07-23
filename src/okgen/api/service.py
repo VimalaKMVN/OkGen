@@ -999,6 +999,22 @@ def delete_file(path) -> dict:
     return {"deleted": str(p)}
 
 
+def tosca_scripts(config: Config) -> dict:
+    """The configured TOSCA scripts (names) + the run warning, for the picker."""
+    from okgen import tosca
+    return {"scripts": tosca.list_scripts(config),
+            "warning": (config.tosca() or {}).get("run_warning", "")}
+
+
+def run_tosca_script(paths, script, registry, config: Config) -> dict:
+    """Populate the chosen TOSCA workbook from the selected JSON files."""
+    from okgen import tosca
+    try:
+        return tosca.run(paths, script, registry, config)
+    except tosca.ToscaError as exc:
+        raise EditError(str(exc))
+
+
 def send_to_nicelabel(paths, config: Config) -> dict:
     """Copy selected .OK files into NiceLabel's incoming folder (overwriting)."""
     dest = config.nicelabel_path()

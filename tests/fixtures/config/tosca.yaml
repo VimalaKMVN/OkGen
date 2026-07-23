@@ -1,0 +1,50 @@
+# Test fixture: workbooks point at the sample .xlsm copies (relative to this
+# config dir). Mirrors config/tosca.yaml.
+scripts:
+  - name: "Laser Compare"
+    workbook: "../tosca/laser_compare.xlsm"
+    data_sheet: "Laser-SH_PT_CL_DL_Formats"
+  - name: "Thermal"
+    workbook: "../tosca/thermal.xlsm"
+    data_sheet: "REG_JSON_THERMAL_Compare"
+
+run_warning: "Make sure the CORRECT PowerForms link is set in the input sheet before running TOSCA."
+
+first_data_row: 2
+columns:
+  chain: A
+  process: B
+  format: C
+  status: D
+  source: E
+  date: F
+
+defaults:
+  status: "Work Pending"
+  source: "Online"
+
+date_format_default: "%m/%d/%Y"
+date_format_europe: "%d/%m/%Y"
+europe_chain_names: ["TJX Europe"]
+
+chain_names:
+  "01": "T.J. Maxx"
+  "02": "Marshalls"
+  "03": "Homegoods"
+  "04": "Winners"
+  "05": "TJX Europe"
+  "06": "HomeSense"
+
+process_names:
+  CalgaryStyleHeader: "Style Header"
+  CalgaryCartonLabel: "Carton Label"
+  CalgaryDistLabel: "Distribution Label"
+
+key_sheet: "Key"
+format_columns:
+  "T.J. Maxx":  { "Style Header": C, "Carton Label": I, "Distribution Label": J }
+  "Marshalls":  { "Style Header": D, "Carton Label": I, "Distribution Label": J }
+  "Homegoods":  { "Style Header": E, "Carton Label": K, "Distribution Label": L }
+  "Winners":    { "Style Header": F, "Distribution Label": L }
+  "HomeSense":  { "Style Header": F, "Distribution Label": L }
+  "TJX Europe": { "Style Header": G }
