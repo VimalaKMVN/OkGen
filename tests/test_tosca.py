@@ -70,6 +70,19 @@ def test_config_loads_scripts(config):
         assert Path(s["workbook"]).is_absolute()
 
 
+def test_malformed_tosca_yaml_does_not_crash_startup(tmp_path, capsys):
+    """A bad tosca.yaml (e.g. a double-quoted Windows path with backslashes) must
+    NOT stop the app from loading — TOSCA is disabled and a warning printed."""
+    from okgen.config import Config
+    cfgdir = tmp_path / "cfg"
+    cfgdir.mkdir()
+    (cfgdir / "tosca.yaml").write_text(
+        'scripts:\n  - name: X\n    workbook: "C:\\TOSCA\\Thermal"\n', encoding="utf-8")
+    cfg = Config.load(cfgdir)                            # must not raise
+    assert cfg.tosca_scripts() == []                    # TOSCA disabled
+    assert "TOSCA disabled" in capsys.readouterr().err
+
+
 def test_absolute_workbook_path_used_as_given(tmp_path):
     """Regression: an absolute path that exists must be used EXACTLY as given —
     never prepended with the config dir."""

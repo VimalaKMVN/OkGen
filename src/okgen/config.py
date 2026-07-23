@@ -532,7 +532,18 @@ class Config:
         tosca: dict = {}
         tosca_path = cdir / "tosca.yaml"
         if tosca_path.is_file():
-            tosca = yaml.safe_load(tosca_path.read_text(encoding="utf-8")) or {}
+            # A malformed tosca.yaml must NOT stop OkGen from starting — a common
+            # cause is a double-quoted Windows path (``"C:\T…"`` -> YAML reads
+            # ``\T`` as a bad escape). Disable just TOSCA and warn loudly.
+            try:
+                tosca = yaml.safe_load(tosca_path.read_text(encoding="utf-8")) or {}
+            except yaml.YAMLError as exc:
+                import sys
+                print(f"WARNING: could not parse {tosca_path} — TOSCA disabled. "
+                      f"({exc}). Tip: don't wrap Windows paths in DOUBLE quotes; "
+                      f"use no quotes, single quotes, or forward slashes.",
+                      file=sys.stderr)
+                tosca = {}
             # Normalise each script's workbook + bat paths. Use the value EXACTLY
             # as given when it already points at something real (an absolute
             # Windows/UNC path, or a path relative to the working dir) — never
