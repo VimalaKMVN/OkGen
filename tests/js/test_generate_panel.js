@@ -135,5 +135,16 @@ setTimeout(() => {
   const ok5 = hf && hf.values === "11, 22, 33";
   console.log(`  ${ok5 ? "PASS" : "FAIL"}  spec carries the value list (${hf && JSON.stringify(hf.values)})`);
   if (!ok5) process.exit(1);
+
+  // The apply must COMPLETE without a post-request error. A stray variable in
+  // the success path — e.g. folderOf(path) after the paths[] rename — is caught
+  // by runGenerate and reported via setStatus as "Generate failed", so the
+  // status bar shows the failure instead of "Generated N". (The panel's own
+  // text is racy: a late debounced preview can overwrite it, so check #status.)
+  const status = (doc.querySelector("#status").textContent || "");
+  const ok6 = /Generated \d+ file/.test(status) && !/failed/i.test(status);
+  console.log(`  ${ok6 ? "PASS" : "FAIL"}  apply completes without a post-request error (status: "${status}")`);
+  if (!ok6) process.exit(1);
+
   console.log(`\nAll checks passed (build ${api.OKGEN_BUILD})`);
 }, 400);

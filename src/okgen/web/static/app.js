@@ -2336,7 +2336,7 @@ function renderGeneratePanel(panel, paths, scope) {
       setStatus(`Generated ${res.written} file(s)`, "ok");
       activityResult(`Generated ${res.written} files`, "ok");
       panelMessage(`Wrote ${res.written} file(s) into ${res.folder}`);
-      await refreshFolder(folderOf(path));
+      await refreshFolder(folderOf(paths[0]));   // the source files' folder
     } catch (e) {
       setStatus("Generate failed: " + e.message, "err");
       panelMessage("Generate failed: " + e.message, "err");
