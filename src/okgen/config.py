@@ -533,12 +533,23 @@ class Config:
         tosca_path = cdir / "tosca.yaml"
         if tosca_path.is_file():
             tosca = yaml.safe_load(tosca_path.read_text(encoding="utf-8")) or {}
-            # Resolve each script's workbook + bat paths relative to the config dir.
+            # Normalise each script's workbook + bat paths. Use the value EXACTLY
+            # as given when it already points at something real (an absolute
+            # Windows/UNC path, or a path relative to the working dir) — never
+            # prepend the config dir to a real path. Only when it does NOT resolve
+            # as-is do we try it relative to the config dir (this is what lets the
+            # test fixtures use ``../tosca/…``). If neither exists, keep the given
+            # value so the run-time error reports the path the user actually set.
             for scr in (tosca.get("scripts") or []):
                 for key in ("workbook", "bat"):
-                    val = str(scr.get(key, ""))
-                    if val and not Path(val).is_absolute():
-                        scr[key] = str((cdir / val).resolve())
+                    val = str(scr.get(key, "") or "").strip()
+                    if not val:
+                        continue
+                    if Path(val).exists():
+                        scr[key] = val
+                    else:
+                        alt = cdir / val
+                        scr[key] = str(alt.resolve()) if alt.exists() else val
 
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,

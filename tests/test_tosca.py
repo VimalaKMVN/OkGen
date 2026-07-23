@@ -70,6 +70,24 @@ def test_config_loads_scripts(config):
         assert Path(s["workbook"]).is_absolute()
 
 
+def test_absolute_workbook_path_used_as_given(tmp_path):
+    """Regression: an absolute path that exists must be used EXACTLY as given —
+    never prepended with the config dir."""
+    from okgen.config import Config
+    wb = tmp_path / "real.xlsm"
+    wb.write_text("x")                                  # just needs to exist
+    cfgdir = tmp_path / "cfg"
+    cfgdir.mkdir()
+    (cfgdir / "tosca.yaml").write_text(
+        "scripts:\n"
+        f"  - name: X\n    workbook: {wb}\n    data_sheet: S\n    bat: {wb}\n",
+        encoding="utf-8")
+    cfg = Config.load(cfgdir)
+    script = cfg.tosca_script("X")
+    assert script["workbook"] == str(wb)                # unchanged, not cfgdir/…
+    assert str(cfgdir) not in script["workbook"]
+
+
 def test_resolution_dedup_and_errors(tmp_path, registry, config):
     wb = _copy_wb(tmp_path)
     _point_at(config, "Thermal", wb)

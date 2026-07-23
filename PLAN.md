@@ -5,7 +5,7 @@ picking up OkGen: what it is, how it's built, the decisions and why, where thing
 are, and what's next — so you can make the next increment without re-deriving
 context. Keep it updated as part of each change.
 
-> Baseline: top of `main` = tag `v0.33.0-run-tosca-script`.
+> Baseline: top of `main` = tag `v0.33.1-tosca-path-fix`.
 > Deeper references (don't duplicate them here):
 > [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) · [ARCHITECTURE.md](ARCHITECTURE.md) ·
 > [DEVELOPMENT_PROCESS.md](DEVELOPMENT_PROCESS.md) · [README.md](README.md)
@@ -85,7 +85,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 | D9 | **Config-driven editor-field behavior** — four new YAML-driven layers over the section editor, all resolved server-side and emitted per field: **hide** structural fields (`field_display.yaml`), **read-only** fields shown as a static label (`field_display.yaml`), **derived** computed fields not in the raw file with an `eq`/`neq`/`in`/`nin` rule DSL that the client re-evaluates live (`derived_fields.yaml`), and **chain-edit isolation** blocking cross-region chain changes (`isolated_chain_groups` in `chains.yaml`, enforced in the dropdown **and** on save). | Keep per-layout/vendor UI rules out of code so ops can adjust labels/rules/locks without a release; the same config feeds editor, rename tokens, and save validation for one source of truth |
 
 ## 4. Current state
-- **Top of `main` = tag `v0.33.0-run-tosca-script`.** **Tests: 411 passing, 4 skipped** (410 Python + 1 Node smoke suite).
+- **Top of `main` = tag `v0.33.1-tosca-path-fix`.** **Tests: 412 passing, 4 skipped** (411 Python + 1 Node smoke suite). Fix: TOSCA config `workbook`/`bat` paths are used EXACTLY as given when they exist (an absolute path is never prepended with the config dir); config-relative resolution only kicks in for a path that does not resolve as-is (fixtures' `../tosca/…`).
   **Run TOSCA Script** (D21) — new selection action (right-click + gated top-bar button, JSON layouts only). Populates a configured TOSCA input `.xlsm` from the selected files (one row per unique Chain/Process/Format; Format resolved from the workbook's own Key sheet; Status/Source constants; ProcessedDate today, Europe D/M/Y else M/D/Y), CONTIGUOUS from the top with everything below cleared, then fires that script's `.bat` fire-and-forget. `workbook`/`bat` in `config/tosca.yaml` accept a folder (one file inside) or a full path. The `.xlsm` write is a **targeted XML cell edit** — macros, dropdowns, formatting and helper columns preserved (verified). Run modal warns about the **PowerForms link** behind an acknowledgement checkbox. `okgen/tosca.py` + `service.run_tosca_script` + `/api/tosca/{scripts,run}`; 13 tests. *Config best-guesses to tune later: `format_columns` matrix (e.g. Winners/Carton gap), real workbook/bat folders. Future idea: a "View Reports" button after execution.*
 - **Prior top of `main` = tag `v0.32.0-calgary-json-engine`** (398 passing).
   **Calgary JSON layouts — a 3rd native engine** (D20), Stage 1 + tree + Make-Unique + pretty raw view. Three new layouts **CalgaryStyleHeader / CalgaryCartonLabel / CalgaryDistLabel** (JSON, not fixed-width/delimited) now open, render, edit, Save/Save As, and Make-Unique — reusing the existing service/editor/raw pipeline via a key-path record model. New `src/okgen/jsonengine.py` (scan-spans + byte-exact splice-on-save), 3 `Calgary*.layout.json` specs (fields + max-lengths + Header/nested-array/details section split, derived from the vendor samples + Excel), and `detect.py` `data.type` detection. Wiring stayed small: `models.py` (json_mode/json_path/json_kind/readonly), `compiler.py`+`registry.py` (load specs), `okfile.py` (parse + `to_bytes` branch), `service.py` (readonly, UTF-8 pretty raw view, skip header stability check, tree lists `.json` with a badge, Make-Unique reads/writes JSON keys), `config.py` (chain **name** alias), `keys.yaml` (Calgary keys). **Byte-exact round-trip verified on all real samples** (pretty AND minified); single-field edit is surgical; Make-Unique re-keys duplicates (ASN ID keeps its `V…A` literal parts; pickListId renumbers). 37 dedicated JSON tests. **Not yet: bulk / rename / volume-generate parity, add/delete JSON rows, Send-to-NiceLabel loader hand-off.**
@@ -184,7 +184,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 411
+.venv/bin/python -m pytest tests/ -q              # currently 412
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```
