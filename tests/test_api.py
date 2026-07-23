@@ -3021,3 +3021,33 @@ def test_blank_misc_text_fields_all_sections(tmp_path, registry, config, sample)
                         continue
                     seen.add(r["values"][fname].strip())
             assert seen <= {"A", ""}, f"{layout}/{sec['name']}/{fname} gen -> {seen}"
+
+
+def test_instructions_is_literal_exact(tmp_path, registry, config):
+    """StyleHeader 'instructions' stores EXACTLY what the user types — leading,
+    middle and trailing spaces preserved, space-padded to width, NEVER
+    zero-padded (it is on the literal list, so this can't depend on the sample
+    value heuristic). It exists only on StyleHeader (Header)."""
+    # not present in the other layouts -> nothing to guard there
+    for name in ("Preticket", "DistLabels", "CartonLabel",
+                 "EUPreticket", "EUStyleHeader", "EUCartonLabel"):
+        L = registry.get(name)
+        assert not any(f.name == "instructions" for sec in L.sections for f in sec.fields)
+
+    assert config.is_literal("StyleHeader", "instructions") is True
+
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    width = next(f.size for f in registry.get("StyleHeader").sections[0].fields
+                 if f.name == "instructions")
+
+    for typed in [" HI ", "A  B", "  indented", "5", "12345", " 007 "]:
+        w = tmp_path / "w.OK"
+        shutil.copy2(DATA_DIR / "StyleHeader.OK", w)
+        service.apply_edits(w, [{"section_index": 0, "record_index": 0,
+                                 "field": "instructions", "value": typed}],
+                            registry, config=config, backup=False)
+        got = service.parse_file_view(w, registry, config)["sections"][0]["records"][0]["values"]["instructions"]
+        assert got == typed.ljust(width), f"{typed!r} -> {got!r}"
+        assert "0" not in got[len(typed):], f"tail zero-padded: {got!r}"   # spaces only
+        assert service.parse_file_view(w, registry, config)["roundtrip_ok"]

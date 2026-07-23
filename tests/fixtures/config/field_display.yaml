@@ -45,6 +45,7 @@ literal:
   "*":
     - message1
     - message2
+    - instructions
     - fact1
     - fact2
     - fact3
