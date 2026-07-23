@@ -22,6 +22,7 @@ import datetime
 import os
 import re
 import subprocess
+import time
 import zipfile
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -246,11 +247,25 @@ def write_data_sheet(workbook: Path, data_sheet: str, rows: List[dict],
             xml = _set_cell(xml, f"{col}{rnum}", None)
 
     data[sheet_path] = xml.encode("utf-8")
-    tmp = workbook.with_name(workbook.name + ".tmp")
+    tmp = workbook.with_name(workbook.name + ".okgen.tmp")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
         for n in names:                                 # preserve entry order
             zf.writestr(n, data[n])
-    tmp.replace(workbook)
+    # Atomically swap in the new workbook. On Windows this fails if the file is
+    # open (Excel) or held by a running TOSCA — retry briefly for a transient
+    # handle, then give up cleanly (caller turns it into a friendly message).
+    for attempt in range(5):
+        try:
+            tmp.replace(workbook)
+            return
+        except PermissionError:
+            if attempt == 4:
+                try:
+                    tmp.unlink()
+                except OSError:
+                    pass
+                raise
+            time.sleep(0.25)
 
 
 # --------------------------------------------------------------------------- #
@@ -318,7 +333,15 @@ def run(paths, script_name, registry, config, launch=True) -> dict:
 
     max_clear_row = max(max_row, first_data_row + len(rows))
     if rows:
-        write_data_sheet(workbook, data_sheet, rows, first_data_row, columns, max_clear_row)
+        try:
+            write_data_sheet(workbook, data_sheet, rows, first_data_row, columns, max_clear_row)
+        except PermissionError:
+            raise ToscaError(
+                f"could not update the workbook — it looks LOCKED: {workbook.name}. "
+                f"Close it in Excel (and make sure no earlier TOSCA run still has it "
+                f"open), then run again.")
+        except OSError as exc:
+            raise ToscaError(f"could not write the workbook {workbook}: {exc}")
 
     # Fire the selected script's .bat — only when we actually wrote rows (nothing
     # to run otherwise). Fire-and-forget: launch detached and return at once.

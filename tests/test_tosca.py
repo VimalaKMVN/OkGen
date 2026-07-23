@@ -70,6 +70,21 @@ def test_config_loads_scripts(config):
         assert Path(s["workbook"]).is_absolute()
 
 
+def test_locked_workbook_gives_friendly_error(tmp_path, registry, config, monkeypatch):
+    """A locked workbook (open in Excel / held by TOSCA) surfaces a clear
+    ToscaError, not an unhandled 500."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+
+    def boom(*a, **k):
+        raise PermissionError("[WinError 32] used by another process")
+    monkeypatch.setattr(tosca, "write_data_sheet", boom)
+
+    with pytest.raises(tosca.ToscaError) as ei:
+        tosca.run([str(FIXJ / "styleheader_fmtB.json")], "Thermal", registry, config)
+    assert "LOCKED" in str(ei.value)
+
+
 def test_malformed_tosca_yaml_does_not_crash_startup(tmp_path, capsys):
     """A bad tosca.yaml (e.g. a double-quoted Windows path with backslashes) must
     NOT stop the app from loading — TOSCA is disabled and a warning printed."""
