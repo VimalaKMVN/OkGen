@@ -393,13 +393,25 @@ def _reindex(okf: OkFile) -> None:
         rec.index = i
 
 
+def _unwrap_quoted(s):
+    """If ``s`` is wrapped in a matching pair of quotes, return the interior
+    VERBATIM (leading/middle/trailing spaces preserved); otherwise return None.
+
+    This is how a user protects significant spaces in a comma-separated list,
+    where every unquoted entry is trimmed — ``'   msg01'`` -> ``   msg01``. The
+    all-spaces interior (``' '``, ``''``) is the explicit-blank case."""
+    if isinstance(s, str) and len(s) >= 2 and s[0] in "'\"" and s[-1] in "'\"":
+        return s[1:-1]
+    return None
+
+
 def _is_blank_token(s: str) -> bool:
     """True when ``s`` is the explicit-blank token: a pair of quotes wrapping
     only spaces — ``''``, ``' '``, ``'  '`` (or the double-quote forms). This
     is how a user ASKS for a blank value where an empty entry would be ambiguous
     or dropped."""
-    s = s.strip()
-    return len(s) >= 2 and s[0] in "'\"" and s[-1] in "'\"" and s[1:-1].strip() == ""
+    inner = _unwrap_quoted(s.strip())
+    return inner is not None and inner.strip() == ""
 
 
 def _unquote_blank(value):
@@ -1413,7 +1425,10 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
             for r in recs:
                 pick = random.choice(values)
                 # a blank ("") choice writes spaces on any field
-                r.set(field, pick, literal=base_literal or pick == "")
+                # a blank ("") or space-padded pick writes literal spaces on any
+                # field (numeric included, which would otherwise zero-fill)
+                r.set(field, pick,
+                      literal=base_literal or pick != pick.strip() or pick == "")
             return {"name": name, "status": "change",
                     "detail": f"{field} from {len(values)} allowed value(s) "
                               f"on {before} row(s)", "okf": okf}
@@ -1975,11 +1990,13 @@ def _generate_folder(templates, count: int, layout_name: str, dest=None, dry=Fal
 def _clean_values(raw) -> List[str]:
     """Normalise a user-supplied value list.
 
-    Accepts either a real list or one comma-separated string, trims each entry
-    and preserves order. A bare empty entry is dropped (so ``a, , b`` is two
-    values), but the explicit-blank token ``''`` / ``""`` is KEPT as a blank
-    choice — the only way to include "blank" among random values, since the
-    comma split would otherwise lose it.
+    Accepts either a real list or one comma-separated string, trims each bare
+    entry and preserves order. A bare empty entry is dropped (so ``a, , b`` is
+    two values). A QUOTE-WRAPPED entry keeps its interior spaces verbatim:
+    ``'   msg01'`` -> ``   msg01`` (leading spaces kept), and the all-spaces
+    case ``''`` / ``' '`` -> ``""`` (the explicit blank choice). Quoting is the
+    only way to carry significant spaces through the comma split, which would
+    otherwise trim them.
     """
     if raw is None:
         return []
@@ -1987,8 +2004,9 @@ def _clean_values(raw) -> List[str]:
     out = []
     for v in items:
         s = str(v).strip()
-        if _is_blank_token(s):
-            out.append("")            # explicit blank choice ('' / ' ' / "  ")
+        inner = _unwrap_quoted(s)
+        if inner is not None:
+            out.append("" if inner.strip() == "" else inner)   # blank, or spaces kept
         elif s != "":
             out.append(s)             # bare empties dropped
     return out
@@ -2089,7 +2107,8 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
             continue
         val = _spec_value(hf, f.size, hf["name"])
         base = config is not None and config.is_literal(okf.layout.name, hf["name"])
-        header.set(hf["name"], val, literal=base or val == "")   # blank pick -> spaces
+        header.set(hf["name"], val,                              # blank/spaced -> spaces
+                   literal=base or val != val.strip() or val == "")
 
     # 4. user-chosen detail fields — a fresh value per ROW, not per file. In a
     # zero-filled section (Preticket Lane) the trailing all-zero filler rows are
@@ -2107,7 +2126,8 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
             if fm and _is_blank_row(r, hidden):
                 continue                          # leave filler rows untouched
             val = _spec_value(df, f.size, df["name"])
-            r.set(df["name"], val, literal=base or val == "")    # blank pick -> spaces
+            r.set(df["name"], val,                               # blank/spaced -> spaces
+                  literal=base or val != val.strip() or val == "")
 
 
 def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder=None,

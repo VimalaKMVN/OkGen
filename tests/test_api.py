@@ -2617,6 +2617,19 @@ def test_clean_values_keeps_blank_token_drops_bare_empty():
     assert service._clean_values('X,"",Y') == ["X", "", "Y"]
 
 
+def test_clean_values_quotes_preserve_significant_spaces():
+    """A quote-wrapped list entry keeps its interior spaces; bare entries are
+    still trimmed so a plain '10, 20, 30' is unaffected."""
+    assert service._clean_values("  ab , cd") == ["ab", "cd"]        # bare -> trimmed
+    assert service._clean_values("'  ab', cd") == ["  ab", "cd"]     # leading kept
+    assert service._clean_values("'ab  ', cd") == ["ab  ", "cd"]     # trailing kept
+    assert service._clean_values("' a b '") == [" a b "]            # both ends + middle
+    assert service._clean_values('"  msg", X') == ["  msg", "X"]    # double quotes too
+    assert service._clean_values("10, 20, 30") == ["10", "20", "30"]  # normal case intact
+    # unwrapping is verbatim: an all-spaces interior is still the blank token
+    assert service._clean_values("'   ', y") == ["", "y"]
+
+
 def test_single_edit_blank_size_via_quotes(tmp_path, registry, config):
     """A field can be set blank in a single-file edit with the '' token
     (clearing the box also works — this is the explicit form)."""
@@ -2676,6 +2689,39 @@ def test_generation_blank_in_value_list(tmp_path, registry, config):
             seen.add(r["values"]["size"].strip())
     assert seen <= {"XS", "S", ""}
     assert "" in seen, "over 25 files, the blank choice should appear at least once"
+
+
+def test_bulk_list_quoted_value_keeps_leading_spaces(tmp_path, registry, config):
+    """A quoted list entry with leading spaces is written literally on a literal
+    field (size) — spaces survive the comma split and are not zero-padded."""
+    assert config.is_literal("StyleHeader", "size") is True
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    # single-value list so the (random) pick is deterministic
+    service.bulk_op_apply([str(work)], "StyleHeader", "Size",
+                          {"type": "list", "field": "size", "values": "'  XS'"},
+                          registry, config, backup=False)
+    rows = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                if s["name"] == "Size")["records"]
+    for r in rows:
+        v = r["values"]["size"]
+        assert v.startswith("  XS"), repr(v)          # leading spaces preserved
+        assert len(v) == 6 and v.strip("0") == v      # field width, no zero-pad
+
+
+def test_generation_quoted_value_keeps_leading_spaces(tmp_path, registry, config):
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    res = service.generate_apply(work, {
+        "count": 3,
+        "detail_fields": [{"section": "Size", "name": "size", "values": "'  XS'"}],
+        "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"},
+        registry, config)
+    for f in Path(res["folder"]).glob("*.OK"):
+        for r in next(s for s in service.parse_file_view(f, registry, config)["sections"]
+                      if s["name"] == "Size")["records"]:
+            v = r["values"]["size"]
+            assert v.startswith("  XS") and len(v) == 6, repr(v)
 
 
 def test_blank_token_writes_spaces_on_numeric_field(tmp_path, registry, config):
@@ -3103,3 +3149,110 @@ def test_generation_row_count_variation_keeps_filler_clean(tmp_path, registry, c
         assert all(r["values"]["size"].strip() in ("XS", "S") for r in real)
         for r in filler:
             assert all((v or "").strip("0 ") == "" for v in r["values"].values())
+
+
+# --------------------------------------------------------------------------- #
+# LEADING and MIDDLE-space PRESERVATION on literal fields (the counterpart to the
+# blank sweeps above). Discovers EVERY editable literal field in EVERY populated
+# section of EVERY layout and asserts values with significant spaces survive
+# byte-for-byte through all four write paths. Two variants per field:
+#   * LEADING space ("  X")  — in a comma list this needs the quote token
+#     ('  X'), because the split trims the ends.
+#   * MIDDLE space  ("A  B")  — survives BARE in a list (trimming only touches
+#     the ends), so it is deliberately passed unquoted to prove the guidance.
+# Single-file edit and bulk 'set' always type the value directly (no split).
+# Everything is written literal (never zero-padded) and stays field-width.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_literal_fields_keep_leading_and_middle_spaces_all_sections(
+        tmp_path, registry, config, sample):
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(DATA_DIR / sample, registry, config)
+    layout = view["layout"]
+
+    def is_filler(r):
+        return all((v or "").strip("0 ") == "" for v in r["values"].values())
+
+    tested = 0
+    for sec in view["sections"]:
+        lit_fields = [f for f in sec["fields"]
+                      if f.get("size") and not f.get("hidden") and not f.get("derived")
+                      and f.get("editable") and config.is_literal(layout, f["name"])]
+        if not sec["records"] or not lit_fields:
+            continue
+        fm = bool(config.zero_fill(layout, sec["name"]))
+        for f in lit_fields:
+            fname, width = f["name"], f["size"]
+
+            # (label, typed value, how it appears inside a comma list)
+            variants = []
+            if width >= 2:
+                lead = min(2, width - 1)
+                v = " " * lead + "X"
+                variants.append(("leading", v, "'%s'" % v))      # quotes REQUIRED in a list
+            if width >= 3:
+                v = "A" + " " * min(2, width - 2) + "B"           # e.g. "A  B"
+                variants.append(("middle", v, v))                 # BARE in a list — no quotes
+            if not variants:
+                continue
+            tested += 1
+
+            for label, typed, in_list in variants:
+                expect = typed.ljust(width)                       # literal: tail space-filled
+
+                def check(store_path, where):
+                    sv = service.parse_file_view(store_path, registry, config)
+                    srec = next(x for x in sv["sections"] if x["name"] == sec["name"])["records"]
+                    for r in [r for r in srec if not (fm and is_filler(r))]:
+                        got = r["values"][fname]
+                        assert got == expect, \
+                            f"{layout}/{sec['name']}/{fname} [{label}] {where} -> {got!r} (want {expect!r})"
+                        assert "0" not in got[len(typed):], f"{where}: tail zero-padded {got!r}"
+
+                # 1. single-file edit — value typed directly
+                a = tmp_path / f"a_{sec['name']}_{fname}_{label}_{sample}"
+                shutil.copy2(DATA_DIR / sample, a)
+                s = next(x for x in service.parse_file_view(a, registry, config)["sections"]
+                         if x["name"] == sec["name"])
+                service.apply_edits(a, [{"section_index": sec["index"],
+                                         "record_index": s["records"][0]["index"],
+                                         "field": fname, "value": typed}],
+                                    registry, config=config, backup=False)
+                av = service.parse_file_view(a, registry, config)
+                got = next(x for x in av["sections"] if x["name"] == sec["name"])["records"][0]["values"][fname]
+                assert got == expect, f"{layout}/{sec['name']}/{fname} [{label}] single -> {got!r} (want {expect!r})"
+                assert av["roundtrip_ok"]
+
+                # 2. bulk set — value typed directly, every real row
+                b = tmp_path / f"b_{sec['name']}_{fname}_{label}_{sample}"
+                shutil.copy2(DATA_DIR / sample, b)
+                res = service.bulk_op_apply([str(b)], layout, sec["name"],
+                                            {"type": "set", "field": fname, "value": typed},
+                                            registry, config, backup=False)
+                assert res["results"][0]["status"] in ("changed", "unchanged")
+                check(b, "bulk-set")
+
+                # 3. bulk 'random from list' — single entry (deterministic pick)
+                c = tmp_path / f"c_{sec['name']}_{fname}_{label}_{sample}"
+                shutil.copy2(DATA_DIR / sample, c)
+                service.bulk_op_apply([str(c)], layout, sec["name"],
+                                      {"type": "list", "field": fname, "values": in_list},
+                                      registry, config, backup=False)
+                check(c, "bulk-list")
+
+                # 4. volume generation — same entry in the value list
+                g = tmp_path / f"g_{sec['name']}_{fname}_{label}_{sample}"
+                shutil.copy2(DATA_DIR / sample, g)
+                spec = {"count": 3, "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"}
+                if sec["is_header"]:
+                    spec["header_fields"] = [{"name": fname, "values": in_list}]
+                else:
+                    spec["detail_fields"] = [{"section": sec["name"], "name": fname, "values": in_list}]
+                res = service.generate_apply(g, spec, registry, config)
+                for gf in Path(res["folder"]).glob("*.OK"):
+                    check(gf, "generate")
+
+    # CartonLabel's sample has no populated section carrying a literal field
+    if layout != "CartonLabel":
+        assert tested > 0, f"{layout}: discovered no literal field to exercise"

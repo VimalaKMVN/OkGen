@@ -479,8 +479,8 @@ function renderBulkPanel(scope) {
       } else if (op === "list") {
         const listInp = el("input", "bulk-value bulk-list");
         listInp.type = "text";
-        listInp.placeholder = "e.g. 10, 20, 30  (use ' ' for blank)";
-        listInp.style.width = "260px";
+        listInp.placeholder = "e.g. 10, 20, 30  ('  msg' keeps spaces · ' ' = blank)";
+        listInp.style.width = "320px";
         row2.appendChild(el("span", "bulk-label", "Allowed values:"));
         row2.appendChild(listInp);
         row2.appendChild(el("span", "bulk-section",
@@ -539,9 +539,11 @@ function renderBulkPanel(scope) {
       return o;
     }
     if (op === "list") {
+      // Send the raw string, NOT a pre-split/trimmed array — the server's
+      // _clean_values splits on comma, trims bare entries, and unwraps quoted
+      // entries so significant spaces survive ('   msg01' keeps its spaces).
       const raw = (row2.querySelector(".bulk-list") || {}).value || "";
-      return { type: "list", field: fieldSel.value,
-               values: raw.split(",").map((v) => v.trim()).filter((v) => v !== "") };
+      return { type: "list", field: fieldSel.value, values: raw };
     }
     if (op === "unique") {
       return { type: "unique", field: fieldSel.value, start: Number(row2.querySelector(".bulk-value").value || 0) };
@@ -556,9 +558,11 @@ function renderBulkPanel(scope) {
       return `${sec}: set ${op.field} to a random value${rng} on every row`;
     }
     if (op.type === "list") {
-      return `${sec}: set ${op.field} randomly from ${op.values.length} value(s)`
-             + (op.values.length ? ` [${op.values.slice(0, 6).join(", ")}` +
-                (op.values.length > 6 ? ", …]" : "]") : "");
+      // op.values is the raw string now — split just for the human summary.
+      const vals = String(op.values || "").split(",").map((v) => v.trim()).filter((v) => v !== "");
+      return `${sec}: set ${op.field} randomly from ${vals.length} value(s)`
+             + (vals.length ? ` [${vals.slice(0, 6).join(", ")}` +
+                (vals.length > 6 ? ", …]" : "]") : "");
     }
     if (op.type === "unique") return `${sec}: set ${op.field} to unique values from ${op.start}`;
     if (op.type === "add") return `${sec}: add ${op.count} row(s)`;
@@ -1211,18 +1215,21 @@ function makeControl(sec, rec, field) {
     // (okfile._fit), and untouched fields are never re-sent, so the file still
     // round-trips byte-for-byte.
     //
-    // EXCEPT literal fields (messages, facts, descriptions…), where the spaces
-    // are the user's data: those are shown exactly as stored so what you see is
-    // what gets saved. To keep them comfortable to type in, the cursor is
-    // placed after the last non-space character on focus.
+    // EXCEPT literal fields (messages, facts, descriptions…), where LEADING and
+    // middle spaces are the user's data and must survive. Only the TRAILING pad
+    // is stripped for display: the field is fixed width, so the server re-pads
+    // the tail on save (Record.set literal -> ljust), which reproduces exactly
+    // what was stored — an untouched field is never re-sent, so it stays
+    // byte-exact. Keeping the trailing pad here instead would fill the input to
+    // maxLength and make it impossible to TYPE a leading space.
     if (field.literal) {
-      orig = value;
+      orig = value.replace(/ +$/, "");   // drop trailing pad only; keep leading/middle
       ctrl.value = orig;
       ctrl.classList.add("fval-literal");
-      ctrl.title = "Saved exactly as typed — leading, middle and trailing "
-                 + "spaces are kept, and nothing is zero-padded.";
+      ctrl.title = "Saved exactly as typed — leading and middle spaces are "
+                 + "kept, the tail is space-filled to width, nothing is zero-padded.";
       ctrl.addEventListener("focus", () => {
-        const end = ctrl.value.replace(/ +$/, "").length;
+        const end = ctrl.value.length;
         try { ctrl.setSelectionRange(end, end); } catch (_) {}
       });
     } else {
@@ -2085,7 +2092,7 @@ function renderGeneratePanel(panel, paths, scope) {
       // A value list wins over the min/max range when it is filled in, so the
       // generated files only ever contain values the user allowed.
       const list = el("input", "gen-list"); list.type = "text";
-      list.placeholder = "or list: 10,20,' ' "; list.disabled = true;
+      list.placeholder = "or list: 10,20,'  msg',' '"; list.disabled = true;
       list.title = "Comma-separated. When filled, values are picked from this "
                  + "list instead of the min/max range. Use ' ' for a blank value.";
       const syncRange = () => {
