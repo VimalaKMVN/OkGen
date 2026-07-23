@@ -161,7 +161,7 @@ later with no core rewrite. (Note: a stale docstring in `service.py` still says
 # Dev server — http://127.0.0.1:8000
 PYTHONPATH=src python -m okgen.cli serve          # Windows: double-click run.bat
 # Tests
-.venv/bin/python -m pytest tests/ -q              # currently 318
+.venv/bin/python -m pytest tests/ -q              # currently 325
 # Offline deps install (Windows box)
 .venv\Scripts\python.exe -m pip install --no-index --find-links vendor\wheels flask openpyxl pyyaml
 ```

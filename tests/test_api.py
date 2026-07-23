@@ -2786,3 +2786,62 @@ def test_blank_only_touches_named_fields(tmp_path, registry, config):
         if name == "size_1":
             continue
         assert after[name] == val, f"{name} changed unexpectedly: {val!r} -> {after[name]!r}"
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_blank_every_size_field_all_sections(tmp_path, registry, config, sample):
+    """Exhaustive: for EVERY layout, discover EVERY size-like editable field in
+    EVERY section (Header / Lane / Size / Detail / store …) and assert it blanks
+    to spaces via the ' ' token — both single-file edit and bulk set. A field
+    that ships already-blank is a correct no-op (still ends blank)."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(DATA_DIR / sample, registry, config)
+    layout = view["layout"]
+
+    def spaces(v):
+        return v.strip() == "" and set(v) == {" "}
+
+    tested = 0
+    for sec in view["sections"]:
+        size_fields = [f for f in sec["fields"]
+                       if "size" in f["name"].lower() and f.get("size")
+                       and not f.get("hidden") and not f.get("derived") and f.get("editable")]
+        if not sec["records"] or not size_fields:
+            continue
+        for f in size_fields:
+            tested += 1
+            fname = f["name"]
+
+            # single-file edit blanks one row's field; others stay put
+            a = tmp_path / f"a_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, a)
+            s = next(x for x in service.parse_file_view(a, registry, config)["sections"]
+                     if x["name"] == sec["name"])
+            service.apply_edits(a, [{"section_index": sec["index"],
+                                     "record_index": s["records"][0]["index"],
+                                     "field": fname, "value": "' '"}],
+                                registry, config=config, backup=False)
+            av = service.parse_file_view(a, registry, config)
+            got = next(x for x in av["sections"] if x["name"] == sec["name"])["records"][0]["values"][fname]
+            assert spaces(got), f"{layout}/{sec['name']}/{fname} single -> {got!r}"
+            assert av["roundtrip_ok"]
+
+            # bulk set blanks the field on every (real) row
+            b = tmp_path / f"b_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, b)
+            res = service.bulk_op_apply([str(b)], layout, sec["name"],
+                                        {"type": "set", "field": fname, "value": "'   '"},
+                                        registry, config, backup=False)
+            assert res["results"][0]["status"] in ("changed", "unchanged")
+            fm = bool(config.zero_fill(layout, sec["name"]))
+            for r in next(x for x in service.parse_file_view(b, registry, config)["sections"]
+                          if x["name"] == sec["name"])["records"]:
+                is_filler = all((v or "").strip("0 ") == "" for v in r["values"].values())
+                if fm and is_filler:
+                    continue                       # filler rows aren't touched by bulk
+                assert spaces(r["values"][fname]), f"{layout}/{sec['name']}/{fname} bulk -> {r['values'][fname]!r}"
+
+    # every layout except DistLabels has at least one size field
+    if layout != "DistLabels":
+        assert tested > 0, f"{layout}: no size field exercised"
