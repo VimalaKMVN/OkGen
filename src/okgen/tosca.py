@@ -257,20 +257,23 @@ def write_data_sheet(workbook: Path, data_sheet: str, rows: List[dict],
 # Launch the TOSCA .bat (fire-and-forget)
 # --------------------------------------------------------------------------- #
 def _launch_bat(bat: Path) -> None:
-    """Start the .bat detached, with its own folder as the working directory,
-    and return immediately (TOSCA runs long and does its own reporting)."""
+    """Start the .bat and return immediately (fire-and-forget — TOSCA runs long
+    and does its own reporting)."""
     folder = str(bat.parent)
-    common = dict(cwd=folder, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                  stdin=subprocess.DEVNULL, close_fds=True)
     if os.name == "nt":
-        # Windows: run the .bat via cmd, fully detached from the OkGen process.
-        DETACHED = 0x00000008 | 0x00000200   # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen(["cmd", "/c", str(bat)], creationflags=DETACHED, **common)
+        # Open the .bat in its OWN console window — like double-clicking it — with
+        # its folder as the working directory, so the user SEES TOSCA run (and any
+        # error). ``start "" /D <dir> <bat>``: the empty "" is the window title so
+        # a quoted path isn't mistaken for it. The launching cmd exits at once.
+        subprocess.Popen(["cmd", "/c", "start", "", "/D", folder, str(bat)],
+                         close_fds=True)
     else:
         # Non-Windows (dev/CI): run the script directly in a new session. A real
         # .bat won't execute here, but an executable stub does — enough to prove
         # the launch path without a Windows box.
-        subprocess.Popen([str(bat)], start_new_session=True, **common)
+        subprocess.Popen([str(bat)], cwd=folder, start_new_session=True,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         stdin=subprocess.DEVNULL, close_fds=True)
 
 
 # --------------------------------------------------------------------------- #
