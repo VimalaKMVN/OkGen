@@ -2592,3 +2592,83 @@ def test_generate_pool_preview_names_template(tmp_path, registry, config):
         registry, config)
     assert pv["templates"] == 3
     assert all(r["template"] for r in pv["sample"])   # each row records its source
+
+
+# --------------------------------------------------------------------------- #
+# Explicit-blank token: '' (or "") means "set this field blank"
+# --------------------------------------------------------------------------- #
+def test_unquote_blank_helper():
+    assert service._unquote_blank("''") == ""
+    assert service._unquote_blank('""') == ""
+    assert service._unquote_blank(" '' ") == ""
+    assert service._unquote_blank("XS") == "XS"
+    assert service._unquote_blank("") == ""           # already empty
+    assert service._unquote_blank(None) is None
+
+
+def test_clean_values_keeps_blank_token_drops_bare_empty():
+    assert service._clean_values("XS, '', S") == ["XS", "", "S"]
+    assert service._clean_values("XS,,S") == ["XS", "S"]       # bare empty dropped
+    assert service._clean_values("''") == [""]
+    assert service._clean_values('X,"",Y') == ["X", "", "Y"]
+
+
+def test_single_edit_blank_size_via_quotes(tmp_path, registry, config):
+    """A field can be set blank in a single-file edit with the '' token
+    (clearing the box also works — this is the explicit form)."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    view = service.parse_file_view(work, registry, config)
+    size = next(s for s in view["sections"] if s["name"] == "Size")
+
+    service.apply_edits(work, [{"section_index": size["index"],
+                                "record_index": size["records"][0]["index"],
+                                "field": "size", "value": "''"}],
+                        registry, config=config, backup=False)
+    after = service.parse_file_view(work, registry, config)
+    val = next(s for s in after["sections"] if s["name"] == "Size")["records"][0]["values"]["size"]
+    assert val.strip() == "" and len(val) == 6        # blank, still field-width
+    assert after["roundtrip_ok"]
+
+
+def test_bulk_set_blank_size_via_quotes(tmp_path, registry, config):
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    res = service.bulk_op_apply([str(work)], "StyleHeader", "Size",
+                                {"type": "set", "field": "size", "value": "''"},
+                                registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+    rows = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                if s["name"] == "Size")["records"]
+    assert all(r["values"]["size"].strip() == "" for r in rows)
+
+
+def test_bulk_list_blank_is_a_random_choice(tmp_path, registry, config):
+    """'' in a value list makes blank one of the random picks."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    service.bulk_op_apply([str(work)], "StyleHeader", "Size",
+                          {"type": "list", "field": "size", "values": ["XS", "''", "S"]},
+                          registry, config, backup=False)
+    vals = {r["values"]["size"].strip()
+            for r in next(s for s in service.parse_file_view(work, registry, config)["sections"]
+                          if s["name"] == "Size")["records"]}
+    assert vals <= {"XS", "S", ""}                    # only allowed values
+    # (can't assert blank always appears — it's random — but it's a valid choice)
+
+
+def test_generation_blank_in_value_list(tmp_path, registry, config):
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    res = service.generate_apply(work, {
+        "count": 25,
+        "detail_fields": [{"section": "Size", "name": "size", "values": "XS,'',S"}],
+        "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"},
+        registry, config)
+    seen = set()
+    for f in Path(res["folder"]).glob("*.OK"):
+        for r in next(s for s in service.parse_file_view(f, registry, config)["sections"]
+                      if s["name"] == "Size")["records"]:
+            seen.add(r["values"]["size"].strip())
+    assert seen <= {"XS", "S", ""}
+    assert "" in seen, "over 25 files, the blank choice should appear at least once"

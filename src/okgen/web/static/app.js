@@ -2,7 +2,7 @@
 
 // Build marker — shown in the Generate panel header so a cached copy of this
 // file is obvious at a glance ("build" in the UI vs the tag you deployed).
-const OKGEN_BUILD = "v0.29.1";
+const OKGEN_BUILD = "v0.30.0";
 
 // Nothing in this app should fail silently: surface JS errors and rejected
 // promises in the status bar, otherwise a thrown error inside a click handler
@@ -479,12 +479,12 @@ function renderBulkPanel(scope) {
       } else if (op === "list") {
         const listInp = el("input", "bulk-value bulk-list");
         listInp.type = "text";
-        listInp.placeholder = "e.g. 10, 20, 30";
+        listInp.placeholder = "e.g. 10, 20, 30  (use '' for blank)";
         listInp.style.width = "260px";
         row2.appendChild(el("span", "bulk-label", "Allowed values:"));
         row2.appendChild(listInp);
         row2.appendChild(el("span", "bulk-section",
-          `· comma separated — each ${sec.isHeader ? "file" : "row"} gets one of them at random`));
+          `· comma separated — each ${sec.isHeader ? "file" : "row"} gets one at random; use '' for a blank value`));
         listInp.addEventListener("input", reset);
         fieldSel.addEventListener("change", reset);
       } else {  // random
@@ -2085,9 +2085,9 @@ function renderGeneratePanel(panel, paths, scope) {
       // A value list wins over the min/max range when it is filled in, so the
       // generated files only ever contain values the user allowed.
       const list = el("input", "gen-list"); list.type = "text";
-      list.placeholder = "or list: 10,20,30"; list.disabled = true;
+      list.placeholder = "or list: 10,20,'' "; list.disabled = true;
       list.title = "Comma-separated. When filled, values are picked from this "
-                 + "list instead of the min/max range.";
+                 + "list instead of the min/max range. Use '' for a blank value.";
       const syncRange = () => {
         const usingList = list.value.trim() !== "";
         min.disabled = max.disabled = !cb.checked || usingList;

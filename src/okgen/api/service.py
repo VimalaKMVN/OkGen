@@ -393,8 +393,20 @@ def _reindex(okf: OkFile) -> None:
         rec.index = i
 
 
+def _unquote_blank(value):
+    """Interpret the explicit-blank token: a value of exactly ``''`` or ``""``
+    (empty quotes) means "set this field blank". Used so a user can ASK for a
+    blank value where an empty entry would be ambiguous or dropped (bulk
+    set-value and the random value lists). Any other value is returned as-is."""
+    if isinstance(value, str) and value.strip() in ("''", '""'):
+        return ""
+    return value
+
+
 def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
     """Validate field widths, then apply edits in place. Raises EditError."""
+    for e in edits:                     # '' / "" -> explicit blank
+        e["value"] = _unquote_blank(e.get("value"))
     by_index = {r.index: r for r in okf.records}
     errors: List[dict] = []
     for e in edits:
@@ -1352,7 +1364,7 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
             return {"name": name, "status": "error", "error": f"{field} has no fixed width"}
 
         if t == "set":
-            value = op.get("value", "")
+            value = _unquote_blank(op.get("value", ""))     # '' / "" -> blank
             if len(value) > size:
                 return {"name": name, "status": "too_wide", "detail": f"value too long for {field}"}
             changed = 0
@@ -1947,12 +1959,22 @@ def _clean_values(raw) -> List[str]:
     """Normalise a user-supplied value list.
 
     Accepts either a real list or one comma-separated string, trims each entry
-    and drops blanks, preserving the order the user typed.
+    and preserves order. A bare empty entry is dropped (so ``a, , b`` is two
+    values), but the explicit-blank token ``''`` / ``""`` is KEPT as a blank
+    choice — the only way to include "blank" among random values, since the
+    comma split would otherwise lose it.
     """
     if raw is None:
         return []
     items = raw.split(",") if isinstance(raw, str) else list(raw)
-    return [str(v).strip() for v in items if str(v).strip() != ""]
+    out = []
+    for v in items:
+        s = str(v).strip()
+        if s in ("''", '""'):
+            out.append("")            # explicit blank choice
+        elif s != "":
+            out.append(s)             # bare empties dropped
+    return out
 
 
 def _pick_value(values: List[str], size: int, field: str) -> str:
