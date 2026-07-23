@@ -2932,3 +2932,92 @@ def test_blank_every_message_field_all_sections(tmp_path, registry, config, samp
                         continue
                     seen.add(r["values"][fname].strip())
             assert seen <= {"AA", ""}, f"{layout}/{sec['name']}/{fname} gen -> {seen}"
+
+
+# Fields the user asked to be blank-able (mapped to real layout names). Vendor
+# Style / Approx Size / Country are not present in any current layout (listed in
+# field_display.yaml so they behave the day they appear).
+_BLANKABLE_MISC = {"description", "universal_item", "item", "fact1", "fact2", "fact3",
+                   "engnoun", "frnoun", "instructions", "frdesc", "suppress", "dsuppress"}
+
+
+@pytest.mark.parametrize("sample", ALL_SAMPLES)
+def test_blank_misc_text_fields_all_sections(tmp_path, registry, config, sample):
+    """Description, Item, Fact1-3, Eng/Fre Noun, Instructions, French description,
+    header- and line-level Suppress all blank to spaces via ' ' — single-file
+    edit, bulk set, bulk 'random from list', and volume generation — on every
+    layout/section where they occur."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(DATA_DIR / sample, registry, config)
+    layout = view["layout"]
+
+    def spaces(v):
+        return v.strip() == "" and set(v) == {" "}
+
+    def is_filler(r):
+        return all((v or "").strip("0 ") == "" for v in r["values"].values())
+
+    for sec in view["sections"]:
+        fields = [f for f in sec["fields"]
+                  if f["name"] in _BLANKABLE_MISC and f.get("size")
+                  and not f.get("hidden") and not f.get("derived") and f.get("editable")]
+        if not sec["records"] or not fields:
+            continue
+        fm = bool(config.zero_fill(layout, sec["name"]))
+        for f in fields:
+            fname = f["name"]
+
+            a = tmp_path / f"a_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, a)
+            s = next(x for x in service.parse_file_view(a, registry, config)["sections"]
+                     if x["name"] == sec["name"])
+            service.apply_edits(a, [{"section_index": sec["index"],
+                                     "record_index": s["records"][0]["index"],
+                                     "field": fname, "value": "' '"}],
+                                registry, config=config, backup=False)
+            av = service.parse_file_view(a, registry, config)
+            got = next(x for x in av["sections"] if x["name"] == sec["name"])["records"][0]["values"][fname]
+            assert spaces(got), f"{layout}/{sec['name']}/{fname} single -> {got!r}"
+            assert av["roundtrip_ok"]
+
+            b = tmp_path / f"b_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, b)
+            res = service.bulk_op_apply([str(b)], layout, sec["name"],
+                                        {"type": "set", "field": fname, "value": "'   '"},
+                                        registry, config, backup=False)
+            assert res["results"][0]["status"] in ("changed", "unchanged")
+            for r in next(x for x in service.parse_file_view(b, registry, config)["sections"]
+                          if x["name"] == sec["name"])["records"]:
+                if fm and is_filler(r):
+                    continue
+                assert spaces(r["values"][fname]), f"{layout}/{sec['name']}/{fname} bulk -> {r['values'][fname]!r}"
+
+            c = tmp_path / f"c_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, c)
+            service.bulk_op_apply([str(c)], layout, sec["name"],
+                                  {"type": "list", "field": fname, "values": ["A", "' '"]},
+                                  registry, config, backup=False)
+            vals = {r["values"][fname].strip()
+                    for r in next(x for x in service.parse_file_view(c, registry, config)["sections"]
+                                  if x["name"] == sec["name"])["records"]
+                    if not (fm and is_filler(r))}
+            assert vals <= {"A", ""}, f"{layout}/{sec['name']}/{fname} list -> {vals}"
+
+            g = tmp_path / f"g_{sec['name']}_{fname}_{sample}"
+            shutil.copy2(DATA_DIR / sample, g)
+            spec = {"count": 12, "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"}
+            if sec["is_header"]:
+                spec["header_fields"] = [{"name": fname, "values": "A,' '"}]
+            else:
+                spec["detail_fields"] = [{"section": sec["name"], "name": fname, "values": "A,' '"}]
+            res = service.generate_apply(g, spec, registry, config)
+            seen = set()
+            for gf in Path(res["folder"]).glob("*.OK"):
+                gs = next(x for x in service.parse_file_view(gf, registry, config)["sections"]
+                          if x["name"] == sec["name"])
+                for r in gs["records"]:
+                    if fm and is_filler(r):
+                        continue
+                    seen.add(r["values"][fname].strip())
+            assert seen <= {"A", ""}, f"{layout}/{sec['name']}/{fname} gen -> {seen}"
