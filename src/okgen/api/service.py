@@ -393,12 +393,19 @@ def _reindex(okf: OkFile) -> None:
         rec.index = i
 
 
+def _is_blank_token(s: str) -> bool:
+    """True when ``s`` is the explicit-blank token: a pair of quotes wrapping
+    only spaces — ``''``, ``' '``, ``'  '`` (or the double-quote forms). This
+    is how a user ASKS for a blank value where an empty entry would be ambiguous
+    or dropped."""
+    s = s.strip()
+    return len(s) >= 2 and s[0] in "'\"" and s[-1] in "'\"" and s[1:-1].strip() == ""
+
+
 def _unquote_blank(value):
-    """Interpret the explicit-blank token: a value of exactly ``''`` or ``""``
-    (empty quotes) means "set this field blank". Used so a user can ASK for a
-    blank value where an empty entry would be ambiguous or dropped (bulk
-    set-value and the random value lists). Any other value is returned as-is."""
-    if isinstance(value, str) and value.strip() in ("''", '""'):
+    """Map the explicit-blank token (see :func:`_is_blank_token`) to an empty
+    string; return any other value unchanged."""
+    if isinstance(value, str) and _is_blank_token(value):
         return ""
     return value
 
@@ -1970,8 +1977,8 @@ def _clean_values(raw) -> List[str]:
     out = []
     for v in items:
         s = str(v).strip()
-        if s in ("''", '""'):
-            out.append("")            # explicit blank choice
+        if _is_blank_token(s):
+            out.append("")            # explicit blank choice ('' / ' ' / "  ")
         elif s != "":
             out.append(s)             # bare empties dropped
     return out

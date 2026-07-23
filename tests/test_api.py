@@ -2598,18 +2598,22 @@ def test_generate_pool_preview_names_template(tmp_path, registry, config):
 # Explicit-blank token: '' (or "") means "set this field blank"
 # --------------------------------------------------------------------------- #
 def test_unquote_blank_helper():
-    assert service._unquote_blank("''") == ""
-    assert service._unquote_blank('""') == ""
-    assert service._unquote_blank(" '' ") == ""
+    # quotes wrapping only spaces -> blank, in any of these forms
+    for tok in ["''", "' '", "'  '", '""', '" "', "  ' '  "]:
+        assert service._unquote_blank(tok) == "", tok
+        assert service._is_blank_token(tok) is True, tok
+    # real content (even quoted) is left alone
+    for tok in ["XS", "' XS '", "' 'x", ""]:
+        assert service._is_blank_token(tok) is False, tok
     assert service._unquote_blank("XS") == "XS"
-    assert service._unquote_blank("") == ""           # already empty
     assert service._unquote_blank(None) is None
 
 
 def test_clean_values_keeps_blank_token_drops_bare_empty():
-    assert service._clean_values("XS, '', S") == ["XS", "", "S"]
-    assert service._clean_values("XS,,S") == ["XS", "S"]       # bare empty dropped
-    assert service._clean_values("''") == [""]
+    assert service._clean_values("XS, ' ', S") == ["XS", "", "S"]   # ' ' kept as blank
+    assert service._clean_values("XS, '', S") == ["XS", "", "S"]    # '' also works
+    assert service._clean_values("XS,,S") == ["XS", "S"]            # bare empty dropped
+    assert service._clean_values("' '") == [""]
     assert service._clean_values('X,"",Y') == ["X", "", "Y"]
 
 
@@ -2623,7 +2627,7 @@ def test_single_edit_blank_size_via_quotes(tmp_path, registry, config):
 
     service.apply_edits(work, [{"section_index": size["index"],
                                 "record_index": size["records"][0]["index"],
-                                "field": "size", "value": "''"}],
+                                "field": "size", "value": "' '"}],
                         registry, config=config, backup=False)
     after = service.parse_file_view(work, registry, config)
     val = next(s for s in after["sections"] if s["name"] == "Size")["records"][0]["values"]["size"]
@@ -2635,7 +2639,7 @@ def test_bulk_set_blank_size_via_quotes(tmp_path, registry, config):
     work = tmp_path / "StyleHeader.OK"
     shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
     res = service.bulk_op_apply([str(work)], "StyleHeader", "Size",
-                                {"type": "set", "field": "size", "value": "''"},
+                                {"type": "set", "field": "size", "value": "' '"},
                                 registry, config, backup=False)
     assert res["results"][0]["status"] == "changed"
     rows = next(s for s in service.parse_file_view(work, registry, config)["sections"]
@@ -2648,7 +2652,7 @@ def test_bulk_list_blank_is_a_random_choice(tmp_path, registry, config):
     work = tmp_path / "StyleHeader.OK"
     shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
     service.bulk_op_apply([str(work)], "StyleHeader", "Size",
-                          {"type": "list", "field": "size", "values": ["XS", "''", "S"]},
+                          {"type": "list", "field": "size", "values": ["XS", "' '", "S"]},
                           registry, config, backup=False)
     vals = {r["values"]["size"].strip()
             for r in next(s for s in service.parse_file_view(work, registry, config)["sections"]
@@ -2662,7 +2666,7 @@ def test_generation_blank_in_value_list(tmp_path, registry, config):
     shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
     res = service.generate_apply(work, {
         "count": 25,
-        "detail_fields": [{"section": "Size", "name": "size", "values": "XS,'',S"}],
+        "detail_fields": [{"section": "Size", "name": "size", "values": "XS,' ',S"}],
         "name_parts": [{"type": "token", "name": "seq"}], "separator": "_"},
         registry, config)
     seen = set()
