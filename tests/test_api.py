@@ -2739,3 +2739,50 @@ def test_blank_size_every_layout(tmp_path, registry, config, sample, section, fi
         if fill_managed and is_blank_row:
             continue                              # untouched filler row
         assert r["values"][field].strip() == "" and set(r["values"][field]) == {" "}
+
+
+@pytest.mark.parametrize("sample", ["EUStyleHeader.OK", "EUCartonLabel.OK"])
+def test_blank_eu_header_size_families(tmp_path, registry, config, sample):
+    """The EU GTA header carries three size families — size_1..10, pack_size_*,
+    phys_size_1..10 — all of which blank to spaces via the ' ' token, each field
+    independently and only when named in the edit."""
+    if not (DATA_DIR / sample).exists():
+        pytest.skip(f"no sample for {sample}")
+    families = (["size_%d" % i for i in range(1, 11)]
+                + ["pack_size_%d" % i for i in range(1, 6)] + ["pack_size"]
+                + ["phys_size_%d" % i for i in range(1, 11)])
+
+    work = tmp_path / sample
+    shutil.copy2(DATA_DIR / sample, work)
+    header = service.parse_file_view(work, registry, config)["sections"][0]
+    present = {f["name"] for f in header["fields"]}
+    targets = [f for f in families if f in present]
+    assert "size_1" in targets and "size_10" in targets     # the header size fields exist
+
+    service.apply_edits(work, [{"section_index": 0, "record_index": 0,
+                                "field": f, "value": "' '"} for f in targets],
+                        registry, config=config, backup=False)
+    after = service.parse_file_view(work, registry, config)
+    vals = after["sections"][0]["records"][0]["values"]
+    for f in targets:
+        assert vals[f].strip() == "" and set(vals[f]) == {" "}, f"{f}={vals[f]!r}"
+    assert after["roundtrip_ok"]
+
+
+def test_blank_only_touches_named_fields(tmp_path, registry, config):
+    """Blanking is opt-in: only the field(s) you name change; the rest of the
+    record is byte-identical."""
+    work = tmp_path / "EUStyleHeader.OK"
+    shutil.copy2(DATA_DIR / "EUStyleHeader.OK", work)
+    before = service.parse_file_view(work, registry, config)["sections"][0]["records"][0]["values"]
+
+    service.apply_edits(work, [{"section_index": 0, "record_index": 0,
+                                "field": "size_1", "value": "' '"}],
+                        registry, config=config, backup=False)
+    after = service.parse_file_view(work, registry, config)["sections"][0]["records"][0]["values"]
+
+    assert after["size_1"].strip() == "" and set(after["size_1"]) == {" "}
+    for name, val in before.items():
+        if name == "size_1":
+            continue
+        assert after[name] == val, f"{name} changed unexpectedly: {val!r} -> {after[name]!r}"
