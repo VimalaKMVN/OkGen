@@ -987,6 +987,16 @@ def browse_folder(initial: Optional[str] = None) -> dict:
             # top-most owner + the Alt-key trick releases Windows' foreground
             # lock so it appears IN FRONT of Edge (a background process
             # otherwise can't take foreground).
+            #
+            # AttachThreadInput: bringing the window to the FRONT is not the same
+            # as giving it input FOCUS. Without focus the dialog is topmost but
+            # inactive, so Windows spends the user's FIRST click just activating
+            # it (nothing gets selected) and only the 2nd click registers. A
+            # background process can't grab focus on its own, so we attach to the
+            # current foreground window's input queue for the hand-off, force
+            # focus onto the owner (which the modal dialog then inherits), and
+            # detach — so the dialog opens already active and the first click
+            # selects.
             ps = f'''
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type @"
@@ -995,6 +1005,13 @@ using System.Runtime.InteropServices;
 public static class Fg {{
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr SetActiveWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr SetFocus(IntPtr h);
 }}
 "@
 $o = New-Object System.Windows.Forms.Form
@@ -1005,10 +1022,19 @@ $o.Width = 1; $o.Height = 1
 $o.StartPosition = 'Manual'
 $o.Left = -32000; $o.Top = -32000
 $o.Show()
+$fg = [Fg]::GetForegroundWindow()
+$fgTid = [Fg]::GetWindowThreadProcessId($fg, [IntPtr]::Zero)
+$myTid = [Fg]::GetCurrentThreadId()
+$attached = $false
+if ($fgTid -ne 0 -and $fgTid -ne $myTid) {{ $attached = [Fg]::AttachThreadInput($myTid, $fgTid, $true) }}
 [Fg]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
 [Fg]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+[Fg]::BringWindowToTop($o.Handle) | Out-Null
 [Fg]::SetForegroundWindow($o.Handle) | Out-Null
+[Fg]::SetActiveWindow($o.Handle) | Out-Null
+[Fg]::SetFocus($o.Handle) | Out-Null
 $o.Activate()
+if ($attached) {{ [Fg]::AttachThreadInput($myTid, $fgTid, $false) | Out-Null }}
 $d = New-Object System.Windows.Forms.OpenFileDialog
 $d.Title = 'Go INTO the folder with your OK files, then click Open'
 $d.ValidateNames = $false
