@@ -322,6 +322,10 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
         "format": fmt,
         "chain_info": chain_info_dict,
         "roundtrip_ok": roundtrip_ok,
+        # >0 when opening this file dropped stray trailing blank lines; the diff
+        # from disk is exactly those lines, so the editor shows it clean and a
+        # Save (or the "Clean up files" bulk action) writes it out without them.
+        "trailing_blanks_removed": getattr(okf, "trailing_blanks_removed", 0),
         "key_field": config.unique_field(layout_name),  # unique field for this layout
         "raw_text": raw_text,  # for the Raw verify tab
         "sections": sections_out,
@@ -936,6 +940,15 @@ def _insert_in_section_order(okf, clone, sec) -> int:
 # --------------------------------------------------------------------------- #
 # Native folder picker (local app convenience)
 # --------------------------------------------------------------------------- #
+import threading
+
+# Only ONE native folder dialog may be open at a time. The dialog is a blocking
+# subprocess; without this, a race (or a client with no guard) could launch a
+# pile of them that then linger and re-surface one after another. The client
+# also guards the button, but this is the server-side backstop.
+_BROWSE_LOCK = threading.Lock()
+
+
 def browse_folder(initial: Optional[str] = None) -> dict:
     """Open the OS-native folder chooser and return the selected path.
 
@@ -945,9 +958,15 @@ def browse_folder(initial: Optional[str] = None) -> dict:
       * Linux   -> ``zenity --file-selection --directory``
 
     Returns {"path": None} when cancelled or when no GUI dialog is available.
+    Refused (``already_open``) if a dialog is already open — never launches a
+    second one.
     """
     import platform
     import subprocess
+
+    if not _BROWSE_LOCK.acquire(blocking=False):
+        return {"path": None, "already_open": True,
+                "error": "a folder chooser is already open"}
 
     system = platform.system()
     try:
@@ -956,7 +975,7 @@ def browse_folder(initial: Optional[str] = None) -> dict:
             script = f'POSIX path of (choose folder with prompt "{prompt}")'
             proc = subprocess.run(
                 ["osascript", "-e", script],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, text=True, timeout=120,
             )
         elif system == "Windows":
             import base64
@@ -1004,20 +1023,24 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {{ [Console]::Out.Write([Sys
             enc = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
             proc = subprocess.run(
                 ["powershell", "-NoProfile", "-STA", "-EncodedCommand", enc],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, text=True, timeout=120,
             )
         else:
             proc = subprocess.run(
                 ["zenity", "--file-selection", "--directory",
                  "--title=Select the folder with your OK files"],
-                capture_output=True, text=True, timeout=600,
+                capture_output=True, text=True, timeout=120,
             )
         chosen = (proc.stdout or "").strip()
         return {"path": chosen or None}
+    except subprocess.TimeoutExpired:
+        return {"path": None, "error": "folder chooser timed out — please try again"}
     except FileNotFoundError:
         return {"path": None, "error": "no native folder dialog available on this system"}
     except Exception as exc:  # pragma: no cover - depends on desktop session
         return {"path": None, "error": str(exc)}
+    finally:
+        _BROWSE_LOCK.release()
 
 
 # --------------------------------------------------------------------------- #
@@ -1368,6 +1391,42 @@ def make_unique_files(paths, registry, config, backup=True) -> dict:
             folders.append(parent)
     results = [make_unique_in_folder(f, registry, config, backup=backup) for f in folders]
     return {"folders": results}
+
+
+def clean_files(paths, registry) -> dict:
+    """Remove stray trailing blank lines from each selected file (the "Clean up
+    files" bulk action).
+
+    Parsing already drops trailing empty/space-only lines (see
+    :func:`okgen.okfile.parse_okfile`), and a plain parse leaves every real
+    record's bytes untouched, so this is simply "parse -> serialize -> write if
+    the bytes changed". Nothing else is normalized (Preticket filler, trailing
+    pad, line counts are NOT touched), so a file with no trailing blanks is
+    reported ``clean`` and left byte-for-byte as it was.
+
+    Per-file status: ``cleaned`` (blank lines removed, with how many), ``clean``
+    (already fine), or ``error`` (couldn't detect/parse the file).
+    """
+    results = []
+    cleaned = 0
+    for p in paths or []:
+        p = Path(p)
+        try:
+            original = p.read_bytes()
+            okf = parse_okfile(p, registry=registry)      # strips trailing blanks
+            new_bytes = okf.to_bytes()
+            if new_bytes != original:
+                removed = max(original.count(b"\n") - new_bytes.count(b"\n"), 1)
+                p.write_bytes(new_bytes)
+                cleaned += 1
+                results.append({"path": str(p), "name": p.name,
+                                "status": "cleaned", "removed": removed})
+            else:
+                results.append({"path": str(p), "name": p.name, "status": "clean"})
+        except Exception as exc:
+            results.append({"path": str(p), "name": p.name,
+                            "status": "error", "error": str(exc)})
+    return {"results": results, "cleaned": cleaned, "total": len(paths or [])}
 
 
 # --------------------------------------------------------------------------- #

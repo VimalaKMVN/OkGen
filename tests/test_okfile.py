@@ -36,6 +36,58 @@ def test_roundtrip_byte_identical(registry, filename):
 
 
 @pytest.mark.parametrize("filename", OK_FILES)
+def test_trailing_blank_lines_are_dropped_on_parse(registry, tmp_path, filename):
+    """Stray trailing blank lines (empty / space-only, no terminator) that users
+    add after the last record are dropped on parse: no sectionless junk records,
+    and re-serializing equals the original file with just those lines removed."""
+    src = DATA_DIR / filename
+    original = src.read_bytes()
+    # Blank lines can only follow a terminated last record, so make sure the
+    # base ends with a newline (some sample files don't) before appending them.
+    base = original if original.endswith(b"\n") else original + b"\r\n"
+    for junk in (b"   \r\n      \r\n\r\n",   # spaces + empties, final newline
+                 b"\r\n\r\n",               # bare empty lines
+                 b"   \r\n   "):            # last blank line has no final newline
+        work = tmp_path / f"junk_{filename}"
+        work.write_bytes(base + junk)
+        okf = parse_okfile(work, registry=registry)
+        # no records landed in "(unassigned)"
+        assert "(unassigned)" not in okf.sections()
+        assert all(r.section is not None for r in okf.records)
+        assert okf.trailing_blanks_removed >= 1
+        cleaned = okf.to_bytes()
+        # only the trailing blank lines changed: real content is byte-identical
+        # (a file that had no final newline gains a normalized one, so the last
+        # record isn't left ending in a dangling bare '\r' — hence the rstrip).
+        assert cleaned.rstrip(b"\r\n") == original.rstrip(b"\r\n")
+        # ...and if the original already ended with a newline, it's exact
+        if original.endswith(b"\n"):
+            assert cleaned == original
+
+
+@pytest.mark.parametrize("filename", OK_FILES)
+def test_clean_file_reports_zero_blanks_removed(registry, filename):
+    """A well-formed sample drops nothing and stays byte-identical."""
+    okf = parse_okfile(DATA_DIR / filename, registry=registry)
+    assert okf.trailing_blanks_removed == 0
+    assert okf.to_bytes() == (DATA_DIR / filename).read_bytes()
+
+
+def test_blank_line_between_records_is_kept(registry, tmp_path):
+    """Only TRAILING blanks are removed — a blank line in the middle is left as
+    junk (we never reorder or drop interior content)."""
+    src = (DATA_DIR / "StyleHeader.OK").read_bytes()
+    lines = src.split(b"\r\n")
+    # insert a blank line after the header, keep the rest
+    spliced = b"\r\n".join([lines[0], b"   "] + lines[1:])
+    work = tmp_path / "mid.OK"
+    work.write_bytes(spliced)
+    okf = parse_okfile(work, registry=registry)
+    assert okf.trailing_blanks_removed == 0        # nothing trailing to drop
+    assert okf.to_bytes() == spliced               # interior blank preserved
+
+
+@pytest.mark.parametrize("filename", OK_FILES)
 def test_header_is_single_record(registry, filename):
     okf = parse_okfile(DATA_DIR / filename, registry=registry)
     header = okf.records[0]

@@ -270,6 +270,11 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(service.make_unique_files(body.get("paths", []), registry, config))
 
+    @app.post("/api/clean/bulk")
+    def clean_bulk():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.clean_files(body.get("paths", []), registry))
+
     @app.post("/api/file/rename")
     def file_rename():
         body = request.get_json(force=True, silent=True) or {}

@@ -156,6 +156,10 @@ class OkFile:
     records: List[Record]
     trailing_newline: bool
     newline: str = "\n"           # join separator (data carries its own '\r')
+    # How many stray trailing blank lines were dropped when this file was parsed
+    # (see parse_okfile). 0 for a well-formed file; >0 means a Save will rewrite
+    # the file without them.
+    trailing_blanks_removed: int = 0
     # JSON engine only: the shared parse state (source text + span map + staged
     # value edits). When present, serialization goes through it (byte-exact
     # splice of only the changed values) instead of the raw-line join below.
@@ -375,10 +379,27 @@ def parse_okfile(path, layout: Optional[Layout] = None, registry=None) -> OkFile
     if trailing_newline:
         parts = parts[:-1]
 
+    # Drop stray trailing blank lines. Users sometimes press Enter a few times
+    # after the last record, leaving empty / space-only lines below the final
+    # terminator; those parse into sectionless "(unassigned)" junk records and
+    # show as blank rows in the editor and blank lines in the Raw view. A real
+    # record — including an all-zero filler row — always ends with the record
+    # terminator, so a whitespace/empty trailing line is unambiguously junk.
+    # Only *trailing* blanks are removed (a blank line between records is kept),
+    # and never the header (line 0). When any are dropped, the last real record
+    # keeps its newline (a well-formed file ends with the terminator + newline).
+    removed = 0
+    while len(parts) > 1 and parts[-1].rstrip("\r").strip(" ") == "":
+        parts.pop()
+        removed += 1
+    if removed:
+        trailing_newline = True
+
     records = _assign_records(parts, layout)
     return OkFile(
         path=path,
         layout=layout,
         records=records,
         trailing_newline=trailing_newline,
+        trailing_blanks_removed=removed,
     )

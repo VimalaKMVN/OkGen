@@ -35,6 +35,44 @@ def config():
     return Config.load(FIXTURE_CONFIG)
 
 
+def test_browse_folder_refuses_second_dialog(monkeypatch):
+    """The native folder chooser is a blocking dialog; a second request while one
+    is open must be refused (never launch a second dialog that would linger and
+    re-surface). The client also guards the button; this is the server backstop."""
+    import subprocess
+    import threading
+
+    inside = threading.Event()
+    release = threading.Event()
+
+    class _Proc:
+        stdout = ""
+        returncode = 0
+
+    def fake_run(*args, **kwargs):
+        inside.set()          # a "dialog" is now open
+        release.wait(3)       # hold it open until the test lets go
+        return _Proc()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    out = {}
+    first = threading.Thread(target=lambda: out.__setitem__("first", service.browse_folder()))
+    first.start()
+    assert inside.wait(2), "first dialog never opened"
+
+    # Second call, while the first is still open, is refused immediately.
+    second = service.browse_folder()
+    assert second["path"] is None
+    assert second.get("already_open") is True
+
+    release.set()
+    first.join(3)
+    assert out["first"]["path"] is None          # empty stdout -> nothing picked
+    # Lock is released afterwards: a fresh call can proceed again.
+    assert service.browse_folder()["path"] is None
+
+
 def test_build_tree_only_ok_files(config):
     tree = service.build_tree(DATA_DIR, config)
     assert tree["type"] == "folder"
@@ -2441,6 +2479,62 @@ def test_trim_trailing_is_preticket_only(config):
     for other in ("CartonLabel", "DistLabels", "StyleHeader",
                   "EUPreticket", "EUStyleHeader", "EUCartonLabel"):
         assert config.trims_trailing(other) is False
+
+
+# --------------------------------------------------------------------------- #
+# Trailing blank-line cleanup: auto on open + the "Clean up files" bulk action
+# --------------------------------------------------------------------------- #
+def test_open_reports_trailing_blanks_removed(tmp_path, registry, config):
+    """Opening a file with stray trailing blank lines shows it clean and reports
+    how many were dropped (so the client can light up Save)."""
+    src = (DATA_DIR / "StyleHeader.OK").read_bytes()
+    work = tmp_path / "StyleHeader.OK"
+    work.write_bytes(src + b"   \r\n      \r\n\r\n")     # 3 stray lines
+    view = service.parse_file_view(work, registry, config)
+    assert view["trailing_blanks_removed"] == 3
+    assert view["roundtrip_ok"] is False                # differs from disk (junk)
+    # the junk is not shown as a section
+    assert not any(s["name"] == "(unassigned)" for s in view["sections"])
+    # a clean file reports zero and round-trips
+    clean = service.parse_file_view(DATA_DIR / "StyleHeader.OK", registry, config)
+    assert clean["trailing_blanks_removed"] == 0
+    assert clean["roundtrip_ok"] is True
+
+
+def test_clean_files_removes_trailing_blanks(tmp_path, registry):
+    """clean_files strips trailing blank lines and writes the file, reporting how
+    many lines went — and touches ONLY the trailing blanks (real bytes intact)."""
+    src = (DATA_DIR / "StyleHeader.OK").read_bytes()
+    work = tmp_path / "a.OK"
+    work.write_bytes(src + b"   \r\n   \r\n")
+    res = service.clean_files([str(work)], registry)
+    assert res["cleaned"] == 1 and res["total"] == 1
+    assert res["results"][0]["status"] == "cleaned"
+    assert res["results"][0]["removed"] == 2
+    assert work.read_bytes() == src                     # exactly the junk removed
+
+
+def test_clean_files_skips_already_clean(tmp_path, registry):
+    """A well-formed file is left byte-for-byte untouched and reported clean."""
+    work = tmp_path / "b.OK"
+    shutil.copy2(DATA_DIR / "CartonLabel.OK", work)
+    before = work.read_bytes()
+    res = service.clean_files([str(work)], registry)
+    assert res["cleaned"] == 0 and res["total"] == 1
+    assert res["results"][0]["status"] == "clean"
+    assert work.read_bytes() == before
+
+
+def test_clean_files_mixed_batch(tmp_path, registry):
+    """A batch reports per-file status and an accurate cleaned/total count."""
+    dirty = tmp_path / "dirty.OK"
+    dirty.write_bytes((DATA_DIR / "Preticket.OK").read_bytes() + b"\r\n\r\n")
+    clean = tmp_path / "clean.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", clean)
+    res = service.clean_files([str(dirty), str(clean)], registry)
+    assert res["total"] == 2 and res["cleaned"] == 1
+    by_name = {r["name"]: r["status"] for r in res["results"]}
+    assert by_name == {"dirty.OK": "cleaned", "clean.OK": "clean"}
 
 
 def test_fill_bulk_keep_one_row(tmp_path, registry, config):

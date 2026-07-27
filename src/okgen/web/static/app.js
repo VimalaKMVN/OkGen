@@ -22,12 +22,14 @@ const state = {
   view: null,          // parsed view
   edits: {},           // key -> value
   ops: [],             // staged row-op journal, replayed on Save/Save As
+  normalized: 0,       // trailing blank lines dropped on open (Save persists it)
   clipboard: [],       // array of paths copied for paste
   treeToken: 0,        // increments per Open; guards against stale renders
   treeAbort: null,     // AbortController for the in-flight root load
   selection: new Set(),// multi-selected file paths (for bulk copy / future bulk edit)
   selAnchor: null,     // last plainly-clicked file, for Shift-range select
   busy: false,         // guards slow file ops (make-unique) from double-runs
+  browsing: false,     // a native folder dialog is open — block re-launching it
   activityTimer: null, // auto-hide timer for the activity indicator
   activityResult: false, // a result is showing — don't let a follow-up status clobber it
 };
@@ -132,12 +134,28 @@ function updateDirtyIndicator() {
 
 // ---- folder picker (native OS dialog) ----
 async function browseFolder() {
+  const btn = $("#openBtn");
+  // One dialog at a time. The chooser is a BLOCKING native window (it can open
+  // behind the browser, so a click can look like "nothing happened"); without
+  // this guard, repeated clicks stack up hidden dialogs that then re-surface one
+  // after another. Re-clicking now just re-nudges the reminder instead.
+  if (state.browsing) {
+    setStatus("Folder chooser is already open — look behind this window", "dirty");
+    return;
+  }
+  state.browsing = true;
+  btn.disabled = true;
+  setStatus("Opening folder chooser… (if you don't see it, check behind this window)", "dirty");
   try {
     const res = await postJSON("/api/browse-folder", {});
     if (res.path) { const fp = $("#folderPath"); fp.value = res.path; fp.title = res.path; openFolder(res.path); }
+    else if (res.already_open) setStatus("Folder chooser is already open — look behind this window", "dirty");
     else setStatus("No folder selected");
   } catch (e) {
     setStatus("Native dialog unavailable — paste a path instead", "err");
+  } finally {
+    state.browsing = false;
+    btn.disabled = false;
   }
 }
 
@@ -315,7 +333,7 @@ async function enterBulkMode() {
   if (state.selection.size < 1) return;
   if (!confirmDiscardIfDirty()) return;
   closeAllPanels("bulk");        // only one bulk mode open at a time
-  state.file = null; state.view = null; state.edits = {}; state.ops = [];
+  state.file = null; state.view = null; state.edits = {}; state.ops = []; state.normalized = 0;
   $("#editorTabs").classList.add("hidden");
   $("#editor").classList.add("hidden");
   $("#rawView").classList.add("hidden");
@@ -641,7 +659,7 @@ async function enterRenameMode() {
   if (!state.selection.size) return;
   if (!confirmDiscardIfDirty()) return;
   closeAllPanels("rename");      // only one bulk mode open at a time
-  state.file = null; state.view = null; state.edits = {}; state.ops = [];
+  state.file = null; state.view = null; state.edits = {}; state.ops = []; state.normalized = 0;
   $("#editorTabs").classList.add("hidden");
   $("#editor").classList.add("hidden");
   $("#rawView").classList.add("hidden");
@@ -949,12 +967,18 @@ async function loadFile(path) {
     state.view = view;
     state.edits = {};
     state.ops = [];   // staged rows belong to the file we just left
+    state.normalized = view.trailing_blanks_removed || 0;
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
     updateTreeBadge(path, view.chain_info, view.chain);  // reflect chain edits in the tree
-    setStatus(view.roundtrip_ok ? "Loaded (round-trip OK)" : "Loaded (round-trip DIFFERS!)",
-              view.roundtrip_ok ? "ok" : "err");
+    if (state.normalized) {
+      const n = state.normalized;
+      setStatus(`Loaded — removed ${n} trailing blank line${n > 1 ? "s" : ""}; Save to keep`, "dirty");
+    } else {
+      setStatus(view.roundtrip_ok ? "Loaded (round-trip OK)" : "Loaded (round-trip DIFFERS!)",
+                view.roundtrip_ok ? "ok" : "err");
+    }
   } catch (e) {
     setStatus("Parse failed: " + e.message, "err");
   }
@@ -1047,6 +1071,10 @@ function updateRawBanner() {
     banner.className = "raw-banner warn";
   } else if (ops) {
     banner.textContent = "⚠ Preview of unsaved row changes — nothing has been written to disk yet.";
+    banner.className = "raw-banner warn";
+  } else if (state.normalized) {
+    const n = state.normalized;
+    banner.textContent = `🧹 Removed ${n} stray trailing blank line${n > 1 ? "s" : ""} at the end — Save to keep (nothing written yet).`;
     banner.className = "raw-banner warn";
   } else {
     banner.textContent = "Read-only view of the file on disk (use the ruler to verify character positions).";
@@ -1410,7 +1438,9 @@ function updateSaveButtons() {
   // them. Save As stays enabled with no changes too, so it can still copy a
   // file to a new name — it is styled as clearly live rather than greyed.
   const dirty = dirtyCount();
-  $("#saveBtn").disabled = !state.file || dirty === 0;
+  // Save is also enabled when opening the file dropped stray trailing blank
+  // lines (state.normalized) so the user can persist that cleanup in one click.
+  $("#saveBtn").disabled = !state.file || (dirty === 0 && !state.normalized);
   $("#saveAsBtn").disabled = !state.file;
   const saveAs = $("#saveAsBtn");
   saveAs.classList.toggle("has-changes", dirty > 0);
@@ -1481,6 +1511,7 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Bulk Edit (${count})` : "Bulk Edit", () => enterBulkMode());
   add(count > 1 ? `Bulk Rename (${count})…` : "Bulk Rename…", () => enterRenameMode());
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
+  add(count > 1 ? `🧹  Clean up ${count} files` : "🧹  Clean up file", () => cleanUpSelection());
   add(count > 1 ? `🏷️  Send ${count} to NiceLabel` : "🏷️  Send to NiceLabel", () => sendToNiceLabel());
   add(count > 1 ? `▶  Run TOSCA Script (${count})` : "▶  Run TOSCA Script", () => runTosca());
   menu.appendChild(el("div", "ctx-sep"));
@@ -1568,6 +1599,33 @@ async function makeUniqueSelection() {
     setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
   } catch (e) {
     setStatus("Make unique failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
+}
+
+// ---- Clean up files (remove stray trailing blank lines) ----
+async function cleanUpSelection() {
+  const paths = [...state.selection];
+  if (!paths.length) return;
+  if (!beginBusy("Cleaning up files…")) {
+    setStatus("Please wait — an operation is already running…", "dirty");
+    return;
+  }
+  try {
+    const res = await postJSON("/api/clean/bulk", { paths });
+    new Set(paths.map(folderOf)).forEach((f) => refreshFolder(f));
+    const errs = (res.results || []).filter((r) => r.status === "error").length;
+    let msg = res.cleaned
+      ? `Cleaned ${res.cleaned} of ${res.total} file(s)` +
+        (res.cleaned < res.total ? " (rest already clean)" : "")
+      : `All ${res.total} file(s) already clean`;
+    if (errs) msg += ` — ${errs} could not be read`;
+    setStatus(msg, errs ? "dirty" : "ok");
+    // If the open file was one of them, reload so the editor drops the junk too.
+    if (state.file && paths.includes(state.file)) loadFile(state.file);
+  } catch (e) {
+    setStatus("Clean up failed: " + e.message, "err");
   } finally {
     state.busy = false;
   }
@@ -2057,6 +2115,7 @@ function showBulkMenu() {
   add(`Bulk Edit (${n})`, () => enterBulkMode());
   add(`Bulk Rename (${n})`, () => enterRenameMode());
   add(`Make keys unique (${n})`, () => makeUniqueSelection());
+  add(n === 1 ? "🧹  Clean up file" : `🧹  Clean up ${n} files`, () => cleanUpSelection());
   // Volume generation works from exactly ONE template file.
   add(n === 1 ? "Generate volume files…" : `Generate volume files… (${n} source files)`,
       () => enterGenerateMode());
@@ -2138,7 +2197,7 @@ async function enterGenerateMode() {
   if (!confirmDiscardIfDirty()) return;
   const paths = [...state.selection];
   closeAllPanels("generate");    // only one bulk mode open at a time
-  state.file = null; state.view = null; state.edits = {}; state.ops = [];
+  state.file = null; state.view = null; state.edits = {}; state.ops = []; state.normalized = 0;
   $("#editorTabs").classList.add("hidden");
   $("#editor").classList.add("hidden");
   $("#rawView").classList.add("hidden");
