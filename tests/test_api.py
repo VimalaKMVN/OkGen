@@ -192,6 +192,47 @@ def test_save_roundtrip_and_edit(tmp_path, registry, config):
     assert view["sections"][0]["records"][0]["values"]["chain"] == "07"
 
 
+def test_save_to_locked_file_is_friendly_and_leaves_no_stray_files(
+        tmp_path, registry, config, monkeypatch):
+    """Saving to a file that's open elsewhere (locked/read-only) must fail with a
+    clear message — not a raw 500 — leave the original untouched, and NOT leave a
+    stray .tmp or .bak behind."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    original = work.read_bytes()
+
+    # Simulate the OS refusing to replace a locked/in-use target (Windows: file
+    # open in Excel -> sharing violation).
+    def boom(src, dst, *a, **k):
+        raise PermissionError(13, "file is in use")
+    monkeypatch.setattr(service.os, "replace", boom)
+
+    with pytest.raises(service.EditError) as ei:
+        service.apply_edits(
+            work, [{"section_index": 0, "record_index": 0, "field": "chain", "value": "07"}],
+            registry, config=config, backup=True)
+    msg = str(ei.value).lower()
+    assert "open in another program" in msg or "read-only" in msg, msg
+
+    assert work.read_bytes() == original                       # original untouched
+    strays = sorted(p.name for p in tmp_path.iterdir() if p.suffix in (".tmp", ".bak"))
+    assert strays == [], f"stray files left behind: {strays}"
+
+
+def test_normal_save_is_atomic_bak_kept_no_tmp(tmp_path, registry, config):
+    """A successful save keeps a .bak of the previous content and leaves no .tmp."""
+    work = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
+    before = work.read_bytes()
+    service.apply_edits(
+        work, [{"section_index": 0, "record_index": 0, "field": "chain", "value": "07"}],
+        registry, config=config, backup=True)
+    bak = work.with_suffix(".OK.bak")
+    assert bak.exists() and bak.read_bytes() == before          # .bak = previous content
+    assert not (work.with_suffix(".OK.tmp")).exists()           # no stray temp
+    assert service.parse_file_view(work, registry, config)["sections"][0]["records"][0]["values"]["chain"] == "07"
+
+
 def test_save_rejects_too_wide_value(tmp_path, registry):
     src = DATA_DIR / "CartonLabel.OK"
     work = tmp_path / "CartonLabel.OK"
@@ -2523,6 +2564,28 @@ def test_clean_files_skips_already_clean(tmp_path, registry):
     assert res["cleaned"] == 0 and res["total"] == 1
     assert res["results"][0]["status"] == "clean"
     assert work.read_bytes() == before
+
+
+def test_clean_files_on_locked_file_reports_error_no_stray(tmp_path, registry, monkeypatch):
+    """Clean up on a locked file reports a per-file 'error' (friendly message),
+    leaves the original untouched, and drops no stray .tmp/.bak — same atomic
+    write path as a normal Save."""
+    work = tmp_path / "StyleHeader.OK"
+    work.write_bytes((DATA_DIR / "StyleHeader.OK").read_bytes() + b"\r\n\r\n")
+    original = work.read_bytes()
+
+    def boom(src, dst, *a, **k):
+        raise PermissionError(13, "file is in use")
+    monkeypatch.setattr(service.os, "replace", boom)
+
+    res = service.clean_files([str(work)], registry)
+    r = res["results"][0]
+    assert res["cleaned"] == 0
+    assert r["status"] == "error"
+    assert "open in another program" in r["error"].lower() or "read-only" in r["error"].lower()
+    assert work.read_bytes() == original                       # junk still there, untouched
+    strays = sorted(p.name for p in tmp_path.iterdir() if p.suffix in (".tmp", ".bak"))
+    assert strays == [], strays
 
 
 def test_clean_files_mixed_batch(tmp_path, registry):

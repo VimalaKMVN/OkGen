@@ -6,6 +6,8 @@ Kept HTTP-free so it can be unit-tested directly. The FastAPI app in
 
 from __future__ import annotations
 
+import errno
+import os
 import random
 import re
 import shutil
@@ -378,9 +380,7 @@ def apply_edits(
 
     _assert_layout_stable(okf)
     out = Path(target_path) if target_path else src
-    if backup and out.exists() and target_path is None:
-        shutil.copy2(out, out.with_suffix(out.suffix + ".bak"))
-    okf.save(out)
+    _atomic_write_okf(okf, out, backup=(backup and target_path is None))
 
     return {
         "path": str(out),
@@ -730,11 +730,51 @@ def _assert_layout_stable(okf: OkFile) -> None:
     )
 
 
+def _write_failed_message(out: Path, exc: OSError) -> str:
+    """A user-facing reason for a failed write. A locked / in-use / read-only
+    target is the common one (the file is open in Excel or another editor)."""
+    busy = (isinstance(exc, PermissionError)
+            or getattr(exc, "winerror", None) in (32, 33)      # sharing/lock violation
+            or getattr(exc, "errno", None) in (errno.EACCES, errno.EPERM, errno.EROFS))
+    if busy:
+        return (f"Couldn't save '{out.name}' — it looks like it's open in another "
+                f"program (e.g. Excel) or is read-only. Close it there and try again.")
+    return f"Couldn't save '{out.name}': {getattr(exc, 'strerror', None) or exc}"
+
+
+def _atomic_write_okf(okf, out: Path, backup: bool) -> None:
+    """Write ``okf`` to ``out`` ATOMICALLY, with an optional ``.bak`` of the
+    previous content written only AFTER the save succeeds.
+
+    Serialize to a sibling ``.tmp`` then ``os.replace`` it in, so ``out`` is
+    never left half-written and a locked / read-only / open-elsewhere target
+    fails **without leaving a stray ``.tmp`` or ``.bak``** and raises a friendly
+    :class:`EditError` (the routes turn it into a clear message) instead of a raw
+    500. Callers that need the layout-stability check first should go through
+    :func:`_backup_and_save`.
+    """
+    out = Path(out)
+    tmp = out.with_suffix(out.suffix + ".tmp")
+    prev = out.read_bytes() if (backup and out.exists()) else None
+    try:
+        tmp.write_bytes(okf.to_bytes())
+        os.replace(tmp, out)                 # atomic; fails cleanly if out is locked
+    except OSError as exc:
+        try:
+            tmp.unlink()                     # no stray temp file left behind
+        except OSError:
+            pass
+        raise EditError(_write_failed_message(out, exc)) from exc
+    if prev is not None:
+        try:
+            out.with_suffix(out.suffix + ".bak").write_bytes(prev)
+        except OSError:
+            pass                             # best-effort; the save already succeeded
+
+
 def _backup_and_save(okf, out: Path, backup: bool) -> None:
-    _assert_layout_stable(okf)          # check before the .bak, so a rejected
-    if backup and out.exists():         # write leaves nothing behind at all
-        shutil.copy2(out, out.with_suffix(out.suffix + ".bak"))
-    okf.save(out)
+    _assert_layout_stable(okf)              # reject a bad write before touching disk
+    _atomic_write_okf(okf, out, backup)
 
 
 def _eol_of(okf) -> str:
@@ -1312,10 +1352,7 @@ def _set_key(path: Path, registry, key_field: str, new_int: int, size: int, back
         raise EditError(f"no available key for {path.name} (width {size} overflow)")
     okf = parse_okfile(path, registry=registry)
     okf.records[0].set(key_field, new_str)
-    _assert_layout_stable(okf)
-    if backup and path.exists():
-        shutil.copy2(path, path.with_suffix(path.suffix + ".bak"))
-    okf.save(path)
+    _backup_and_save(okf, path, backup)
     return new_str
 
 
@@ -1443,7 +1480,10 @@ def clean_files(paths, registry) -> dict:
             new_bytes = okf.to_bytes()
             if new_bytes != original:
                 removed = max(original.count(b"\n") - new_bytes.count(b"\n"), 1)
-                p.write_bytes(new_bytes)
+                # Atomic write with the same friendly-on-lock handling as every
+                # other save (a locked file -> EditError, caught below as an
+                # "error" result; original untouched, no stray files).
+                _atomic_write_okf(okf, p, backup=False)
                 cleaned += 1
                 results.append({"path": str(p), "name": p.name,
                                 "status": "cleaned", "removed": removed})
@@ -1745,10 +1785,7 @@ def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> 
         if r["status"] == "change" and okf is not None:
             try:
                 _apply_detail_fill(okf, config)   # keep Preticket-style filler rows
-                _assert_layout_stable(okf)
-                if backup and sp.exists():
-                    shutil.copy2(sp, sp.with_suffix(sp.suffix + ".bak"))
-                okf.save(sp)
+                _backup_and_save(okf, sp, backup)
                 r["status"] = "changed"
             except (OSError, EditError) as exc:
                 r["status"] = "error"
@@ -1815,10 +1852,7 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
         if r["status"] == "change" and okf is not None:
             try:
                 _apply_detail_fill(okf, config)   # keep Preticket-style filler rows
-                _assert_layout_stable(okf)
-                if backup and sp.exists():
-                    shutil.copy2(sp, sp.with_suffix(sp.suffix + ".bak"))
-                okf.save(sp)
+                _backup_and_save(okf, sp, backup)
                 r["status"] = "changed"
             except (OSError, EditError) as exc:
                 r["status"] = "error"
@@ -2409,7 +2443,7 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
         seen_names.add(name.lower())
 
         if write:
-            okf.save(Path(dest_folder) / name)
+            _atomic_write_okf(okf, Path(dest_folder) / name, backup=False)
         yield name, okf, {"key": _format_key(key_parts.prefix, k, key_size,
                                              key_parts.suffix, key_parts.width)
                           if key_size else "", "template": src.name}

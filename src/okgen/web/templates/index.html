@@ -19,6 +19,10 @@
     <input id="folderPath" class="folder-input" type="text"
            placeholder="Folder path (or click Open Folder to browse)…" />
     <button id="openBtn" class="btn">Open Folder…</button>
+    <label id="autoCleanLabel" class="auto-clean"
+           title="When you open a file that has stray blank lines at the end, remove them and save automatically. Turn off to review and Save yourself.">
+      <input id="autoCleanChk" type="checkbox" checked /> Auto-clean blank lines
+    </label>
     <div class="spacer"></div>
     <button id="bulkBtn" class="btn hidden">Bulk Edit</button>
     <button id="toscaBtn" class="btn hidden">▶ Run TOSCA</button>

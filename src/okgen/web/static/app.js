@@ -132,6 +132,20 @@ function updateDirtyIndicator() {
   }
 }
 
+// ---- auto-clean-on-open toggle (persisted, default ON) ----
+function autoCleanEnabled() { return localStorage.getItem("okgen.autoClean") !== "0"; }
+(function initAutoCleanToggle() {
+  const chk = $("#autoCleanChk");
+  if (!chk) return;
+  chk.checked = autoCleanEnabled();
+  chk.addEventListener("change", () => {
+    localStorage.setItem("okgen.autoClean", chk.checked ? "1" : "0");
+    setStatus(chk.checked
+      ? "Auto-clean ON — opening a file with stray blank lines removes them and saves"
+      : "Auto-clean OFF — you'll be asked to Save blank-line removals yourself", "ok");
+  });
+})();
+
 // ---- folder picker (native OS dialog) ----
 async function browseFolder() {
   const btn = $("#openBtn");
@@ -973,8 +987,30 @@ async function loadFile(path) {
     updateDirtyIndicator();
     updateTreeBadge(path, view.chain_info, view.chain);  // reflect chain edits in the tree
     if (state.normalized) {
-      const n = state.normalized;
-      setStatus(`Loaded — removed ${n} trailing blank line${n > 1 ? "s" : ""}; Save to keep`, "dirty");
+      const n = state.normalized, s = n > 1 ? "s" : "";
+      if (autoCleanEnabled()) {
+        // Persist the junk removal automatically — junk-only (the /api/clean
+        // path writes okf.to_bytes(), NOT the full save normalization), so the
+        // "removed N" message stays honest. Locked/read-only files fall back to
+        // the manual Save path instead of erroring.
+        try {
+          const res = await postJSON("/api/clean/bulk", { paths: [path] });
+          const r = (res.results || [])[0] || {};
+          if (r.status === "error") {
+            setStatus(`Removed ${n} stray blank line${s}, but couldn't save automatically ` +
+                      `(the file may be open in another program); click Save to keep`, "dirty");
+          } else {
+            state.normalized = 0;              // now clean on disk
+            updateSaveButtons();               // greys out Save, clears the raw note
+            setStatus(`Removed ${n} stray blank line${s} at the end and saved`, "ok");
+          }
+        } catch (e) {
+          setStatus(`Removed ${n} blank line${s} — auto-save failed (${e.message}); ` +
+                    `click Save to keep`, "dirty");
+        }
+      } else {
+        setStatus(`Loaded — removed ${n} trailing blank line${s}; Save to keep`, "dirty");
+      }
     } else {
       setStatus(view.roundtrip_ok ? "Loaded (round-trip OK)" : "Loaded (round-trip DIFFERS!)",
                 view.roundtrip_ok ? "ok" : "err");
@@ -1620,7 +1656,7 @@ async function cleanUpSelection() {
       ? `Cleaned ${res.cleaned} of ${res.total} file(s)` +
         (res.cleaned < res.total ? " (rest already clean)" : "")
       : `All ${res.total} file(s) already clean`;
-    if (errs) msg += ` — ${errs} could not be read`;
+    if (errs) msg += ` — ${errs} couldn't be cleaned (open elsewhere or read-only?)`;
     setStatus(msg, errs ? "dirty" : "ok");
     // If the open file was one of them, reload so the editor drops the junk too.
     if (state.file && paths.includes(state.file)) loadFile(state.file);
