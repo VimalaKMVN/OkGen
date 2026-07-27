@@ -2329,6 +2329,120 @@ def test_fill_is_idempotent(tmp_path, registry, config):
     assert a.read_bytes() == b.read_bytes()
 
 
+# --------------------------------------------------------------------------- #
+# Preticket `vendor_style` field (added at the end of the detail line, after
+# fact3) + trailing-pad trim after the record terminator.
+# --------------------------------------------------------------------------- #
+def test_preticket_has_vendor_style_field(registry):
+    """The Lane detail section exposes an editable 8-char `vendor_style` field,
+    last (after fact3)."""
+    lane = next(s for s in registry["Preticket"].sections if s.name == "Lane")
+    names = [f.name for f in lane.fields]
+    assert names[-1] == "vendor_style", f"vendor_style not last: {names[-3:]}"
+    vs = next(f for f in lane.fields if f.name == "vendor_style")
+    assert vs.size == 8
+    # it sits right after fact3 (start = fact3.start + fact3.size)
+    fact3 = next(f for f in lane.fields if f.name == "fact3")
+    assert vs.start == fact3.start + fact3.size
+
+
+def test_preticket_vendor_style_reads_and_edits(tmp_path, registry, config):
+    """vendor_style reads the sample's value and takes an edit like any field."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    v = service.parse_file_view(work, registry, config)
+    lane = next(s for s in v["sections"] if s["name"] == "Lane")
+    assert lane["records"][0]["values"]["vendor_style"] == "VENDORST"
+
+    si, ri = lane["index"], lane["records"][0]["index"]
+    service.apply_edits(work, [{"section_index": si, "record_index": ri,
+                                "field": "vendor_style", "value": "AB12"}],
+                        registry, config=config, backup=False)
+    v2 = service.parse_file_view(work, registry, config)
+    lane2 = next(s for s in v2["sections"] if s["name"] == "Lane")
+    # literal field: kept exactly as typed, tail space-filled to width 8
+    assert lane2["records"][0]["values"]["vendor_style"] == "AB12    "
+    assert v2["roundtrip_ok"]
+
+
+def test_preticket_vendor_style_numeric_is_literal_not_zero_padded(tmp_path, registry, config):
+    """vendor_style 'can be numbers also' — a numeric value is stored literally
+    (space-padded tail), NEVER zero-padded like a code field."""
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", work)
+    v = service.parse_file_view(work, registry, config)
+    lane = next(s for s in v["sections"] if s["name"] == "Lane")
+    si, ri = lane["index"], lane["records"][0]["index"]
+    service.apply_edits(work, [{"section_index": si, "record_index": ri,
+                                "field": "vendor_style", "value": "12345"}],
+                        registry, config=config, backup=False)
+    got = next(s for s in service.parse_file_view(work, registry, config)["sections"]
+               if s["name"] == "Lane")["records"][0]["values"]["vendor_style"]
+    assert got == "12345   "           # left-justified, space-padded to width 8
+    assert "0" not in got[len("12345"):]  # tail is spaces, not zero-fill
+
+
+def _detail_lines(path):
+    """Non-header lines of an OK file (Latin-1, EOL stripped)."""
+    text = path.read_bytes().decode("latin-1")
+    return [ln.rstrip("\r") for ln in text.split("\r\n") if ln][1:]
+
+
+def test_preticket_write_trims_trailing_pad_after_terminator(tmp_path, registry, config):
+    """On write, every Preticket detail line is trimmed to end AT the '\\'
+    terminator — the unneeded pad after it ('...VENDORST\\   ') is dropped."""
+    src = DATA_DIR / "Preticket.OK"
+    # the sample really does carry trailing pad after the terminator
+    assert any(ln.endswith("\\   ") for ln in _detail_lines(src))
+
+    work = tmp_path / "Preticket.OK"
+    shutil.copy2(src, work)
+    out = tmp_path / "out.OK"
+    service.apply_edits(work, [], registry, target_path=str(out), config=config)
+
+    lines = _detail_lines(out)
+    assert lines, "no detail lines written"
+    for ln in lines:                      # real rows AND filler rows
+        assert ln.endswith("\\"), f"line not trimmed to terminator: {ln[-6:]!r}"
+        assert not ln.endswith(" "), f"trailing pad survived: {ln[-6:]!r}"
+    # the header line is never touched by the trim (it has no trailing pad); it
+    # ends at its own terminator with no spaces after it
+    header = out.read_bytes().decode("latin-1").split("\r\n")[0]
+    assert header.endswith("\\") and not header.endswith(" ")
+    assert service.parse_file_view(out, registry, config)["roundtrip_ok"]
+
+
+def test_preticket_plain_open_is_byte_exact_despite_trim(registry):
+    """The trim is write-only: parsing the sample and re-serializing (no edit)
+    is still byte-for-byte identical, trailing pad and all."""
+    from okgen import okfile
+    src = DATA_DIR / "Preticket.OK"
+    okf = okfile.parse_okfile(src, registry=registry)
+    assert okf.to_bytes() == src.read_bytes()
+
+
+def test_preticket_vendor_style_is_a_rename_token(registry, config):
+    """vendor_style is offered in the Bulk Rename palette and resolves to the
+    file's value, so it can be used as a filename token."""
+    sc = service.rename_scope([str(DATA_DIR / "Preticket.OK")], registry, config)
+    assert "vendor_style" in sc["palette"]["header_fields"]
+    assert sc["sample"].get("vendor_style") == "VENDORST"
+
+    prev = service.bulk_rename_preview(
+        [str(DATA_DIR / "Preticket.OK")],
+        [{"type": "token", "name": "vendor_style"}], "_", registry, config)
+    new_names = [r["new"] for r in prev["results"]]
+    assert any(n and "VENDORST" in n for n in new_names), new_names
+
+
+def test_trim_trailing_is_preticket_only(config):
+    """Only Preticket is configured to trim; other layouts keep their bytes."""
+    assert config.trims_trailing("Preticket") is True
+    for other in ("CartonLabel", "DistLabels", "StyleHeader",
+                  "EUPreticket", "EUStyleHeader", "EUCartonLabel"):
+        assert config.trims_trailing(other) is False
+
+
 def test_fill_bulk_keep_one_row(tmp_path, registry, config):
     """Bulk 'keep first 1 row' -> 1 real + 10 filler."""
     work = tmp_path / "Preticket.OK"

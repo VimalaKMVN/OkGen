@@ -166,8 +166,8 @@
     {
       "name": "Lane",
       "tab": "Detail",
-      "record_length": 186,
-      "sample_record": "00100142103239702      NXXXXXXXXXX          001800N00099900220007194339000454218                                                                                                          ",
+      "record_length": 194,
+      "sample_record": "00100142103239702      NXXXXXXXXXX          001800N00099900220007194339000454218                                                                                                          VENDORST",
       "marker": "",
       "sample_raw": "00100101217194183P65   YMESSAGES01MESSAGES02999999Y59999900003123456789000000012FRENCH DESCRIPTION!!ENGFRE26x29x35ItemItemItemFact1Fact1Fact1Fact1Fact2Fact2Fact2Fact2Fact3Fact3Fact3Fact3VENDORST\\   ",
       "filler_raw": "00000000000000000000000000000000000000000000000000000000000000000000000000000000                                                                                                                  \\   ",
@@ -436,6 +436,17 @@
           "declared_position": 167,
           "sample_value": "                    ",
           "field_id": "field173",
+          "issues": []
+        },
+        {
+          "name": "vendor_style",
+          "field_name": "vendor_style",
+          "size": 8,
+          "start": 187,
+          "field_type": "char",
+          "declared_position": 187,
+          "sample_value": "VENDORST",
+          "field_id": "field174",
           "issues": []
         }
       ]

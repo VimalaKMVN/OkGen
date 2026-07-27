@@ -15,6 +15,7 @@ rename_tokens:
     - type
     - keytrol
     - po
+    - vendor_style
     - picklist_id
     - size_rec
     - lane_rec

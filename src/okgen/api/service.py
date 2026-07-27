@@ -834,6 +834,38 @@ def _apply_detail_fill(okf: OkFile, config: Config) -> None:
         # header count field = number of REAL rows (not counting filler)
         _set_count_field(okf, layout.name, sec_name, len(real), config)
 
+    # Trim junk pad after the record terminator on detail lines (Preticket).
+    # Done AFTER fill so freshly-copied filler rows are trimmed too.
+    _trim_trailing_pad(okf, config)
+
+
+def _trim_trailing_pad(okf: OkFile, config: Config) -> None:
+    """Remove padding spaces that follow the record terminator on detail lines,
+    for layouts configured in ``trim_trailing`` (e.g. Preticket, whose lines end
+    ``...VENDORST\\   `` where the format needs no trailing pad).
+
+    The terminator (``\\``) is a non-space char, so ``rstrip`` stops at it: every
+    field — including a space-padded trailing field like ``vendor_style`` — is
+    preserved, and only the pad after the terminator is dropped. The header line
+    (index 0) is never touched, and a line whose stripped content doesn't end at
+    the terminator is left alone (defensive: never eat a real field's spaces).
+    Called only from the write path, so a plain open still round-trips exact.
+    """
+    if not config.trims_trailing(okf.layout.name):
+        return
+    term = okf.layout.record_terminator or ""
+    for i, rec in enumerate(okf.records):
+        if i == 0:                                   # header keeps its own bytes
+            continue
+        cr = "\r" if rec.raw.endswith("\r") else ""
+        content = rec.raw[:-1] if cr else rec.raw
+        stripped = content.rstrip(" ")
+        if stripped == content:
+            continue                                 # nothing to trim
+        if term and not stripped.endswith(term):
+            continue                                 # guard: don't eat field pad
+        rec.raw = stripped + cr
+
 
 def _set_count_field(okf: OkFile, layout_name: str, section_name: str,
                      count: int, config: Config) -> None:

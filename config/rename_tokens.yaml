@@ -88,7 +88,7 @@ rename_tokens:
     - add
     - version
     - instructions
-    - ven_style
+    - vendor_style   # Preticket detail: vendor style (8 chars, free-text)
     - desc
     - price
     - ret_price

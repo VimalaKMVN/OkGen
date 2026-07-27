@@ -18,3 +18,10 @@ fill:
   # adding or removing any rows.
   EUPreticket:
     Lane: 0
+
+# Trim padding spaces after the record terminator ('\') on detail lines, on
+# write. Preticket's detail lines end '...VENDORST\   '; the trailing pad is
+# unneeded, so writes end the line at the terminator. Write-only (plain open
+# still round-trips byte-exact).
+trim_trailing:
+  - Preticket
