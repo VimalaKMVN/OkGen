@@ -156,10 +156,14 @@ class OkFile:
     records: List[Record]
     trailing_newline: bool
     newline: str = "\n"           # join separator (data carries its own '\r')
-    # How many stray trailing blank lines were dropped when this file was parsed
-    # (see parse_okfile). 0 for a well-formed file; >0 means a Save will rewrite
-    # the file without them.
-    trailing_blanks_removed: int = 0
+    # Junk removed while parsing (see parse_okfile / _clean_lines). Both are 0
+    # for a well-formed file; either being >0 means a Save rewrites the file
+    # without that junk. ``blank_lines_removed`` = stray empty/space-only lines
+    # dropped (anywhere but the header); ``lines_space_trimmed`` = lines whose
+    # padding AFTER the record terminator was trimmed. Field data (before the
+    # terminator) is never touched by either.
+    blank_lines_removed: int = 0
+    lines_space_trimmed: int = 0
     # JSON engine only: the shared parse state (source text + span map + staged
     # value edits). When present, serialization goes through it (byte-exact
     # splice of only the changed values) instead of the raw-line join below.
@@ -168,7 +172,9 @@ class OkFile:
     def to_bytes(self) -> bytes:
         if self.json_state is not None:
             return self.json_state.serialize()
-        text = self.newline.join(r.raw for r in self.records)
+        term = getattr(self.layout, "record_terminator", "") or ""
+        text = self.newline.join(_trim_after_terminator(r.raw, term)
+                                 for r in self.records)
         if self.trailing_newline:
             text += self.newline
         return text.encode(ENCODING)
@@ -379,20 +385,9 @@ def parse_okfile(path, layout: Optional[Layout] = None, registry=None) -> OkFile
     if trailing_newline:
         parts = parts[:-1]
 
-    # Drop stray trailing blank lines. Users sometimes press Enter a few times
-    # after the last record, leaving empty / space-only lines below the final
-    # terminator; those parse into sectionless "(unassigned)" junk records and
-    # show as blank rows in the editor and blank lines in the Raw view. A real
-    # record — including an all-zero filler row — always ends with the record
-    # terminator, so a whitespace/empty trailing line is unambiguously junk.
-    # Only *trailing* blanks are removed (a blank line between records is kept),
-    # and never the header (line 0). When any are dropped, the last real record
-    # keeps its newline (a well-formed file ends with the terminator + newline).
-    removed = 0
-    while len(parts) > 1 and parts[-1].rstrip("\r").strip(" ") == "":
-        parts.pop()
-        removed += 1
-    if removed:
+    parts, blank_lines_removed, lines_space_trimmed = _clean_lines(parts, layout)
+    if blank_lines_removed or lines_space_trimmed:
+        # keep a well-formed final newline once we've rewritten anything
         trailing_newline = True
 
     records = _assign_records(parts, layout)
@@ -401,5 +396,60 @@ def parse_okfile(path, layout: Optional[Layout] = None, registry=None) -> OkFile
         layout=layout,
         records=records,
         trailing_newline=trailing_newline,
-        trailing_blanks_removed=removed,
+        blank_lines_removed=blank_lines_removed,
+        lines_space_trimmed=lines_space_trimmed,
     )
+
+
+def _clean_lines(parts: List[str], layout: Layout):
+    """Strip junk from a file's lines and report how much.
+
+    Two kinds of junk, both of which only ever touch content the format doesn't
+    need — never a field:
+
+    * **Blank junk lines** — a line that is empty or only spaces has no record
+      terminator and no data, so it is never a valid record. Users leave them
+      after (or wedged between) the real records by pressing Enter; they parse
+      into sectionless ``(unassigned)`` rows and show as blank lines in the Raw
+      view. Dropped anywhere EXCEPT the header (line 0), whether trailing or
+      interior.
+    * **Padding after the record terminator** — spaces following the ``\\``
+      terminator on any line (header or detail). Trimmed only when what remains
+      still ends with the terminator, so a space-padded LAST FIELD (which sits
+      *before* the terminator) is preserved byte-for-byte.
+
+    A blank-but-terminated line (``   \\``) is kept (it has structure), and an
+    all-zero filler row (``000…\\``) is neither blank nor space-padded, so both
+    survive untouched. Returns ``(cleaned_parts, blank_lines_removed,
+    lines_space_trimmed)``.
+    """
+    term = getattr(layout, "record_terminator", "") or ""
+    out: List[str] = []
+    blanks = 0
+    trimmed = 0
+    for i, line in enumerate(parts):
+        content = line[:-1] if line.endswith("\r") else line
+        if i != 0 and content.strip(" ") == "":     # blank junk line (not header)
+            blanks += 1
+            continue
+        new = _trim_after_terminator(line, term)     # drop pad AFTER the terminator
+        if new != line:
+            trimmed += 1
+        out.append(new)
+    return out, blanks, trimmed
+
+
+def _trim_after_terminator(raw: str, term: str) -> str:
+    """Drop padding spaces that follow the record terminator on ONE line,
+    preserving any trailing ``\\r``. Field data (before the terminator) is kept:
+    the strip is applied only when what remains still ends with the terminator,
+    so a line with no terminator — or a space-padded last field — is untouched.
+    Used by both parse-time cleaning and :meth:`OkFile.to_bytes`, so a row built
+    after parsing (seeded/cloned/generated) serializes just as clean as a parsed
+    one."""
+    cr = "\r" if raw.endswith("\r") else ""
+    content = raw[:-1] if cr else raw
+    stripped = content.rstrip(" ")
+    if stripped != content and term and stripped.endswith(term):
+        content = stripped
+    return content + cr

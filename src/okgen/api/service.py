@@ -324,10 +324,12 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
         "format": fmt,
         "chain_info": chain_info_dict,
         "roundtrip_ok": roundtrip_ok,
-        # >0 when opening this file dropped stray trailing blank lines; the diff
-        # from disk is exactly those lines, so the editor shows it clean and a
-        # Save (or the "Clean up files" bulk action) writes it out without them.
-        "trailing_blanks_removed": getattr(okf, "trailing_blanks_removed", 0),
+        # >0 when opening this file removed junk that a Save (or the "Clean up
+        # files" bulk action) will write out: blank junk lines dropped, and/or
+        # lines whose padding AFTER the terminator was trimmed. Field data is
+        # never touched, so the editor already shows the clean result.
+        "blank_lines_removed": getattr(okf, "blank_lines_removed", 0),
+        "lines_space_trimmed": getattr(okf, "lines_space_trimmed", 0),
         "key_field": config.unique_field(layout_name),  # unique field for this layout
         "raw_text": raw_text,  # for the Raw verify tab
         "sections": sections_out,

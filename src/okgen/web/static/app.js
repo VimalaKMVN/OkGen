@@ -22,7 +22,8 @@ const state = {
   view: null,          // parsed view
   edits: {},           // key -> value
   ops: [],             // staged row-op journal, replayed on Save/Save As
-  normalized: 0,       // trailing blank lines dropped on open (Save persists it)
+  normalized: 0,       // junk removed on open (blank lines + trimmed lines); Save persists it
+  cleanupDesc: "",     // human description of that cleanup, for the status/banner
   clipboard: [],       // array of paths copied for paste
   treeToken: 0,        // increments per Open; guards against stale renders
   treeAbort: null,     // AbortController for the in-flight root load
@@ -970,6 +971,15 @@ function updateTreeBadge(path, chainInfo, chain) {
   });
 }
 
+// Human summary of what auto-clean removed on open (blank lines / trimmed
+// trailing spaces). Both counts are junk only — no field is ever touched.
+function describeCleanup(blanks, trimmed) {
+  const parts = [];
+  if (blanks) parts.push(`removed ${blanks} blank junk line${blanks > 1 ? "s" : ""}`);
+  if (trimmed) parts.push(`trimmed trailing spaces on ${trimmed} line${trimmed > 1 ? "s" : ""}`);
+  return parts.join(" and ") || "cleaned junk";
+}
+
 // ---- editor ----
 async function loadFile(path) {
   try {
@@ -981,35 +991,37 @@ async function loadFile(path) {
     state.view = view;
     state.edits = {};
     state.ops = [];   // staged rows belong to the file we just left
-    state.normalized = view.trailing_blanks_removed || 0;
+    const blanks = view.blank_lines_removed || 0, trimmed = view.lines_space_trimmed || 0;
+    state.normalized = blanks + trimmed;
+    state.cleanupDesc = describeCleanup(blanks, trimmed);
     renderEditor(view);
     updateSaveButtons();
     updateDirtyIndicator();
     updateTreeBadge(path, view.chain_info, view.chain);  // reflect chain edits in the tree
     if (state.normalized) {
-      const n = state.normalized, s = n > 1 ? "s" : "";
+      const desc = state.cleanupDesc;
       if (autoCleanEnabled()) {
-        // Persist the junk removal automatically — junk-only (the /api/clean
-        // path writes okf.to_bytes(), NOT the full save normalization), so the
-        // "removed N" message stays honest. Locked/read-only files fall back to
-        // the manual Save path instead of erroring.
+        // Persist the cleanup automatically — junk-only (the /api/clean path
+        // writes okf.to_bytes(), which is exactly the file minus blank lines and
+        // post-terminator padding — no field is touched). Locked/read-only files
+        // fall back to the manual Save path instead of erroring.
         try {
           const res = await postJSON("/api/clean/bulk", { paths: [path] });
           const r = (res.results || [])[0] || {};
           if (r.status === "error") {
-            setStatus(`Removed ${n} stray blank line${s}, but couldn't save automatically ` +
+            setStatus(`Cleaned this file (${desc}), but couldn't save automatically ` +
                       `(the file may be open in another program); click Save to keep`, "dirty");
           } else {
             state.normalized = 0;              // now clean on disk
             updateSaveButtons();               // greys out Save, clears the raw note
-            setStatus(`Removed ${n} stray blank line${s} at the end and saved`, "ok");
+            setStatus(`Cleaned and saved — ${desc}`, "ok");
           }
         } catch (e) {
-          setStatus(`Removed ${n} blank line${s} — auto-save failed (${e.message}); ` +
+          setStatus(`Cleaned this file (${desc}) — auto-save failed (${e.message}); ` +
                     `click Save to keep`, "dirty");
         }
       } else {
-        setStatus(`Loaded — removed ${n} trailing blank line${s}; Save to keep`, "dirty");
+        setStatus(`Loaded — ${desc}; Save to keep`, "dirty");
       }
     } else {
       setStatus(view.roundtrip_ok ? "Loaded (round-trip OK)" : "Loaded (round-trip DIFFERS!)",
@@ -1109,8 +1121,7 @@ function updateRawBanner() {
     banner.textContent = "⚠ Preview of unsaved row changes — nothing has been written to disk yet.";
     banner.className = "raw-banner warn";
   } else if (state.normalized) {
-    const n = state.normalized;
-    banner.textContent = `🧹 Removed ${n} stray trailing blank line${n > 1 ? "s" : ""} at the end — Save to keep (nothing written yet).`;
+    banner.textContent = `🧹 Cleaned on open (${state.cleanupDesc || "removed junk"}) — Save to keep (nothing written yet).`;
     banner.className = "raw-banner warn";
   } else {
     banner.textContent = "Read-only view of the file on disk (use the ruler to verify character positions).";

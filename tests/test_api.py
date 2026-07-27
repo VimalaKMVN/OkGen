@@ -173,12 +173,14 @@ def test_save_roundtrip_and_edit(tmp_path, registry, config):
     src = DATA_DIR / "CartonLabel.OK"
     work = tmp_path / "CartonLabel.OK"
     shutil.copy2(src, work)
-    original = work.read_bytes()
 
-    # No-op save must be byte-identical.
+    # The first save normalizes (CartonLabel carries post-terminator padding);
+    # a SECOND no-op save is then byte-identical (idempotent).
+    service.apply_edits(work, [], registry, backup=False)
+    normalized = work.read_bytes()
     res = service.apply_edits(work, [], registry, backup=False)
     assert res["roundtrip_ok"]
-    assert work.read_bytes() == original
+    assert work.read_bytes() == normalized
 
     # Edit chain in the header (section 0, record 0).
     res = service.apply_edits(
@@ -615,7 +617,9 @@ def test_flask_endpoints():
 def test_parse_view_includes_raw_text(registry, config):
     path = DATA_DIR / "StyleHeader.OK"
     view = service.parse_file_view(path, registry, config)
-    assert view["raw_text"] == path.read_bytes().decode("latin-1")
+    # raw_text is the normalized serialization (StyleHeader's header carries a
+    # trailing space after the terminator that opening trims away).
+    assert view["raw_text"] == service.parse_okfile(path, registry=registry).to_bytes().decode("latin-1")
 
 
 def test_max_records_in_view(registry, config):
@@ -800,9 +804,9 @@ def test_eu_raw_view_hides_bom_but_bytes_untouched(registry, config):
     assert raw.splitlines()[0].startswith("¦")   # clean broken-bar marker
     assert "﻿" not in raw                          # BOM hidden
     assert "\xef\xbb\xbf" not in raw and "\xc2\xa6" not in raw  # no Latin-1 mojibake
-    assert view["roundtrip_ok"] is True                # file itself still byte-exact
-    # NA files keep the byte-exact Latin-1 view unchanged.
-    na = service.parse_file_view(DATA_DIR / "Preticket.OK", registry, config)
+    assert view["roundtrip_ok"] is True                # EUPreticket carries no junk
+    # A clean NA file keeps the byte-exact Latin-1 view unchanged.
+    na = service.parse_file_view(DATA_DIR / "DistLabels.OK", registry, config)
     assert na["roundtrip_ok"] is True
 
 
@@ -1345,12 +1349,13 @@ def test_section_without_sample_rows_cannot_be_seeded(tmp_path, registry, config
 
 @pytest.mark.parametrize("sample", ALL_SAMPLES)
 def test_short_value_is_repadded_on_save_every_layout(tmp_path, registry, config, sample):
-    """Padding UX: a short typed value is re-padded, so record width is preserved."""
+    """Padding UX: a short typed value is re-padded to its FIELD width, so the
+    fields after it don't shift. (Record width is no longer a proxy — opening
+    trims post-terminator padding — so we check the field slice directly.)"""
     if not (DATA_DIR / sample).exists():
         pytest.skip(f"no sample for {sample}")
     work = tmp_path / sample
     shutil.copy2(DATA_DIR / sample, work)
-    width_before = len(work.read_bytes().split(b"\n")[0])
 
     view = service.parse_file_view(work, registry, config)
     field = next(f for f in view["sections"][0]["fields"]
@@ -1361,7 +1366,10 @@ def test_short_value_is_repadded_on_save_every_layout(tmp_path, registry, config
         registry, config=config, backup=False)
 
     assert res["roundtrip_ok"]
-    assert len(work.read_bytes().split(b"\n")[0]) == width_before   # re-padded to width
+    v2 = service.parse_file_view(work, registry, config)
+    stored = v2["sections"][0]["records"][0]["values"][field["name"]]
+    assert len(stored) == field["size"]        # short value re-padded to full field width
+    assert stored.strip().lstrip("0") in ("7", "")  # the typed value is there
     stored = service.parse_file_view(work, registry, config)["sections"][0]["records"][0]
     assert len(stored["values"][field["name"]]) == field["size"]
     assert stored["values"][field["name"]].strip().lstrip("0") == "7"
@@ -1912,7 +1920,7 @@ def test_make_unique_keeps_key_suffix_eustyleheader(tmp_path, registry, config):
     keys = []
     for name in ("a.OK", "b.OK", "c.OK"):
         view = service.parse_file_view(tmp_path / name, registry, config)
-        assert view["layout"] == "EUStyleHeader" and view["roundtrip_ok"]
+        assert view["layout"] == "EUStyleHeader"
         keys.append(view["sections"][0]["records"][0]["values"]["keytrol"].strip())
 
     assert original in keys, "the first file must keep its key"
@@ -2491,13 +2499,17 @@ def test_preticket_write_trims_trailing_pad_after_terminator(tmp_path, registry,
     assert service.parse_file_view(out, registry, config)["roundtrip_ok"]
 
 
-def test_preticket_plain_open_is_byte_exact_despite_trim(registry):
-    """The trim is write-only: parsing the sample and re-serializing (no edit)
-    is still byte-for-byte identical, trailing pad and all."""
+def test_preticket_post_terminator_pad_trimmed_on_open(registry, tmp_path):
+    """Preticket detail lines carry padding after the '\\' terminator; opening now
+    trims it (normalize-on-open) and the normalized form is stable (idempotent)."""
     from okgen import okfile
-    src = DATA_DIR / "Preticket.OK"
-    okf = okfile.parse_okfile(src, registry=registry)
-    assert okf.to_bytes() == src.read_bytes()
+    okf = okfile.parse_okfile(DATA_DIR / "Preticket.OK", registry=registry)
+    assert okf.lines_space_trimmed >= 1                     # pad after '\' trimmed
+    clean = okf.to_bytes()
+    assert clean != (DATA_DIR / "Preticket.OK").read_bytes()
+    work = tmp_path / "p.OK"; work.write_bytes(clean)
+    again = okfile.parse_okfile(work, registry=registry)
+    assert again.lines_space_trimmed == 0                   # already clean, no re-trim
 
 
 def test_preticket_vendor_style_is_a_rename_token(registry, config):
@@ -2525,40 +2537,40 @@ def test_trim_trailing_is_preticket_only(config):
 # --------------------------------------------------------------------------- #
 # Trailing blank-line cleanup: auto on open + the "Clean up files" bulk action
 # --------------------------------------------------------------------------- #
-def test_open_reports_trailing_blanks_removed(tmp_path, registry, config):
-    """Opening a file with stray trailing blank lines shows it clean and reports
-    how many were dropped (so the client can light up Save)."""
+def test_open_reports_cleanup_counts(tmp_path, registry, config):
+    """Opening a file with stray blank lines shows it clean and reports the counts
+    (so the client can light up Save / auto-save)."""
     src = (DATA_DIR / "StyleHeader.OK").read_bytes()
     work = tmp_path / "StyleHeader.OK"
-    work.write_bytes(src + b"   \r\n      \r\n\r\n")     # 3 stray lines
+    work.write_bytes(src + b"   \r\n      \r\n\r\n")     # 3 stray blank lines
     view = service.parse_file_view(work, registry, config)
-    assert view["trailing_blanks_removed"] == 3
+    assert view["blank_lines_removed"] == 3
     assert view["roundtrip_ok"] is False                # differs from disk (junk)
     # the junk is not shown as a section
     assert not any(s["name"] == "(unassigned)" for s in view["sections"])
-    # a clean file reports zero and round-trips
-    clean = service.parse_file_view(DATA_DIR / "StyleHeader.OK", registry, config)
-    assert clean["trailing_blanks_removed"] == 0
+    # a truly clean file reports zero on both counts and round-trips
+    clean = service.parse_file_view(DATA_DIR / "DistLabels.OK", registry, config)
+    assert clean["blank_lines_removed"] == 0 and clean["lines_space_trimmed"] == 0
     assert clean["roundtrip_ok"] is True
 
 
-def test_clean_files_removes_trailing_blanks(tmp_path, registry):
-    """clean_files strips trailing blank lines and writes the file, reporting how
-    many lines went — and touches ONLY the trailing blanks (real bytes intact)."""
+def test_clean_files_removes_junk(tmp_path, registry):
+    """clean_files writes the normalized file (blank lines dropped + post-terminator
+    padding trimmed) and reports it cleaned."""
+    normalized = service.parse_okfile(DATA_DIR / "StyleHeader.OK", registry=registry).to_bytes()
     src = (DATA_DIR / "StyleHeader.OK").read_bytes()
     work = tmp_path / "a.OK"
     work.write_bytes(src + b"   \r\n   \r\n")
     res = service.clean_files([str(work)], registry)
     assert res["cleaned"] == 1 and res["total"] == 1
     assert res["results"][0]["status"] == "cleaned"
-    assert res["results"][0]["removed"] == 2
-    assert work.read_bytes() == src                     # exactly the junk removed
+    assert work.read_bytes() == normalized              # junk gone, fields intact
 
 
 def test_clean_files_skips_already_clean(tmp_path, registry):
-    """A well-formed file is left byte-for-byte untouched and reported clean."""
+    """A truly clean file (no junk) is left byte-for-byte untouched and reported clean."""
     work = tmp_path / "b.OK"
-    shutil.copy2(DATA_DIR / "CartonLabel.OK", work)
+    shutil.copy2(DATA_DIR / "DistLabels.OK", work)      # no padding, no blank lines
     before = work.read_bytes()
     res = service.clean_files([str(work)], registry)
     assert res["cleaned"] == 0 and res["total"] == 1
@@ -2593,7 +2605,7 @@ def test_clean_files_mixed_batch(tmp_path, registry):
     dirty = tmp_path / "dirty.OK"
     dirty.write_bytes((DATA_DIR / "Preticket.OK").read_bytes() + b"\r\n\r\n")
     clean = tmp_path / "clean.OK"
-    shutil.copy2(DATA_DIR / "StyleHeader.OK", clean)
+    shutil.copy2(DATA_DIR / "DistLabels.OK", clean)     # truly clean (no junk)
     res = service.clean_files([str(dirty), str(clean)], registry)
     assert res["total"] == 2 and res["cleaned"] == 1
     by_name = {r["name"]: r["status"] for r in res["results"]}
@@ -2741,13 +2753,21 @@ def test_fill_filler_rows_are_all_zero(tmp_path, registry, config):
 
 
 def test_fill_does_not_touch_non_preticket(tmp_path, registry, config):
-    """A layout with no fill config is byte-identical through a no-op save."""
+    """A layout with no fill config gets NO filler rows added by a save (the save
+    only normalizes junk — StyleHeader's header pad — and is then idempotent)."""
     work = tmp_path / "StyleHeader.OK"
     shutil.copy2(DATA_DIR / "StyleHeader.OK", work)
-    before = work.read_bytes()
+    rows_before = {s["name"]: len(s["records"])
+                   for s in service.parse_file_view(work, registry, config)["sections"]}
     other = tmp_path / "copy.OK"
     service.apply_edits(work, [], registry, target_path=str(other), config=config)
-    assert other.read_bytes() == before
+    rows_after = {s["name"]: len(s["records"])
+                  for s in service.parse_file_view(other, registry, config)["sections"]}
+    assert rows_after == rows_before            # no filler rows added anywhere
+    # a second no-op save is byte-identical (normalization is idempotent)
+    other2 = tmp_path / "copy2.OK"
+    service.apply_edits(other, [], registry, target_path=str(other2), config=config)
+    assert other2.read_bytes() == other.read_bytes()
 
 
 def test_fill_line_count_zero_when_no_real_rows(tmp_path, registry, config):

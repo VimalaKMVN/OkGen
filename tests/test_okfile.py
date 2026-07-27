@@ -29,62 +29,68 @@ def registry():
 
 
 @pytest.mark.parametrize("filename", OK_FILES)
-def test_roundtrip_byte_identical(registry, filename):
-    path = DATA_DIR / filename
-    okf = parse_okfile(path, registry=registry)
-    assert okf.to_bytes() == path.read_bytes(), f"{filename} did not round-trip"
-
-
-@pytest.mark.parametrize("filename", OK_FILES)
-def test_trailing_blank_lines_are_dropped_on_parse(registry, tmp_path, filename):
-    """Stray trailing blank lines (empty / space-only, no terminator) that users
-    add after the last record are dropped on parse: no sectionless junk records,
-    and re-serializing equals the original file with just those lines removed."""
-    src = DATA_DIR / filename
-    original = src.read_bytes()
-    # Blank lines can only follow a terminated last record, so make sure the
-    # base ends with a newline (some sample files don't) before appending them.
-    base = original if original.endswith(b"\n") else original + b"\r\n"
-    for junk in (b"   \r\n      \r\n\r\n",   # spaces + empties, final newline
-                 b"\r\n\r\n",               # bare empty lines
-                 b"   \r\n   "):            # last blank line has no final newline
-        work = tmp_path / f"junk_{filename}"
-        work.write_bytes(base + junk)
-        okf = parse_okfile(work, registry=registry)
-        # no records landed in "(unassigned)"
-        assert "(unassigned)" not in okf.sections()
-        assert all(r.section is not None for r in okf.records)
-        assert okf.trailing_blanks_removed >= 1
-        cleaned = okf.to_bytes()
-        # only the trailing blank lines changed: real content is byte-identical
-        # (a file that had no final newline gains a normalized one, so the last
-        # record isn't left ending in a dangling bare '\r' — hence the rstrip).
-        assert cleaned.rstrip(b"\r\n") == original.rstrip(b"\r\n")
-        # ...and if the original already ended with a newline, it's exact
-        if original.endswith(b"\n"):
-            assert cleaned == original
-
-
-@pytest.mark.parametrize("filename", OK_FILES)
-def test_clean_file_reports_zero_blanks_removed(registry, filename):
-    """A well-formed sample drops nothing and stays byte-identical."""
+def test_normalized_form_roundtrips_byte_identical(registry, tmp_path, filename):
+    """Parsing normalizes junk away (blank lines + padding AFTER the terminator).
+    The NORMALIZED form then round-trips byte-for-byte: writing the cleaned bytes
+    and re-parsing needs no further cleaning and re-serializes identically. (A
+    sample with no junk — DistLabels / EUPreticket — normalizes to itself, so
+    this is also the classic byte-exact round-trip for already-clean files.)"""
     okf = parse_okfile(DATA_DIR / filename, registry=registry)
-    assert okf.trailing_blanks_removed == 0
-    assert okf.to_bytes() == (DATA_DIR / filename).read_bytes()
+    clean = okf.to_bytes()
+    work = tmp_path / filename
+    work.write_bytes(clean)
+    again = parse_okfile(work, registry=registry)
+    assert again.blank_lines_removed == 0 and again.lines_space_trimmed == 0
+    assert again.to_bytes() == clean, f"{filename}: normalized form not stable"
 
 
-def test_blank_line_between_records_is_kept(registry, tmp_path):
-    """Only TRAILING blanks are removed — a blank line in the middle is left as
-    junk (we never reorder or drop interior content)."""
-    src = (DATA_DIR / "StyleHeader.OK").read_bytes()
-    lines = src.split(b"\r\n")
-    # insert a blank line after the header, keep the rest
-    spliced = b"\r\n".join([lines[0], b"   "] + lines[1:])
-    work = tmp_path / "mid.OK"
-    work.write_bytes(spliced)
-    okf = parse_okfile(work, registry=registry)
-    assert okf.trailing_blanks_removed == 0        # nothing trailing to drop
-    assert okf.to_bytes() == spliced               # interior blank preserved
+@pytest.mark.parametrize("filename", OK_FILES)
+def test_normalization_only_strips_junk_never_fields(registry, filename):
+    """Cleaning removes ONLY blank junk lines and spaces AFTER the terminator —
+    every field's bytes (which live before the terminator) are untouched. Proven
+    by rebuilding the expected result from the raw bytes with exactly that rule."""
+    original = (DATA_DIR / filename).read_bytes().decode("latin-1")
+    lines = original.split("\n")
+    if lines and lines[-1] == "":
+        lines = lines[:-1]
+    expected = []
+    for i, line in enumerate(lines):
+        cr = "\r" if line.endswith("\r") else ""
+        c = line[:-1] if cr else line
+        if i != 0 and c.strip(" ") == "":          # blank junk line (not header)
+            continue
+        s = c.rstrip(" ")
+        if s != c and s.endswith("\\"):            # pad AFTER the terminator
+            c = s
+        expected.append(c + cr)
+    got = parse_okfile(DATA_DIR / filename, registry=registry).to_bytes().decode("latin-1")
+    got_lines = got.split("\n")
+    if got_lines and got_lines[-1] == "":
+        got_lines = got_lines[:-1]
+    assert got_lines == expected
+
+
+@pytest.mark.parametrize("filename", OK_FILES)
+def test_blank_lines_dropped_trailing_and_interior(registry, tmp_path, filename):
+    """Blank junk lines (empty/space-only) are dropped whether TRAILING or wedged
+    BETWEEN records — no sectionless '(unassigned)' rows survive — and the content
+    matches the normalized base (blanks contribute nothing that survives)."""
+    base_clean = parse_okfile(DATA_DIR / filename, registry=registry).to_bytes()
+    lines = base_clean.split(b"\n")
+    if lines and lines[-1] == b"":
+        lines = lines[:-1]                          # each remaining line ends with '\r'
+    want = base_clean.rstrip(b"\r\n")               # compare modulo the trailing newline
+
+    def check(raw_bytes):
+        w = tmp_path / f"j_{filename}"
+        w.write_bytes(raw_bytes)
+        okf = parse_okfile(w, registry=registry)
+        assert okf.blank_lines_removed >= 1
+        assert "(unassigned)" not in okf.sections()
+        assert okf.to_bytes().rstrip(b"\r\n") == want
+
+    check(b"\n".join(lines) + b"\n   \r\n\r\n")                # trailing blank lines
+    check(b"\n".join([lines[0], b"   \r"] + lines[1:]))       # interior blank after header
 
 
 @pytest.mark.parametrize("filename", OK_FILES)
@@ -167,10 +173,11 @@ def test_empty_sections_appear_in_canonical_order(registry):
 
 
 def test_edit_preserves_width_and_roundtrips(registry):
-    """Editing a field changes only its span; reverting restores the bytes."""
-    path = DATA_DIR / "CartonLabel.OK"
-    original = path.read_bytes()
-    okf = parse_okfile(path, registry=registry)
+    """Editing a field changes only its span; reverting restores the bytes.
+    (Compared against the normalized baseline, since opening CartonLabel trims
+    its post-terminator padding.)"""
+    okf = parse_okfile(DATA_DIR / "CartonLabel.OK", registry=registry)
+    clean = okf.to_bytes()                       # normalized baseline
     header = okf.records[0]
 
     old_len = len(header.raw)
@@ -178,11 +185,11 @@ def test_edit_preserves_width_and_roundtrips(registry):
     header.set("chain", "07")
     assert header.get("chain") == "07"
     assert len(header.raw) == old_len, "record length must not change on edit"
-    assert okf.to_bytes() != original, "edited file should differ"
+    assert okf.to_bytes() != clean, "edited file should differ"
 
-    # Revert and confirm byte-exact restoration.
+    # Revert and confirm byte-exact restoration of the normalized form.
     header.set("chain", old_chain)
-    assert okf.to_bytes() == original, "reverting the edit must restore bytes"
+    assert okf.to_bytes() == clean, "reverting the edit must restore bytes"
 
 
 def test_detection_drives_parse(registry):
@@ -258,16 +265,17 @@ def test_eu_cartonlabel_header_and_detail(registry):
 
 @pytest.mark.parametrize("filename", ["EUStyleHeader.OK", "EUCartonLabel.OK"])
 def test_eu_delimited_edit_roundtrips(registry, filename):
-    """Editing the keytrol (unique key) on the new EU layouts round-trips exactly."""
-    path = DATA_DIR / filename
-    original = path.read_bytes()
-    okf = parse_okfile(path, registry=registry)
+    """Editing the keytrol (unique key) on the new EU layouts round-trips exactly
+    against the normalized baseline (these samples carry post-terminator padding
+    that opening trims)."""
+    okf = parse_okfile(DATA_DIR / filename, registry=registry)
+    clean = okf.to_bytes()                       # normalized baseline
     h = okf.records[0]
 
     old_len, old_key = len(h.raw), h.get("keytrol")
     h.set("keytrol", "0000000000X")   # 11 chars = field width
     assert len(h.raw) == old_len, "delimited edit must not change line length"
-    assert okf.to_bytes() != original
+    assert okf.to_bytes() != clean
 
     h.set("keytrol", old_key)
-    assert okf.to_bytes() == original, "reverting must restore exact bytes"
+    assert okf.to_bytes() == clean, "reverting must restore exact bytes"
