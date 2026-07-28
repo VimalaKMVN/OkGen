@@ -2088,6 +2088,15 @@ def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry,
     current = header.get(field)
     if f.size is not None and len(value) > f.size:
         return {"name": name, "status": "too_wide", "current": current, "new": value}
+    # Chain isolation (D9) applies HERE too, not just to a single-file save.
+    # Bulk wrote straight through, so one apply could move a whole selection
+    # across the Europe boundary in either direction — the one place it would
+    # hurt most, and invisible because chain is not a detection signature.
+    if field == "chain" and config is not None \
+            and not config.can_change_chain((current or "").strip(), value.strip()):
+        return {"name": name, "status": "error", "current": current, "new": value,
+                "error": (f"chain cannot change from {(current or '').strip()} to "
+                          f"{value.strip()}: Europe is isolated from the other chains")}
     header.set(field, value,
                literal=config is not None and config.is_literal(okf.layout.name, field))
     new = header.get(field)
@@ -2572,7 +2581,8 @@ def _rand_padded(size: int, lo, hi) -> str:
     return str(random.randint(low, high)).zfill(size)
 
 
-def _spec_value(spec: dict, size: int, field: str, date_format: str = None) -> str:
+def _spec_value(spec: dict, size: int, field: str, date_format: str = None,
+                chains: "Optional[List[str]]" = None) -> str:
     """The value for one generated field.
 
     Precedence: the user's value list, then — for a temporal field — a random
@@ -2581,6 +2591,12 @@ def _spec_value(spec: dict, size: int, field: str, date_format: str = None) -> s
     one; only the way a value is produced differs.
     """
     values = _clean_values(spec.get("values"))
+    if chains is not None and not values:
+        # `chain` is not a free number: only a real banner is meaningful, and
+        # crossing an isolation boundary is forbidden (D9). Randomizing 1..99
+        # used to emit codes like 08/15/51 that are not banners at all, and
+        # could land on Europe's 05 in a North-America file.
+        return random.choice(chains)
     if values and date_format:
         from okgen import datetimes
         return datetimes.normalize(random.choice(values), date_format)
@@ -2647,6 +2663,12 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         _set_row_count(okf, config, rc["section"], random.randint(lo, hi))
 
     header = okf.records[0] if okf.records else None
+    # Banners this file may legally become — its own group only (D9).
+    chain_choices = (config.chains_like((header.get("chain") or "").strip())
+                     if (header is not None and config is not None
+                         and "chain" in [h.get("name") for h in
+                                         (spec.get("header_fields") or [])])
+                     else None)
 
     # 2. the unique key — always, so no two generated files collide
     if header is not None and key_field and key_size:
@@ -2661,7 +2683,8 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         # A temporal field need not declare a size — its format sets the length.
         if f is None or header is None or (not f.size and not dfmt):
             continue
-        val = _spec_value(hf, f.size, hf["name"], dfmt)
+        val = _spec_value(hf, f.size, hf["name"], dfmt,
+                          chains=chain_choices if hf["name"] == "chain" else None)
         base = config is not None and config.is_literal(okf.layout.name, hf["name"])
         header.set(hf["name"], val,                              # blank/spaced -> spaces
                    literal=base or val != val.strip() or val == "")

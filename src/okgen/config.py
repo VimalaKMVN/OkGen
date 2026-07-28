@@ -207,6 +207,16 @@ class Config:
         """
         return self._chain_group_of(old) == self._chain_group_of(new)
 
+    def chains_like(self, code: Optional[str]) -> List[str]:
+        """Every chain a file on ``code`` may legally become, including itself.
+
+        The banners an isolated chain can move to is just itself (Europe); an
+        ungrouped chain gets all the other ungrouped ones. Used wherever a chain
+        is CHOSEN rather than typed — the editor dropdown and, so it cannot
+        wander across the boundary, volume generation.
+        """
+        return sorted(c for c in self._chains if self.can_change_chain(code, c))
+
     # ----- display labels -----
     def options(
         self,

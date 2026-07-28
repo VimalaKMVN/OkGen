@@ -530,3 +530,75 @@ def test_a_freely_changeable_chain_is_still_offered(tmp_path, registry, config,
     p.write_bytes(src.read_bytes())
     scope = service.generate_scope([str(p)], registry, config)
     assert "chain" in [f["name"] for f in scope["header_fields"]]
+
+
+# --------------------------------------------------------------------------- #
+# Chain isolation (D9) holds on the BULK paths too, not just a single save
+# --------------------------------------------------------------------------- #
+def _ok_sample(tmp_path, name):
+    src = DATA_DIR / f"{name}.OK"
+    if not src.is_file():
+        pytest.skip(f"no {name}.OK sample")
+    p = tmp_path / f"{name}.OK"
+    p.write_bytes(src.read_bytes())
+    return p
+
+
+@pytest.mark.parametrize("sample,target", [
+    ("EUPreticket", "01"),      # Europe -> North America
+    ("EUStyleHeader", "02"),
+    ("StyleHeader", "05"),      # North America -> Europe
+    ("CartonLabel", "05"),
+])
+def test_bulk_edit_cannot_move_a_file_across_the_europe_boundary(
+        tmp_path, registry, config, sample, target):
+    """Bulk wrote straight through, so one apply could carry a whole selection
+    across the boundary the editor and single-file save both refuse — and
+    invisibly, because `chain` is not a detection signature."""
+    p = _ok_sample(tmp_path, sample)
+    before = p.read_bytes()
+    layout = service.parse_file_view(p, registry, config)["layout"]
+
+    res = service.bulk_apply([str(p)], layout, "chain", target,
+                             registry, config, backup=False)
+
+    assert res["results"][0]["status"] == "error"
+    assert "isolated" in res["results"][0]["error"]
+    assert p.read_bytes() == before, "a refused bulk edit must not write"
+
+
+@pytest.mark.parametrize("sample,target", [
+    ("StyleHeader", "02"), ("CartonLabel", "04"), ("DistLabels", "06"),
+])
+def test_bulk_edit_still_swaps_freely_inside_north_america(
+        tmp_path, registry, config, sample, target):
+    p = _ok_sample(tmp_path, sample)
+    layout = service.parse_file_view(p, registry, config)["layout"]
+    res = service.bulk_apply([str(p)], layout, "chain", target,
+                             registry, config, backup=False)
+    assert res["results"][0]["status"] in ("changed", "unchanged")
+    if res["results"][0]["status"] == "changed":
+        assert service.parse_file_view(p, registry, config)["chain"] == target
+
+
+@pytest.mark.parametrize("sample", ["StyleHeader", "CartonLabel", "DistLabels"])
+def test_generate_only_ever_picks_a_real_banner_in_the_same_group(
+        tmp_path, registry, config, sample):
+    """Randomizing `chain` 1..99 used to emit codes like 08/15/51 that are not
+    banners at all, and could land on Europe's 05 in a North-America file."""
+    p = _ok_sample(tmp_path, sample)
+    res = service.generate_apply(
+        [str(p)], {"count": 15,
+                   "header_fields": [{"name": "chain", "min": 1, "max": 99}]},
+        registry, config)
+
+    produced = {service.parse_file_view(f, registry, config)["chain"]
+                for f in Path(res["folder"]).iterdir()}
+    assert produced <= set(config.chains()), f"not real banners: {produced}"
+    assert "05" not in produced, "generation crossed into Europe"
+
+
+def test_chains_like_is_the_rule_it_is_named_after(config):
+    assert config.chains_like("05") == ["05"]           # Europe: itself only
+    na = config.chains_like("01")
+    assert "05" not in na and {"01", "02"} <= set(na)
