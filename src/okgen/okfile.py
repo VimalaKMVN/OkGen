@@ -171,7 +171,9 @@ class OkFile:
 
     def to_bytes(self) -> bytes:
         if self.json_state is not None:
-            return self.json_state.serialize()
+            # Pass the records so row add/delete/move are written too — the
+            # record list IS the desired row order (see jsonengine.serialize).
+            return self.json_state.serialize(self.records)
         term = getattr(self.layout, "record_terminator", "") or ""
         text = self.newline.join(_trim_after_terminator(r.raw, term)
                                  for r in self.records)

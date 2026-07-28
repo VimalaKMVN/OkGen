@@ -121,7 +121,10 @@ class Config:
         tosca: Optional[dict] = None,
         json_sources: Optional[Dict[str, List[str]]] = None,
         json_source_default: Optional[str] = None,
+        date_fields: Optional[Dict[str, Dict[str, str]]] = None,
     ):
+        # {layout|"*": {field: format}} — fields holding a moment in time.
+        self._date_fields = date_fields or {}
         # {source: [name tokens]} and the fallback source, for Calgary JSON.
         self._json_sources = json_sources or {}
         self._json_source_default = json_source_default or ""
@@ -211,8 +214,15 @@ class Config:
         chain: Optional[str] = None,
         layout: Optional[str] = None,
         fmt: Optional[str] = None,
+        section: Optional[str] = None,
     ) -> Dict[str, str]:
         """Most-specific {code: label} map for a field in the given context.
+
+        ``section`` disambiguates a field NAME that appears in more than one
+        section of the same layout with different meanings — Calgary JSON has a
+        document-level ``type`` (``styleHeaders``) in the header AND a coded
+        ``type`` (1-9) on every detail row. Without it, one rule would label
+        both."
 
         Falls back to the chain registry for the ``chain`` field itself.
         Returns {} when no rule applies (field is free-form / not coded).
@@ -229,8 +239,11 @@ class Config:
                 continue
             if not _crit_matches(match.get("format"), fmt):
                 continue
+            if not _crit_matches(match.get("section"), section):
+                continue
             score = sum(
-                1 for k in ("chain", "layout", "format") if _is_specific(match.get(k))
+                1 for k in ("chain", "layout", "format", "section")
+                if _is_specific(match.get(k))
             )
             if score > best_score:
                 best_score = score
@@ -250,9 +263,11 @@ class Config:
         chain: Optional[str] = None,
         layout: Optional[str] = None,
         fmt: Optional[str] = None,
+        section: Optional[str] = None,
     ) -> str:
         """Friendly label for a code, or the code itself if unmapped."""
-        opts = self.options(field, chain=chain, layout=layout, fmt=fmt)
+        opts = self.options(field, chain=chain, layout=layout, fmt=fmt,
+                            section=section)
         return opts.get(code, code)
 
     # ----- field label colors -----
@@ -405,6 +420,28 @@ class Config:
             return out
         return [val] if val else []
 
+    # ----- date/time fields -----
+    def date_format(self, layout: Optional[str], field: Optional[str]) -> Optional[str]:
+        """The write format for a temporal field, or None if it isn't one.
+
+        A layout-specific entry wins over the ``"*"`` (all layouts) one, so a
+        layout whose date field differs can override the shared default.
+        """
+        if not field:
+            return None
+        for key in (layout, "*"):
+            if key and key in self._date_fields:
+                fmt = self._date_fields[key].get(field)
+                if fmt:
+                    return fmt
+        return None
+
+    def date_fields(self, layout: Optional[str]) -> Dict[str, str]:
+        """Every temporal field that applies to a layout -> its format."""
+        out = dict(self._date_fields.get("*", {}))
+        out.update(self._date_fields.get(layout, {}) if layout else {})
+        return out
+
     # ----- JSON source (SCAN / WMS) -----
     @property
     def json_sources(self) -> Dict[str, List[str]]:
@@ -491,6 +528,13 @@ class Config:
             for k, v in (data.get("unique_fields") or {}).items():
                 unique_fields[str(k)] = ({str(s): str(f) for s, f in v.items()}
                                          if isinstance(v, dict) else str(v))
+
+        date_fields: Dict[str, Dict[str, str]] = {}
+        df_path = cdir / "date_fields.yaml"
+        if df_path.is_file():
+            data = yaml.safe_load(df_path.read_text(encoding="utf-8")) or {}
+            date_fields = {str(lay): {str(f): str(fmt) for f, fmt in (m or {}).items()}
+                           for lay, m in (data.get("date_fields") or {}).items()}
 
         json_sources: Dict[str, List[str]] = {}
         json_source_default = ""
@@ -649,4 +693,4 @@ class Config:
                    nicelabel_warning, send_quips, send_done_quips, regions,
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
                    trim_trailing, derived_fields, isolated_chain_groups, tosca,
-                   json_sources, json_source_default)
+                   json_sources, json_source_default, date_fields)

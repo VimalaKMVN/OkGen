@@ -22,8 +22,7 @@
           "name": "timestamp",
           "json_path": [
             "timestamp"
-          ],
-          "readonly": true
+          ]
         },
         {
           "name": "chain",

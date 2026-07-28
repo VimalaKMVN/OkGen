@@ -3,13 +3,17 @@
 # Each rule maps a field's raw codes to labels. A rule applies to a file when
 # its `match` criteria fit. Omit a criterion (or set it to "*") to match any
 # value. When several rules match the same field, the MOST SPECIFIC one wins
-# (the one matching the most of chain/layout/format).
+# (the one matching the most of chain/layout/format/section).
 #
 # match keys:
 #   chain   2-char chain code ("01".."06"), a LIST like ["03","04"], or "*"  (any)
 #   layout  layout name (CartonLabel | DistLabels | Preticket | StyleHeader),
 #           a LIST like [StyleHeader, Preticket], or "*"
 #   format  the `format` field value (e.g. A, B, L, 1, 7), a LIST, or "*"
+#   section section name (Header | Details | Stores …), a LIST, or "*" —
+#           needed when one field NAME means different things in different
+#           sections of a layout (Calgary JSON `type`: the document kind on
+#           the Header, a coded 1-9 type on each detail row)
 #   field   REQUIRED — the output_field_name this rule applies to
 #
 # Any of chain/layout/format may be a LIST to match several values at once
@@ -54,6 +58,43 @@ rules:
       "7": "Type 7"
       "8": "Type 8"
       "9": "Type 9"
+
+  # ---- Calgary JSON: the document `type` (top of the file) ----
+  #
+  # Calgary JSON has TWO UNRELATED fields called `type`:
+  #   * HEADER  — the document kind, e.g. "styleHeaders"  (these rules)
+  #   * DETAIL  — a coded 1-9 type like the other layouts (the generic rule
+  #               above, which is correct for it)
+  # So these MUST stay scoped to `section: Header`. Without the section they
+  # would relabel every detail row too; without them at all, the generic
+  # `field: type` rule offers a nonsense "Type 1..9" list for the document kind.
+  #
+  # The values below are IDENTITY mappings — each code maps to itself, so the
+  # editor shows exactly what the vendor sent ("styleHeaders", not a prettified
+  # "Style Header"). They exist to claim the field from the generic rule, not to
+  # rename anything.
+  #
+  # NOTE: labels are DISPLAY-ONLY — the file always keeps the raw code. This
+  # field is also read-only (it is the detection signature `data.type`, which
+  # decides the layout), so OkGen never writes it at all. Changing a label here
+  # cannot change a file.
+  #
+  # TO ADD A VARIATION: if the vendor starts sending another document kind, add
+  # it under the right layout below, mapping the code to itself:
+  #     styleHeaders: "styleHeaders"
+  #     styleHeadersV2: "styleHeadersV2"      # <- new variation
+  # A code that is NOT listed still displays as-is; it just won't be offered as
+  # a known value. A NEW document kind also needs a detection rule and a layout
+  # spec before OkGen can open it — this file alone is not enough for that.
+  - match: {layout: CalgaryStyleHeader, section: Header, field: type}
+    values:
+      styleHeaders: "styleHeaders"
+  - match: {layout: CalgaryCartonLabel, section: Header, field: type}
+    values:
+      cartonLabels: "cartonLabels"
+  - match: {layout: CalgaryDistLabel, section: Header, field: type}
+    values:
+      distributionLabels: "distributionLabels"
 
   - match: {layout: StyleHeader, field: indicator}
     values:

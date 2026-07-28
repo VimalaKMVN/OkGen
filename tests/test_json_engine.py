@@ -100,9 +100,12 @@ def test_single_field_edit_is_surgical(fname, tmp_path, registry, config):
     hvals = hdr["records"][0]["values"]
     # a non-empty string field with room, so reverting restores the exact bytes
     # (a null field shows as "" and reverting to "" would write "" != null).
+    # Temporal fields are excluded: they only accept a parseable instant, so
+    # "AB1" is (correctly) refused there — they have their own tests.
     target = next(f for f in hdr["fields"]
                   if f["editable"] and not f["options"]
                   and (f["size"] is None or f["size"] >= 3)
+                  and not config.date_format(view["layout"], f["name"])
                   and hvals[f["name"]].strip() != "")
     orig_val = hvals[target["name"]]
 

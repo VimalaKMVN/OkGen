@@ -1,0 +1,34 @@
+# Fields that hold a MOMENT IN TIME, and the exact format each is written in.
+#
+# Listing a field here does three things:
+#   1. what you type is normalized to the format below on save — so a plain
+#      "2026-01-08" becomes the full stamp the consumer expects, and "now"
+#      means the current UTC time;
+#   2. a value OkGen cannot understand is REFUSED with a clear message instead
+#      of being written through malformed;
+#   3. Bulk Edit and Volume Generate offer a "random date between" range for it.
+#
+# Formats:
+#   rfc3339_nano   2026-01-08T11:36:21.944107946Z  (UTC, 9 fractional digits)
+#   anything else  a strftime pattern, e.g. "%Y-%m-%d" or "%Y%m%d"
+#
+# The format MUST match what the field actually holds. A fixed-width field is
+# width-checked on save, so an RFC 3339 stamp written into an 8-character date
+# field is rejected — which is why these are declared per field rather than
+# guessed from the value.
+#
+#   layout name (or "*" for every layout) -> field name -> format
+date_fields:
+  "*":
+    # The Calgary JSON document stamp. Same shape in all three JSON layouts.
+    timestamp: rfc3339_nano
+
+  # ---- add more as you need them ----
+  # The other Calgary date fields are left as plain text for now, since their
+  # exact formats need confirming against the consumer before OkGen starts
+  # normalizing them. Uncomment (and correct the pattern) to bring one in:
+  #
+  # CalgaryStyleHeader:
+  #   transmitDate: "%Y-%m-%d"      # 2026-01-08
+  #   distroDate: "%Y%m%d"          # 8 chars — CONFIRM before enabling
+  #   adDate: "%m%d"                # 4 chars — CONFIRM before enabling

@@ -248,6 +248,18 @@ def _unique_field_for(path, layout: Optional[str], config: Config,
                                config.json_source_default, source).source)
 
 
+def _editable_file(path: Path) -> bool:
+    """A file OkGen can open and operate on — a fixed-width/delimited ``.OK``
+    file OR a Calgary ``.json`` file.
+
+    Copy, paste, delete and rename used to test ``is_ok_file`` alone, which
+    silently excluded every JSON file. Send to NiceLabel keeps the stricter
+    ``.OK`` test on purpose: that hand-off works differently for JSON and is
+    specified separately.
+    """
+    return is_ok_file(path) or _is_json_file(path)
+
+
 def _file_node(path: Path, config: Config, registry=None,
                source: Optional[str] = None) -> dict:
     chain = ""
@@ -348,7 +360,8 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
             hidden = config.hidden_fields(layout_name)
             readonly = config.readonly_fields(layout_name)
             for f in sec.fields:
-                opts = config.options(f.name, chain=chain, layout=layout_name, fmt=fmt)
+                opts = config.options(f.name, chain=chain, layout=layout_name,
+                                      fmt=fmt, section=sec.name)
                 editable = f.name not in readonly and not getattr(f, "readonly", False)
                 # Chain edits can't cross an isolation boundary (e.g. Europe):
                 # offer only chains the current one may become; lock it when the
@@ -640,7 +653,10 @@ def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
         # field, numeric included — the user typed spaces and asked for blank.
         literal = e.get("_blank") or (config is not None
                                       and config.is_literal(okf.layout.name, e["field"]))
-        rec.set(e["field"], e["value"], literal=literal)
+        value = e["value"]
+        if not e.get("_blank"):        # an explicit blank stays blank
+            value = _coerce_date(okf.layout.name, e["field"], value, config)
+        rec.set(e["field"], value, literal=literal)
 
 
 # --------------------------------------------------------------------------- #
@@ -788,13 +804,10 @@ def _op_add(okf: OkFile, config: Config, section_index=None, after_index=None) -
     if limit is not None and sec_count >= limit:
         raise EditError(f"section '{sec.name}' is at its limit of {limit} records")
 
-    clone = new_record(
-        template.raw.rstrip("\r"),           # copy values; EOL fixed up below
-        template.section,
-        okf.layout,
-        offset=template.offset,
-        index=template.index,                # placeholder; reassigned on reload
-    )
+    # A seeded JSON row is already a standalone new row — cloning it again would
+    # just lose the blank values it was built with.
+    clone = template if (seeded and getattr(okf.layout, "json_mode", False)) \
+        else _clone_record(okf, template)
     if seeded:
         _insert_in_section_order(okf, clone, sec)
     else:
@@ -889,7 +902,14 @@ def _atomic_write_okf(okf, out: Path, backup: bool) -> None:
     tmp = out.with_suffix(out.suffix + ".tmp")
     prev = out.read_bytes() if (backup and out.exists()) else None
     try:
-        tmp.write_bytes(okf.to_bytes())
+        try:
+            data = okf.to_bytes()
+        except ValueError as exc:
+            # A change the engine cannot represent (e.g. rows added to a JSON
+            # array the file doesn't contain). Refuse LOUDLY — writing what we
+            # could and dropping the rest is how edits vanish silently.
+            raise EditError(str(exc)) from exc
+        tmp.write_bytes(data)
         os.replace(tmp, out)                 # atomic; fails cleanly if out is locked
     except OSError as exc:
         try:
@@ -1068,6 +1088,45 @@ def _set_count_field(okf: OkFile, layout_name: str, section_name: str,
         header.set(cf, val)
 
 
+def _json_array_path(sec) -> tuple:
+    """Absolute path to a JSON section's array, e.g. ``("data","header","stores")``."""
+    return ("data",) + tuple(sec.json_path or [])
+
+
+def _coerce_date(layout_name, field, value, config):
+    """Normalize a temporal field's value to its configured format.
+
+    Returns ``value`` unchanged for a field that isn't temporal. A value the
+    date parser can't understand raises :class:`EditError` rather than being
+    written through malformed — the same stance as the width and
+    layout-stability checks.
+    """
+    if config is None:
+        return value
+    fmt = config.date_format(layout_name, field)
+    if not fmt:
+        return value
+    from okgen import datetimes
+    try:
+        return datetimes.normalize(value, fmt)
+    except datetimes.DateError as exc:
+        raise EditError(f"{field}: {exc}") from exc
+
+
+def _clone_record(okf, template):
+    """A duplicate of ``template``, in whichever engine this file uses."""
+    if getattr(okf.layout, "json_mode", False):
+        from okgen import jsonengine
+        return jsonengine.clone_record(template)
+    return new_record(
+        template.raw.rstrip("\r"),            # copy values; EOL fixed up below
+        template.section,
+        okf.layout,
+        offset=template.offset,
+        index=template.index,                 # placeholder; reassigned on reload
+    )
+
+
 def _seed_record(okf, sec, config: Config = None):
     """Build the first row for an EMPTY section from the section's ``sample_raw``.
 
@@ -1086,6 +1145,11 @@ def _seed_record(okf, sec, config: Config = None):
 
     Returns None when no seed structure is known for the section.
     """
+    if getattr(okf.layout, "json_mode", False):
+        # JSON layouts carry no reference line — a first row is rendered from
+        # the section's field list, every value blank.
+        from okgen import jsonengine
+        return jsonengine.seed_record(okf.json_state, sec, _json_array_path(sec))
     seed = getattr(sec, "sample_raw", None)
     if not seed:
         return None
@@ -1246,8 +1310,8 @@ if ($r -eq [System.Windows.Forms.DialogResult]::OK) {{ [Console]::Out.Write([Sys
 # --------------------------------------------------------------------------- #
 def delete_file(path) -> dict:
     p = Path(path)
-    if not is_ok_file(p):
-        raise EditError(f"not an .OK file: {p}")
+    if not _editable_file(p):
+        raise EditError(f"not an editable file: {p}")
     p.unlink()
     return {"deleted": str(p)}
 
@@ -1295,8 +1359,8 @@ def delete_files(paths) -> dict:
     deleted, errors = [], []
     for path in paths or []:
         p = Path(path)
-        if not is_ok_file(p):
-            errors.append({"path": str(path), "error": "not an .OK file"})
+        if not _editable_file(p):
+            errors.append({"path": str(path), "error": "not an editable file"})
             continue
         try:
             p.unlink()
@@ -1308,8 +1372,8 @@ def delete_files(paths) -> dict:
 
 def copy_file(src, dst) -> dict:
     s, d = Path(src), Path(dst)
-    if not is_ok_file(s):
-        raise EditError(f"not an .OK file: {s}")
+    if not _editable_file(s):
+        raise EditError(f"not an editable file: {s}")
     if d.exists():
         raise EditError(f"destination exists: {d}")
     d.parent.mkdir(parents=True, exist_ok=True)
@@ -1351,8 +1415,8 @@ def copy_files(srcs, dst_dir, registry=None, config=None,
     for src in srcs or []:
         sp = Path(src)
         is_dir = sp.is_dir()
-        if not is_dir and not is_ok_file(sp):
-            errors.append({"src": str(src), "error": "not an .OK file or folder"})
+        if not is_dir and not _editable_file(sp):
+            errors.append({"src": str(src), "error": "not an editable file or folder"})
             continue
         if is_dir and (dd == sp or sp in dd.parents):
             errors.append({"src": str(src), "error": "cannot paste a folder into itself"})
@@ -1614,6 +1678,13 @@ def clean_files(paths, registry) -> dict:
     cleaned = 0
     for p in paths or []:
         p = Path(p)
+        if _is_json_file(p):
+            # Blank junk lines are a LINE-based problem; a JSON document has no
+            # such thing. Say so plainly instead of reporting a file "clean"
+            # after a check that never applied to it.
+            results.append({"path": str(p), "name": p.name, "status": "skipped",
+                            "detail": "JSON files have no blank lines to clean"})
+            continue
         try:
             original = p.read_bytes()
             okf = parse_okfile(p, registry=registry)      # strips trailing blanks
@@ -1654,13 +1725,18 @@ def _header_fields_for_layout(layout, config: Config) -> List[dict]:
     locked = config.readonly_fields(layout.name) | config.hidden_fields(layout.name)
     out = []
     for f in layout.sections[0].fields:
-        if f.name == key or f.name in locked:
+        # `readonly` may come from config OR from the layout spec itself (the
+        # Calgary JSON `type`). Both must keep a field out of bulk — that is
+        # the D12 rule, and `type` is a detection signature.
+        if f.name == key or f.name in locked or getattr(f, "readonly", False):
             continue
-        opts = config.options(f.name, layout=layout.name)
-        out.append({
-            "name": f.name, "size": f.size, "type": f.field_type,
-            "options": opts or None,
-        })
+        opts = config.options(f.name, layout=layout.name,
+                              section=layout.sections[0].name)
+        entry = {"name": f.name, "size": f.size, "type": f.field_type,
+                 "options": opts or None}
+        if config.date_format(layout.name, f.name):
+            entry["date"] = True        # offer a date range, not a numeric one
+        out.append(entry)
     return out
 
 
@@ -1698,8 +1774,11 @@ def _detail_sections_for_layout(layout, config: Config) -> List[dict]:
     for sec in layout.sections[1:]:
         fields = [{
             "name": f.name, "size": f.size, "type": f.field_type,
-            "options": config.options(f.name, layout=layout.name) or None,
-        } for f in sec.fields if f.name not in locked]
+            "options": config.options(f.name, layout=layout.name,
+                                      section=sec.name) or None,
+            **({"date": True} if config.date_format(layout.name, f.name) else {}),
+        } for f in sec.fields
+            if f.name not in locked and not getattr(f, "readonly", False)]
         out.append({
             "name": sec.name,
             "fields": fields,
@@ -1756,11 +1835,67 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
     if not recs and t != "add":
         return {"name": name, "status": "no_section"}
 
+    _is_date = (op.get("field") and config is not None
+                and bool(config.date_format(layout_name, op.get("field"))))
+    if t == "random_date" or (t in ("set", "list") and _is_date):
+        # ---- temporal fields (config/date_fields.yaml) ----
+        # Handled before the width gate below: a date field need not declare a
+        # size (the Calgary JSON `timestamp` has none) — its FORMAT decides the
+        # length. A sized field is still width-checked by Record.set(), which is
+        # what turns an over-long stamp into a clean `too_wide` result.
+        field = op.get("field")
+        if not next((x for x in sec.fields if x.name == field), None):
+            return {"name": name, "status": "missing_field"}
+        if not _is_date:
+            # Only a configured temporal field has a format to render into —
+            # say that plainly rather than falling through to "unknown op".
+            return {"name": name, "status": "error",
+                    "error": f"{field} is not a date field "
+                             f"(add it to config/date_fields.yaml)"}
+        fmt = config.date_format(layout_name, field)
+        from okgen import datetimes
+        try:
+            if t == "random_date":
+                # A date RANGE, not a numeric one: each row gets its OWN instant.
+                for r in recs:
+                    r.set(field, datetimes.random_between(op.get("from"),
+                                                          op.get("to"), fmt),
+                          literal=True)
+                detail = (f"random {field} between {op.get('from')} and "
+                          f"{op.get('to')} on {before} row(s)")
+            elif t == "list":
+                # Every listed value is normalized, so a list of plain dates is
+                # written in the field's full format.
+                values = _clean_values(op.get("values"))
+                if not values:
+                    return {"name": name, "status": "error", "error": "no values given"}
+                for r in recs:
+                    r.set(field, datetimes.normalize(random.choice(values), fmt),
+                          literal=True)
+                detail = f"{field} from {len(values)} listed date(s) on {before} row(s)"
+            else:                                   # set
+                value = datetimes.normalize(op.get("value", ""), fmt)
+                for r in recs:
+                    r.set(field, value, literal=True)
+                detail = f"{field} = {value} on {before} row(s)"
+        except datetimes.DateError as exc:
+            return {"name": name, "status": "error", "error": str(exc)}
+        except ValueError as exc:                   # too long for a sized field
+            return {"name": name, "status": "too_wide", "detail": str(exc)}
+        return {"name": name, "status": "change", "detail": detail, "okf": okf}
+
     if t in ("set", "random", "unique", "list"):
         field = op.get("field")
         fdef = next((x for x in sec.fields if x.name == field), None)
         if fdef is None:
             return {"name": name, "status": "missing_field"}
+        # A temporal field's typed value is normalized to its format first.
+        if t == "set" and config is not None and config.date_format(layout_name, field):
+            try:
+                op = dict(op, value=_coerce_date(layout_name, field,
+                                                 op.get("value", ""), config))
+            except EditError as exc:
+                return {"name": name, "status": "error", "error": str(exc)}
         size = fdef.size
         if size is None:
             return {"name": name, "status": "error", "error": f"{field} has no fixed width"}
@@ -1882,9 +2017,7 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
                 insert_at = _insert_in_section_order(okf, template, sec) + 1
                 seeded = 1
             for i in range(to_add - seeded):
-                clone = new_record(template.raw.rstrip("\r"), template.section, okf.layout,
-                                   offset=template.offset, index=template.index)
-                okf.records.insert(insert_at + i, clone)
+                okf.records.insert(insert_at + i, _clone_record(okf, template))
             _normalize_eols(okf)
             new_count = base + to_add
             _sync_count(okf, layout_name, section_name, new_count, config)
@@ -2174,10 +2307,11 @@ def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:
             if not base:
                 results.append({"path": str(f), "old": f.name, "new": None, "status": "empty"})
                 continue
-            cand = base + ".OK"
+            ext = f.suffix or ".OK"      # a Calgary file stays .json
+            cand = base + ext
             i = 1
             while cand in used:
-                cand = f"{base}_{i:03d}.OK"
+                cand = f"{base}_{i:03d}{ext}"
                 i += 1
             used.add(cand)
             results.append({"path": str(f), "old": f.name, "new": cand,
@@ -2258,8 +2392,8 @@ def delete_folder(path) -> dict:
 
 def rename_file(src, dst) -> dict:
     s, d = Path(src), Path(dst)
-    if not is_ok_file(s):
-        raise EditError(f"not an .OK file: {s}")
+    if not _editable_file(s):
+        raise EditError(f"not an editable file: {s}")
     if d.exists():
         raise EditError(f"destination exists: {d}")
     d.parent.mkdir(parents=True, exist_ok=True)
@@ -2325,10 +2459,27 @@ def generate_scope(paths, registry: LayoutRegistry, config: Config,
     locked = config.readonly_fields(layout_name) | config.hidden_fields(layout_name)
 
     def numeric_fields(fields):
-        """Only fixed-width fields we can safely fill with a zero-padded number."""
-        return [{"name": f["name"], "size": f["size"]} for f in fields
-                if f.get("size") and not f.get("derived")
-                and f["name"] not in locked and f["name"] != key_field]
+        """Fields a generated value can be produced for.
+
+        Fixed-width fields get a zero-padded number; a TEMPORAL field (see
+        config/date_fields.yaml) gets a random instant in a date range instead,
+        and is included even though it declares no size — its format sets the
+        length. `date` tells the client which input to show.
+        """
+        out = []
+        for f in fields:
+            if f.get("derived") or f["name"] in locked or f["name"] == key_field:
+                continue
+            if f.get("editable") is False:      # spec-level readonly (JSON `type`)
+                continue
+            dfmt = config.date_format(layout_name, f["name"])
+            if not f.get("size") and not dfmt:
+                continue
+            entry = {"name": f["name"], "size": f["size"]}
+            if dfmt:
+                entry["date"] = True
+            out.append(entry)
+        return out
 
     sections = []
     for sec in view["sections"]:
@@ -2421,12 +2572,26 @@ def _rand_padded(size: int, lo, hi) -> str:
     return str(random.randint(low, high)).zfill(size)
 
 
-def _spec_value(spec: dict, size: int, field: str) -> str:
-    """The value for one generated field: a pick from the user's list if they
-    supplied one, otherwise a random number in their min/max range."""
+def _spec_value(spec: dict, size: int, field: str, date_format: str = None) -> str:
+    """The value for one generated field.
+
+    Precedence: the user's value list, then — for a temporal field — a random
+    instant in their date range, then a random number in their min/max range.
+    A date field varies per generated file (or per row) exactly like a numeric
+    one; only the way a value is produced differs.
+    """
     values = _clean_values(spec.get("values"))
+    if values and date_format:
+        from okgen import datetimes
+        return datetimes.normalize(random.choice(values), date_format)
     if values:
         return _pick_value(values, size, field)
+    if date_format:
+        from okgen import datetimes
+        lo, hi = spec.get("from"), spec.get("to")
+        if not (lo and hi):
+            raise EditError(f"{field}: give a date range (from and to) to vary it")
+        return datetimes.random_between(lo, hi, date_format)
     return _rand_padded(size, spec.get("min"), spec.get("max"))
 
 
@@ -2492,9 +2657,11 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
     # 3. user-chosen header fields — one value per FILE
     for hf in spec.get("header_fields") or []:
         f = _header_field(okf.layout, hf["name"])
-        if f is None or not f.size or header is None:
+        dfmt = config.date_format(okf.layout.name, hf["name"]) if config else None
+        # A temporal field need not declare a size — its format sets the length.
+        if f is None or header is None or (not f.size and not dfmt):
             continue
-        val = _spec_value(hf, f.size, hf["name"])
+        val = _spec_value(hf, f.size, hf["name"], dfmt)
         base = config is not None and config.is_literal(okf.layout.name, hf["name"])
         header.set(hf["name"], val,                              # blank/spaced -> spaces
                    literal=base or val != val.strip() or val == "")
@@ -2506,7 +2673,8 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
     hidden = config.hidden_fields(okf.layout.name) if config else set()
     for df in spec.get("detail_fields") or []:
         f = _field_in_section(okf.layout, df["section"], df["name"])
-        if f is None or not f.size:
+        dfmt = config.date_format(okf.layout.name, df["name"]) if config else None
+        if f is None or (not f.size and not dfmt):
             continue
         sec = next(s for s in okf.layout.sections if s.name == df["section"])
         fm = config is not None and config.zero_fill(okf.layout.name, df["section"])
@@ -2514,9 +2682,9 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         for r in (r for r in okf.records if r.section is sec):
             if fm and _is_blank_row(r, hidden):
                 continue                          # leave filler rows untouched
-            val = _spec_value(df, f.size, df["name"])
+            val = _spec_value(df, f.size, df["name"], dfmt)      # varies per ROW
             r.set(df["name"], val,                               # blank/spaced -> spaces
-                  literal=base or val != val.strip() or val == "")
+                  literal=base or bool(dfmt) or val != val.strip() or val == "")
 
 
 def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder=None,
@@ -2578,9 +2746,10 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
 
         toks = _tokens_from_okf(okf, config, orig_stem=src.stem, custom={})
         stem = _build_name(parts, toks, separator, i + 1, label_names=label_names) or src.stem
-        name = f"{stem}.OK"
+        ext = src.suffix or ".OK"       # generated JSON must stay .json
+        name = f"{stem}{ext}"
         if name.lower() in seen_names:      # names need not be unique — keys are
-            name = f"{stem}_{i + 1}.OK"
+            name = f"{stem}_{i + 1}{ext}"
         seen_names.add(name.lower())
 
         if write:

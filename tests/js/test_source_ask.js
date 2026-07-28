@@ -23,7 +23,7 @@ const src = fs.readFileSync(APP, "utf8");
 const run = new Function(
   "document", "window", "localStorage", "Option", "fetch", "confirm", "prompt", "alert",
   src + "\n;return { renderSourceAsk, sourceFor, rememberSource, srcParam, dirOf," +
-        "\n           rekeyedSummary };");
+        "\n           rekeyedSummary, fileExt, jsBuildName };");
 
 let api;
 try {
@@ -116,6 +116,20 @@ check("a field with no source is named without brackets",
       S([{ file: "a", field: "keytrol", to: "1" },
          { file: "b", field: "po", to: "2" }])
       === "Made keys unique: 2 file(s) re-keyed — 1 keytrol, 1 po");
+
+// --- a rename preview must keep the file's OWN extension ------------------
+// The preview used to append ".OK" unconditionally, so a Calgary .json file
+// showed (and the server produced) a .OK name holding JSON.
+check("a .json path keeps .json", api.fileExt("/d/x/a.json") === ".json");
+check("a .OK path keeps .OK", api.fileExt("/d/x/a.OK") === ".OK");
+check("an unknown path falls back to .OK", api.fileExt(undefined) === ".OK");
+check("rename preview of a JSON file ends .json",
+      api.jsBuildName([{ type: "token", name: "layout" }],
+                      { layout: "CalgaryDistLabel" }, "_", ".json")
+      === "CalgaryDistLabel.json");
+check("rename preview of an .OK file is unchanged",
+      api.jsBuildName([{ type: "token", name: "layout" }],
+                      { layout: "StyleHeader" }, "_", ".OK") === "StyleHeader.OK");
 
 let bad = 0;
 for (const [name, ok] of checks) {

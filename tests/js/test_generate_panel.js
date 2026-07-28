@@ -47,7 +47,8 @@ try {
 const scope = {
   path: "/tmp/StyleHeader.OK", name: "StyleHeader.OK", layout: "StyleHeader",
   key_field: "keytrol", key_size: 6, max_count: 5000,
-  header_fields: [{ name: "dept", size: 2 }, { name: "date", size: 8 }],
+  header_fields: [{ name: "dept", size: 2 }, { name: "date", size: 8 },
+                  { name: "timestamp", size: null, date: true }],
   sections: [
     { name: "Lane", rows: 10, max_records: 10, fields: [{ name: "lane1", size: 4 }] },
     { name: "Size", rows: 4, max_records: null, fields: [{ name: "qty", size: 5 }] },
@@ -113,6 +114,31 @@ listInput.value = "11, 22, 33";
 const listOk = minInput.disabled === true;
 console.log(`  ${listOk ? "PASS" : "FAIL"}  a value list disables the min/max range`);
 if (!listOk) process.exit(1);
+
+// A DATE field must offer a date range (from/to text inputs), not a numeric
+// one, and must send `from`/`to` rather than `min`/`max` — the server reads a
+// different pair for temporal fields.
+const dateRow = fieldRows.find((r) =>
+  r.children.some((e) => /timestamp/.test(e.textContent || "")));
+const dcb = dateRow.children.find((e) => e.classList.contains("gen-on"));
+const dmin = dateRow.children.find((e) => e.classList.contains("gen-min"));
+const dmax = dateRow.children.find((e) => e.classList.contains("gen-max"));
+const dateChecks = [
+  ["a date field renders text inputs, not number", dmin.type === "text"],
+  ["the date row is labelled as a date",
+   dateRow.children.some((e) => /timestamp \(date\)/.test(e.textContent || ""))],
+];
+dcb.checked = true;
+(dcb._handlers.change || []).forEach((f) => f({}));
+dateChecks.push(["ticking a date field does not prefill a numeric range",
+                 dmin.value === ""]);
+dmin.value = "2024-01-01"; dmax.value = "2024-12-31";
+(dmin._handlers.input || []).forEach((f) => f({}));
+for (const [name, ok] of dateChecks) {
+  console.log(`  ${ok ? "PASS" : "FAIL"}  ${name}`);
+  if (!ok) bad++;
+}
+if (bad) { console.error(`\n${bad} check(s) failed`); process.exit(1); }
 
 // Second click must actually POST the write request.
 btn.click();

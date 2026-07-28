@@ -537,25 +537,40 @@ function renderBulkPanel(scope) {
       return [
         { v: "set", t: "Set value" },
         { v: "list", t: "Random value from my list (each file)" },
+        ...(hasDateField(sec)
+          ? [{ v: "random_date", t: "Random date/time in a range (each file)" }] : []),
       ];
     }
     return [
       { v: "set", t: "Set value (all rows)" },
       { v: "list", t: "Random value from my list (each row)" },
       { v: "random", t: "Set random value (each row)" },
+      ...(hasDateField(sec)
+        ? [{ v: "random_date", t: "Random date/time in a range (each row)" }] : []),
       { v: "unique", t: "Set unique value (each row)" },
       { v: "add", t: "Add rows" },
       { v: "keep", t: "Keep first N rows" },
     ];
   }
 
+  // Only sections holding a field configured as temporal (date_fields.yaml)
+  // can offer a date range — nothing else has a format to render into.
+  function hasDateField(sec) {
+    return !!(sec && (sec.fields || []).some((f) => f.date));
+  }
+
   function rebuildInputs() {
     row2.innerHTML = "";
     const sec = curSection(); if (!sec) return;
     const op = opSel.value;
-    if (op === "set" || op === "random" || op === "unique" || op === "list") {
+    if (op === "set" || op === "random" || op === "unique" || op === "list"
+        || op === "random_date") {
       const fieldSel = el("select", "bulk-field");
-      sec.fields.forEach((f) => fieldSel.appendChild(new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
+      // A date range applies only to the temporal fields; every other op keeps
+      // the full list.
+      (op === "random_date" ? sec.fields.filter((f) => f.date) : sec.fields)
+        .forEach((f) => fieldSel.appendChild(
+          new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
       row2.appendChild(el("span", "bulk-label", "Field:"));
       row2.appendChild(fieldSel);
 
@@ -594,6 +609,20 @@ function renderBulkPanel(scope) {
         row2.appendChild(el("span", "bulk-section",
           `· comma separated — each ${sec.isHeader ? "file" : "row"} gets one at random; use ' ' for a blank value`));
         listInp.addEventListener("input", reset);
+        fieldSel.addEventListener("change", reset);
+      } else if (op === "random_date") {
+        const from = el("input", "bulk-value bulk-dfrom"); from.type = "text";
+        from.placeholder = "2024-01-01"; from.style.width = "150px";
+        const to = el("input", "bulk-value bulk-dto"); to.type = "text";
+        to.placeholder = "2024-12-31"; to.style.width = "150px";
+        row2.appendChild(el("span", "bulk-label", "Between:"));
+        row2.appendChild(from);
+        row2.appendChild(el("span", "bulk-section", "and"));
+        row2.appendChild(to);
+        row2.appendChild(el("span", "bulk-section",
+          `· each ${sec.isHeader ? "file" : "row"} gets its own random moment — ` +
+          `a date, or '2024-01-01 14:30'`));
+        [from, to].forEach((i) => i.addEventListener("input", reset));
         fieldSel.addEventListener("change", reset);
       } else {  // random
         const rmin = el("input", "bulk-value bulk-rmin"); rmin.type = "number"; rmin.min = "0"; rmin.placeholder = "min"; rmin.style.width = "90px";
@@ -645,6 +674,11 @@ function renderBulkPanel(scope) {
       if (mn !== "") o.min = Number(mn);
       if (mx !== "") o.max = Number(mx);
       return o;
+    }
+    if (op === "random_date") {
+      return { type: "random_date", field: fieldSel.value,
+               from: (row2.querySelector(".bulk-dfrom") || {}).value || "",
+               to: (row2.querySelector(".bulk-dto") || {}).value || "" };
     }
     if (op === "list") {
       // Send the raw string, NOT a pre-split/trimmed array — the server's
@@ -766,7 +800,7 @@ function exitRenameMode() {
   restoreEditorAfterPanel();
 }
 
-function jsBuildName(parts, sample, sep) {
+function jsBuildName(parts, sample, sep, ext) {
   const inv = /[\\/:*?"<>|]/g;
   let out = ""; let glue = false;
   (parts || []).forEach((p) => {
@@ -780,7 +814,15 @@ function jsBuildName(parts, sample, sep) {
     out = out === "" ? v : out + (glue ? "" : sep) + v;
     glue = false;
   });
-  return out + ".OK";
+  // Keep the file's own extension — a Calgary file stays .json. The server
+  // does the same when it applies the rename; this is only the preview.
+  return out + (ext || ".OK");
+}
+
+// A path's extension, defaulting to .OK for the fixed-width/delimited layouts.
+function fileExt(path) {
+  const m = /(\.[A-Za-z0-9]+)$/.exec(String(path || ""));
+  return m ? m[1] : ".OK";
 }
 
 function renderRenamePanel(scope) {
@@ -926,7 +968,9 @@ function renderRenamePanel(scope) {
         : "Expand “Customize parts” and add parts to build a name.";
       previewBtn.disabled = true;
     } else {
-      live.textContent = "Example (file 1):  " + jsBuildName(parts, scope.sample, sep());
+      live.textContent = "Example (file 1):  " +
+        jsBuildName(parts, scope.sample, sep(),
+                    fileExt(scope.files[0] && scope.files[0].path));
       previewBtn.disabled = false;
     }
     previewBox.innerHTML = ""; resultsBox.innerHTML = ""; applyBtn.disabled = true;
@@ -2279,7 +2323,11 @@ $("#folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") ope
 $("#folderPath").addEventListener("input", (e) => { e.target.title = e.target.value; });
 $("#saveBtn").addEventListener("click", () => save(null));
 $("#saveAsBtn").addEventListener("click", () => {
-  const dflt = state.file ? state.file.replace(/\.OK$/i, "_copy.OK") : "";
+  // Save As must not silently change a .json file into a .OK one.
+  const ext = fileExt(state.file);
+  const dflt = state.file
+    ? state.file.replace(new RegExp(ext.replace(".", "\\.") + "$", "i"), "_copy" + ext)
+    : "";
   const target = prompt("Save As (full path):", dflt);
   if (target) save(target);
 });
@@ -2421,12 +2469,23 @@ function renderGeneratePanel(panel, paths, scope) {
       const row = el("label", "gen-field");
       const cb = el("input", "gen-on"); cb.type = "checkbox";
       cb.dataset.field = f.name; cb.dataset.size = f.size;
-      const min = el("input", "gen-min"); min.type = "number"; min.placeholder = "min"; min.disabled = true;
-      const max = el("input", "gen-max"); max.type = "number"; max.placeholder = "max"; max.disabled = true;
+      if (f.date) cb.dataset.date = "1";
+      // A temporal field (config/date_fields.yaml) takes a DATE range instead
+      // of a numeric one — each generated file (or row) gets its own instant.
+      const isDate = !!f.date;
+      const min = el("input", "gen-min");
+      const max = el("input", "gen-max");
+      min.type = max.type = isDate ? "text" : "number";
+      min.placeholder = isDate ? "from  2024-01-01" : "min";
+      max.placeholder = isDate ? "to  2024-12-31" : "max";
+      min.disabled = max.disabled = true;
+      if (isDate) { min.style.width = max.style.width = "140px"; }
       // A value list wins over the min/max range when it is filled in, so the
       // generated files only ever contain values the user allowed.
       const list = el("input", "gen-list"); list.type = "text";
-      list.placeholder = "or list: 10,20,'  msg',' '"; list.disabled = true;
+      list.placeholder = isDate ? "or list: 2024-01-01, 2024-06-30"
+                                : "or list: 10,20,'  msg',' '";
+      list.disabled = true;
       list.title = "Comma-separated. When filled, values are picked from this "
                  + "list instead of the min/max range. Use ' ' for a blank value.";
       const syncRange = () => {
@@ -2435,7 +2494,7 @@ function renderGeneratePanel(panel, paths, scope) {
         list.disabled = !cb.checked;
       };
       cb.addEventListener("change", () => {
-        if (cb.checked && min.value === "" && list.value.trim() === "") {
+        if (cb.checked && min.value === "" && list.value.trim() === "" && !isDate) {
           min.value = "1"; max.value = String(Math.pow(10, f.size) - 1);
         }
         syncRange();
@@ -2445,7 +2504,8 @@ function renderGeneratePanel(panel, paths, scope) {
       max.addEventListener("input", refresh);
       list.addEventListener("input", () => { syncRange(); refresh(); });
       row.appendChild(cb);
-      row.appendChild(el("span", "gen-name", `${f.name} (${f.size})`));
+      row.appendChild(el("span", "gen-name",
+                         isDate ? `${f.name} (date)` : `${f.name} (${f.size})`));
       row.appendChild(min); row.appendChild(max); row.appendChild(list);
       box.appendChild(row);
     });
@@ -2545,12 +2605,19 @@ function renderGeneratePanel(panel, paths, scope) {
         .map((c) => ({ type: "token", name: c.dataset.token })),
       separator: sepSel.value,
     };
+    // The same two boxes carry a numeric range OR a date range. The server
+    // reads `from`/`to` for a temporal field and `min`/`max` otherwise, so send
+    // whichever this field actually means.
+    const rangeOf = (row, cb) => {
+      const lo = row.querySelector(".gen-min").value;
+      const hi = row.querySelector(".gen-max").value;
+      return cb.dataset.date === "1" ? { from: lo, to: hi } : { min: lo, max: hi };
+    };
     headerBox.querySelectorAll(".gen-on:checked").forEach((cb) => {
       const row = cb.closest(".gen-field");
       spec.header_fields.push({
         name: cb.dataset.field,
-        min: row.querySelector(".gen-min").value,
-        max: row.querySelector(".gen-max").value,
+        ...rangeOf(row, cb),
         values: row.querySelector(".gen-list").value,
       });
     });
@@ -2560,8 +2627,7 @@ function renderGeneratePanel(panel, paths, scope) {
         const row = cb.closest(".gen-field");
         spec.detail_fields.push({
           section, name: cb.dataset.field,
-          min: row.querySelector(".gen-min").value,
-          max: row.querySelector(".gen-max").value,
+          ...rangeOf(row, cb),
           values: row.querySelector(".gen-list").value,
         });
       });

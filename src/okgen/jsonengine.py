@@ -27,8 +27,15 @@ _WS = " \t\n\r"
 
 
 def scan_spans(text: str) -> Dict[Tuple, Tuple[int, int]]:
-    """Map every SCALAR leaf's path -> (start, end); text[start:end] is the exact
-    source token (quotes included for strings, literal for number/bool/null)."""
+    """Map every path -> (start, end); ``text[start:end]`` is its exact source.
+
+    Scalars map to their token (quotes included for strings, the literal for
+    number/bool/null). **Containers map too** — an object or array spans from
+    its opening brace/bracket to its closing one. That is what makes structural
+    editing possible: an array element's span is the exact source text of that
+    row, so adding, deleting and reordering rows are text splices like any
+    other edit, and every untouched row keeps its bytes verbatim.
+    """
     spans: Dict[Tuple, Tuple[int, int]] = {}
     n = len(text)
 
@@ -66,8 +73,10 @@ def scan_spans(text: str) -> Dict[Tuple, Tuple[int, int]]:
         return j
 
     def obj(i, path):
+        start = i
         i = skip_ws(i + 1)
         if text[i] == "}":
+            spans[path] = (start, i + 1)
             return i + 1
         while True:
             i = skip_ws(i)
@@ -82,12 +91,15 @@ def scan_spans(text: str) -> Dict[Tuple, Tuple[int, int]]:
                 i += 1
                 continue
             if text[i] == "}":
+                spans[path] = (start, i + 1)
                 return i + 1
             raise ValueError(f"bad object char {text[i]!r} at {i}")
 
     def arr(i, path):
+        start = i
         i = skip_ws(i + 1)
         if text[i] == "]":
+            spans[path] = (start, i + 1)
             return i + 1
         idx = 0
         while True:
@@ -98,6 +110,7 @@ def scan_spans(text: str) -> Dict[Tuple, Tuple[int, int]]:
                 i += 1
                 continue
             if text[i] == "]":
+                spans[path] = (start, i + 1)
                 return i + 1
             raise ValueError(f"bad array char {text[i]!r} at {i}")
 
@@ -138,18 +151,170 @@ class JsonState:
         self.spans = spans
         self.edits: Dict[Tuple, str] = {}
 
-    def serialize(self) -> bytes:
-        if not self.edits:
-            return self.text.encode(ENCODING)          # untouched -> byte-exact
-        repls = []
-        for path, token in self.edits.items():
-            span = self.spans.get(path)
-            if span is not None:
-                repls.append((span[0], span[1], token))
+    def serialize(self, records=None) -> bytes:
+        """The document with staged edits applied.
+
+        Two passes, in this order:
+
+        1. **values** — splice each changed scalar back over its own span, which
+           is what keeps an ordinary edit byte-exact everywhere else;
+        2. **structure** — for any array whose rows were added, removed or
+           reordered, rebuild just that array's source region from the row
+           texts, reusing the file's own separator and indentation.
+
+        Values go first so that step 2 works on text whose rows already carry
+        their new values; spans are re-scanned in between because a changed
+        token shifts every offset after it. An array whose rows were untouched
+        is never rebuilt, so its bytes — and the whole rest of the file — are
+        preserved exactly.
+        """
         text = self.text
-        for start, end, token in sorted(repls, key=lambda r: r[0], reverse=True):
-            text = text[:start] + token + text[end:]
+        if self.edits:
+            repls = []
+            for path, token in self.edits.items():
+                span = self.spans.get(path)
+                if span is not None:
+                    repls.append((span[0], span[1], token))
+            for start, end, token in sorted(repls, key=lambda r: r[0], reverse=True):
+                text = text[:start] + token + text[end:]
+
+        if records is not None:
+            text = self._apply_structure(text, records)
         return text.encode(ENCODING)
+
+    # ----- structural (row) changes -----
+    def _apply_structure(self, text: str, records) -> str:
+        """Rebuild every array whose row membership or order changed."""
+        wanted: Dict[Tuple, list] = {}
+        for rec in records:
+            ap = getattr(rec, "array_path", None)
+            if ap is not None:
+                wanted.setdefault(ap, []).append(rec)
+        if not wanted:
+            return text
+
+        changed = {ap: rows for ap, rows in wanted.items()
+                   if _row_layout(rows) != tuple(range(len(_at(self.data, ap) or [])))}
+        # Arrays that HAD rows and now have none also count as changed.
+        for ap in wanted:
+            if not wanted[ap] and (_at(self.data, ap) or []):
+                changed[ap] = []
+        if not changed:
+            return text                                   # nothing structural
+
+        spans = scan_spans(text)
+        indent = _detect_indent(text)
+        # Right-to-left so an earlier array's rebuild can't shift a later span.
+        for ap in sorted(changed, key=lambda a: spans.get(a, (0, 0))[0], reverse=True):
+            span = spans.get(ap)
+            if span is None:
+                raise ValueError(
+                    f"cannot change rows: {'.'.join(str(p) for p in ap)} is not an "
+                    f"array in this file")
+            text = (text[:span[0]]
+                    + _rebuild_array(text, spans, ap, changed[ap], indent)
+                    + text[span[1]:])
+        return text
+
+
+def _row_layout(rows) -> Tuple:
+    """The rows' original indices, with None for each newly added row.
+
+    Equal to ``(0, 1, 2, …)`` exactly when nothing was added, removed or moved
+    — which is how :meth:`JsonState._apply_structure` decides an array can be
+    left byte-for-byte alone.
+    """
+    return tuple(getattr(r, "orig_index", None) for r in rows)
+
+
+def _detect_indent(text: str) -> str:
+    """The file's own one-level indent, or "" for a minified document."""
+    i = text.find("\n")
+    if i < 0:
+        return ""
+    j = i + 1
+    while j < len(text) and text[j] in " \t":
+        j += 1
+    return text[i + 1:j]
+
+
+def _rebuild_array(text: str, spans, array_path: Tuple, rows, indent: str) -> str:
+    """The source text for one array, given the rows it should now hold.
+
+    Reuses the file's own layout rather than reformatting: the gap after ``[``,
+    the exact separator between two existing elements, and the gap before ``]``
+    are all lifted from the original. An untouched row contributes its own
+    source verbatim.
+    """
+    a_start, a_end = spans[array_path]
+    orig_n = 0
+    while (array_path + (orig_n,)) in spans:
+        orig_n += 1
+
+    if orig_n:
+        first = spans[array_path + (0,)]
+        open_gap = text[a_start + 1:first[0]]
+        close_gap = text[spans[array_path + (orig_n - 1,)][1]:a_end - 1]
+        sep = (text[first[1]:spans[array_path + (1,)][0]] if orig_n > 1
+               else "," + open_gap)
+    else:
+        # The array is empty in the file, so it has no layout of its own to
+        # copy — fall back to the document's indent.
+        base = _base_indent(text, a_start)
+        open_gap = ("\n" + base + indent) if indent else ""
+        close_gap = ("\n" + base) if indent else ""
+        sep = "," + open_gap
+
+    if not rows:
+        return "[]"
+
+    parts = []
+    for r in rows:
+        oi = getattr(r, "orig_index", None)
+        if oi is not None:
+            parts.append(text[spans[array_path + (oi,)][0]:spans[array_path + (oi,)][1]])
+        else:
+            parts.append(_new_row_text(text, spans, array_path, r, indent))
+    return "[" + open_gap + sep.join(parts) + close_gap + "]"
+
+
+def _base_indent(text: str, pos: int) -> str:
+    """The leading whitespace of the line ``pos`` sits on."""
+    line_start = text.rfind("\n", 0, pos) + 1
+    j = line_start
+    while j < len(text) and text[j] in " \t":
+        j += 1
+    return text[line_start:j]
+
+
+def _new_row_text(text: str, spans, array_path: Tuple, rec, indent: str) -> str:
+    """Source text for a row that wasn't in the file.
+
+    A cloned row copies its template's exact source and splices its own edited
+    values into that copy, so it matches the file's formatting perfectly. A
+    seeded row (the section was empty, so there is nothing to clone) is rendered
+    from the layout's fields using the document's indent.
+    """
+    tpl = getattr(rec, "template_index", None)
+    if tpl is not None and (array_path + (tpl,)) in spans:
+        s, e = spans[array_path + (tpl,)]
+        snippet = text[s:e]
+        edits = getattr(rec, "pending", None) or {}
+        if edits:
+            snip_spans = scan_spans(snippet)
+            repls = [(snip_spans[(k,)][0], snip_spans[(k,)][1],
+                      json.dumps(v, ensure_ascii=False))
+                     for k, v in edits.items() if (k,) in snip_spans]
+            for a, b, tok in sorted(repls, key=lambda r: r[0], reverse=True):
+                snippet = snippet[:a] + tok + snippet[b:]
+        return snippet
+
+    obj = getattr(rec, "pending", None) or {}
+    if not indent:
+        return json.dumps(obj, ensure_ascii=False)
+    base = _base_indent(text, spans[array_path][0]) + indent
+    rendered = json.dumps(obj, ensure_ascii=False, indent=len(indent) or 2)
+    return rendered.replace("\n", "\n" + base)
 
 
 def _display(v) -> str:
@@ -167,7 +332,8 @@ class JsonRecord:
     """One editable object in the document (the header, or one array element),
     presenting the same get/values/set surface as a fixed-width ``Record``."""
 
-    def __init__(self, state: JsonState, section, index: int, base: Tuple):
+    def __init__(self, state: JsonState, section, index: int, base: Tuple,
+                 array_path: Tuple = None, orig_index: int = None):
         self._state = state
         self.section = section
         self.index = index
@@ -177,6 +343,19 @@ class JsonRecord:
         self.offset = 0
         self.field_spans = None
         self.raw = ""                     # not meaningful for JSON records
+        # Structural identity. `array_path` is the array this row belongs to
+        # (None for the header, which is an object and can't be added to or
+        # removed). `orig_index` is where the row sat in the file as read, and
+        # is None for a row added in this session — together they tell
+        # serialize which rows moved, went, or arrived.
+        self.array_path = array_path
+        self.orig_index = orig_index
+        self.template_index = None        # a new row's source row, if cloned
+        self.pending: Dict[str, str] = {}  # a new row's values (no spans yet)
+
+    @property
+    def is_new(self) -> bool:
+        return self.array_path is not None and self.orig_index is None
 
     def _field(self, name):
         if self.section is None:
@@ -192,6 +371,8 @@ class JsonRecord:
         return self._base + (f.name,)
 
     def get(self, name: str) -> Optional[str]:
+        if self.is_new:                   # not in the document yet
+            return _display(self.pending.get(name))
         return _display(_at(self._state.data, self._path(self._field(name))))
 
     def values(self) -> Dict[str, Optional[str]]:
@@ -203,7 +384,16 @@ class JsonRecord:
         """Stage a value edit. ``literal`` is irrelevant for JSON (no padding);
         the value is stored exactly as given as a JSON string."""
         f = self._field(name)
+        if self.is_new:                   # lives only in `pending` until saved
+            self.pending[name] = value
+            return
         path = self._path(f)
+        if isinstance(_at(self._state.data, path), (dict, list)):
+            # Some layouts declare a nested array as a header field (DistLabel's
+            # `lanes`/`sizes`). Those are SECTIONS, edited as rows — writing a
+            # string over one would destroy every row in it.
+            raise ValueError(
+                f"field {name!r} holds nested rows and cannot be set as a value")
         if path not in self._state.spans:
             # Field key is absent from THIS document — inserting a new key is a
             # structural change not supported yet; refuse rather than silently
@@ -212,6 +402,37 @@ class JsonRecord:
                 f"field {name!r} is not present in this JSON file (cannot add keys yet)")
         self._state.edits[path] = json.dumps(value, ensure_ascii=False)
         _set_at(self._state.data, path, value)
+
+
+def clone_record(template: "JsonRecord") -> "JsonRecord":
+    """A new row copied from ``template`` — the JSON equivalent of duplicating
+    a fixed-width line. The copy carries the template's CURRENT values and, on
+    save, its exact source text, so it matches the file's formatting."""
+    if template.array_path is None:
+        raise ValueError("only rows of an array section can be duplicated")
+    clone = JsonRecord(template._state, template.section, template.index,
+                       template._base, array_path=template.array_path,
+                       orig_index=None)
+    clone.template_index = (template.orig_index if template.orig_index is not None
+                            else template.template_index)
+    clone.pending = dict(template.values())
+    if clone.template_index is None:
+        # Duplicating a row that is itself new: there is no source text to copy,
+        # so it renders from its values like a seeded row.
+        clone.pending = {k: (v or "") for k, v in clone.pending.items()}
+    return clone
+
+
+def seed_record(state: "JsonState", section, array_path: Tuple) -> "JsonRecord":
+    """The first row for an EMPTY array section — every field blank.
+
+    There is no existing row to copy, so the row is rendered from the layout's
+    field list. Blank rather than invented values: the user fills it in.
+    """
+    rec = JsonRecord(state, section, 0, array_path + (0,),
+                     array_path=array_path, orig_index=None)
+    rec.pending = {f.name: "" for f in section.fields}
+    return rec
 
 
 def parse(text: str, layout):
@@ -228,7 +449,8 @@ def parse(text: str, layout):
             arr = _at(data, base)
             arr = arr if isinstance(arr, list) else []
             for i in range(len(arr)):
-                records.append(JsonRecord(state, sec, idx, base + (i,)))
+                records.append(JsonRecord(state, sec, idx, base + (i,),
+                                          array_path=base, orig_index=i))
                 idx += 1
         else:                              # object (single record, e.g. Header)
             records.append(JsonRecord(state, sec, idx, base))

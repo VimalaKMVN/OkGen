@@ -14,6 +14,22 @@ rules:
   - match: {chain: ["03", "04"], layout: [StyleHeader, Preticket], field: type}
     values: {"1": "Type One", "2": "Type Two"}
 
+
+  # Calgary JSON has TWO `type` fields — the document kind on the Header, and
+  # a coded 1-9 type on each detail row. Scoped by section so each gets its
+  # own labels. Mirrors production display.yaml.
+  - match: {layout: CalgaryStyleHeader, section: Header, field: type}
+    values: {styleHeaders: "styleHeaders"}
+  - match: {layout: CalgaryCartonLabel, section: Header, field: type}
+    values: {cartonLabels: "cartonLabels"}
+  - match: {layout: CalgaryDistLabel, section: Header, field: type}
+    values: {distributionLabels: "distributionLabels"}
+  # ...and the DETAIL row's coded type, which must resolve independently of the
+  # header rule above. In production this comes from the generic `field: type`
+  # rule; pinned explicitly here so section scoping is proven in both directions.
+  - match: {layout: CalgaryStyleHeader, section: Details, field: type}
+    values: {"1": "Detail Type 1", "2": "Detail Type 2"}
+
   # EU GTA: the read-only `process` field is labeled by layout name.
   - match: {layout: [EUStyleHeader, EUCartonLabel], field: process}
     values: {D: "(D) StyleHeader", H: "(H) Holdings/CartonLabels"}
