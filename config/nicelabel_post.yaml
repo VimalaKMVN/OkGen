@@ -8,14 +8,27 @@
 # Flow per file:  copy into `json_folder`  ->  POST  ->  move that COPY into
 # `json_folder/Processed` (success) or `json_folder/failed` (failure).
 # Your original selected file is NEVER moved or modified.
+#
+# ############################################################################
+# # WINDOWS PATHS: DO NOT PUT A BACKSLASH PATH IN "DOUBLE QUOTES".           #
+# # YAML reads \T, \A, \J… inside double quotes as escape codes, so the      #
+# # whole file fails to load and this feature switches itself off.           #
+# #                                                                          #
+# #   WRONG:  "D:\NiceLabel\TJX GTA\Incoming"                                #
+# #   RIGHT:  'D:\NiceLabel\TJX GTA\Incoming'      <- single quotes          #
+# #   RIGHT:  "D:/NiceLabel/TJX GTA/Incoming"      <- forward slashes        #
+# #   RIGHT:  "D:\\NiceLabel\\TJX GTA\\Incoming"   <- doubled backslashes    #
+# #                                                                          #
+# # After editing this file, RESTART OkGen — config is read once at startup. #
+# ############################################################################
 
 # The URL that receives the POST. Required.
 endpoint_url: "CHANGE_ME"          # e.g. "https://nicelabel.internal.tjx.com/api/labels"
 
 # Staging folder. Selected files are copied here to be posted, and the copies
 # end up in Processed/ or failed/ underneath it. Must already exist.
-# (Windows paths: use double backslashes or forward slashes.)
-json_folder: "CHANGE_ME"           # e.g. "D:\\NiceLabel\\TJX GTA\\Automation\\JsonPost"
+# SINGLE quotes for a Windows path — see the banner at the top of this file.
+json_folder: 'CHANGE_ME'           # e.g. 'D:\NiceLabel\TJX GTA\Automation\JsonPost'
 
 # ---- Credentials (HTTP Basic) -------------------------------------------- #
 # Leave `username` blank to send no Authorization header at all.

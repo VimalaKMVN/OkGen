@@ -448,7 +448,51 @@ def test_a_malformed_yaml_disables_the_send_without_killing_startup(tmp_path, ca
                                                   encoding="utf-8")
     cfg = Config.load(tmp_path)          # must not raise
     assert cfg.nicelabel_post() == {}
-    assert "JSON send is disabled" in capsys.readouterr().out
+    assert "could not be read" in capsys.readouterr().out
+    assert "RESTART OkGen" in cfg.nicelabel_post_error()
+
+
+def test_a_double_quoted_windows_path_is_diagnosed_not_blamed_on_the_user(tmp_path):
+    """The single most likely way a filled-in config still fails.
+
+    YAML processes backslash escapes inside DOUBLE quotes, so a perfectly
+    reasonable-looking Windows path kills the whole file — and the user, who
+    has just filled everything in, must not be told it is 'not configured'.
+    """
+    (tmp_path / "nicelabel_post.yaml").write_text(
+        'endpoint_url: "https://labels.example/api"\n'
+        'json_folder: "D:\\NiceLabel\\TJX GTA\\Automation\\JsonPost"\n'
+        'username: "labeluser"\n'
+        'password: "secret"\n', encoding="utf-8")
+    cfg = Config.load(tmp_path)
+
+    err = cfg.nicelabel_post_error()
+    assert "could not be read" in err
+    assert "DOUBLE quotes" in err, "the actual cause is not explained"
+    assert "single quotes" in err, "no fix is offered"
+    assert "RESTART OkGen" in err
+
+    # …and it reaches the UI verbatim, instead of 'fill in the config'.
+    scope = service.send_scope([str(tmp_path / "a.json")], cfg)
+    assert scope["configured"] is False
+    assert "DOUBLE quotes" in scope["error"]
+    assert "not configured" not in scope["error"]
+    with pytest.raises(service.EditError, match="DOUBLE quotes"):
+        service.start_send_job([str(tmp_path / "a.json")], cfg)
+
+
+def test_the_same_windows_path_in_single_quotes_loads_fine(tmp_path):
+    (tmp_path / "nicelabel_post.yaml").write_text(
+        "endpoint_url: 'https://labels.example/api'\n"
+        "json_folder: 'D:\\NiceLabel\\TJX GTA\\Automation\\JsonPost'\n"
+        "username: 'labeluser'\n"
+        "password: 'secret'\n", encoding="utf-8")
+    cfg = Config.load(tmp_path)
+    assert cfg.nicelabel_post_error() == ""
+    assert cfg.nicelabel_post()["json_folder"] == "D:\\NiceLabel\\TJX GTA\\Automation\\JsonPost"
+    scope = service.send_scope([str(tmp_path / "a.json")], cfg)
+    assert scope["configured"] is True
+    assert scope["destination"] == "https://labels.example/api"
 
 
 # --------------------------------------------------------------------------- #

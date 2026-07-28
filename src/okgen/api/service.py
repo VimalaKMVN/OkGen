@@ -1365,6 +1365,13 @@ def send_scope(paths, config: Config) -> dict:
                 "destination": dest, "warning": config.nicelabel_warning(),
                 "error": "" if dest else
                          "NiceLabel path is not configured (config/nicelabel.yaml)"}
+    broken = config.nicelabel_post_error()
+    if broken:
+        # The file exists and was edited, but could not be parsed — say THAT,
+        # rather than sending the user back to fill in a file they just filled.
+        return {"mode": "post", "count": len(paths or []), "configured": False,
+                "destination": "", "folder": "", "username": "",
+                "warning": "", "error": broken}
     info = nlp.describe(config.nicelabel_post())
     return {"mode": "post", "count": len(paths or []),
             "configured": info.get("configured", False),
@@ -1444,6 +1451,9 @@ def start_send_job(paths, config: Config) -> dict:
             "The POST hand-off takes .json files only — a selection holding an "
             ".OK file is copied to the NiceLabel hot folder instead.")
     paths = [str(p) for p in (paths or [])]
+    broken = config.nicelabel_post_error()
+    if broken:
+        raise EditError(broken)
     try:
         settings = nlp.settings_from(config.nicelabel_post())
         if not Path(settings.json_folder).is_dir():
