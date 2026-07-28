@@ -35,6 +35,8 @@
   <main class="layout">
     <aside id="treePane" class="tree-pane">
       <div class="pane-title">Files<span id="selCount" class="sel-count"></span></div>
+      <!-- Asked once per folder when its JSON files carry no SCAN/WMS token -->
+      <div id="srcAsk" class="src-ask hidden"></div>
       <div id="tree" class="tree"></div>
     </aside>
     <div id="dragbar" class="dragbar" title="Drag to resize the file panel"></div>
@@ -62,6 +64,7 @@
     window.OKGEN_NICELABEL_WARNING = {{ nicelabel_warning | tojson }};
     window.OKGEN_SEND_QUIPS = {{ send_quips | tojson }};
     window.OKGEN_SEND_DONE_QUIPS = {{ send_done_quips | tojson }};
+    window.OKGEN_SOURCES = {{ json_sources | tojson }};
   </script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

@@ -1,0 +1,21 @@
+# Which SOURCE a Calgary JSON file came from — SCAN or WMS.
+#
+# Both sources send structurally identical JSON; the ONLY difference is which
+# header field is that file's unique key (see keys.yaml). Nothing in the file
+# itself says which is which, so it is declared by NAME: a token below appearing
+# in the file name, or in any folder above it.
+#
+# Matching is on whole WORDS, not substrings — a name is split on anything that
+# isn't a letter or digit, so "Calgary_SCAN_2026" and "Calgary SCAN" match, but
+# "SCANNED" does NOT. Add extra words to a list here if a site names its folders
+# differently (e.g. EWMS); no code change is needed.
+sources:
+  SCAN: ["SCAN"]
+  WMS: ["WMS"]
+
+# Used when neither the file name nor any folder above it carries a token AND
+# the user hasn't answered for that folder yet. WMS is the safe fallback: a WMS
+# folder mistaken for SCAN would renumber `keytrol`, which WMS ships as a
+# constant placeholder ('0'), fabricating keys. The other way round only misses
+# a duplicate, which the tree's duplicate warning still flags.
+default: WMS

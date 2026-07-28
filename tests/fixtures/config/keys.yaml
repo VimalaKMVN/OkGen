@@ -7,6 +7,13 @@ unique_fields:
   EUPreticket: po
   EUStyleHeader: keytrol
   EUCartonLabel: keytrol
-  CalgaryStyleHeader: headerASNid
-  CalgaryDistLabel: headerASNid
-  CalgaryCartonLabel: pickListId
+  # Source-dependent (SCAN vs WMS), mirroring production — see json_sources.yaml.
+  CalgaryStyleHeader:
+    SCAN: keytrol
+    WMS: headerASNid
+  CalgaryDistLabel:
+    SCAN: keytrol
+    WMS: headerASNid
+  CalgaryCartonLabel:
+    SCAN: pickListId
+    WMS: pickListId

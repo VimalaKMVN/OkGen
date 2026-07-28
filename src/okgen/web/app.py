@@ -40,7 +40,10 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
                                nicelabel_path=config.nicelabel_path() or "",
                                nicelabel_warning=config.nicelabel_warning(),
                                send_quips=config.send_quips(),
-                               send_done_quips=config.send_done_quips())
+                               send_done_quips=config.send_done_quips(),
+                               # SCAN/WMS names, so the "which source?" prompt
+                               # offers exactly what json_sources.yaml defines.
+                               json_sources=sorted(config.json_sources))
 
     # ----- JSON API -----
     @app.get("/favicon.ico")
@@ -62,7 +65,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def tree():
         directory = request.args.get("dir", "")
         try:
-            return jsonify(service.build_tree(directory, config, registry))
+            return jsonify(service.build_tree(
+                directory, config, registry, request.args.get("source") or None))
         except NotADirectoryError as exc:
             return _err(str(exc), 400)
 
@@ -70,7 +74,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def parse():
         path = request.args.get("path", "")
         try:
-            return jsonify(service.parse_file_view(path, registry, config))
+            return jsonify(service.parse_file_view(path, registry, config,
+                                                  request.args.get("source") or None))
         except FileNotFoundError:
             return _err(f"not found: {path}", 404)
         except ValueError as exc:
@@ -152,7 +157,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         try:
             return jsonify(service.generate_scope(
-                body.get("paths") or body.get("path"), registry, config))
+                body.get("paths") or body.get("path"), registry, config,
+                source=body.get("source") or None))
         except FileNotFoundError:
             return _err(f"not found: {body.get('path')}", 404)
         except ValueError as exc:
@@ -164,7 +170,7 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         try:
             return jsonify(service.generate_preview(
                 body.get("paths") or body.get("path"), body.get("spec") or {},
-                registry, config))
+                registry, config, source=body.get("source") or None))
         except service.EditError as exc:
             return _err(str(exc), 422)
         except FileNotFoundError:
@@ -176,7 +182,7 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         try:
             return jsonify(service.generate_apply(
                 body.get("paths") or body.get("path"), body.get("spec") or {},
-                registry, config))
+                registry, config, source=body.get("source") or None))
         except service.EditError as exc:
             return _err(str(exc), 422)
         except FileNotFoundError:
@@ -253,7 +259,8 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         try:
             return jsonify(service.copy_files(
-                body.get("srcs", []), body.get("dst_dir"), registry, config))
+                body.get("srcs", []), body.get("dst_dir"), registry, config,
+                source=body.get("source") or None))
         except service.EditError as exc:
             return _err(str(exc), 422)
 
@@ -261,14 +268,16 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def unique_folder():
         body = request.get_json(force=True, silent=True) or {}
         try:
-            return jsonify(service.make_unique_in_folder(body.get("path"), registry, config))
+            return jsonify(service.make_unique_in_folder(
+                body.get("path"), registry, config, source=body.get("source") or None))
         except service.EditError as exc:
             return _err(str(exc), 422)
 
     @app.post("/api/unique/bulk")
     def unique_bulk():
         body = request.get_json(force=True, silent=True) or {}
-        return jsonify(service.make_unique_files(body.get("paths", []), registry, config))
+        return jsonify(service.make_unique_files(
+            body.get("paths", []), registry, config, source=body.get("source") or None))
 
     @app.post("/api/clean/bulk")
     def clean_bulk():

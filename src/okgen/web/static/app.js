@@ -50,9 +50,40 @@ async function api(path, opts) {
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
 }
+// ---- JSON source (SCAN / WMS) ----
+// Calgary JSON files come from two sources that send identical structure but a
+// different unique-key field, and nothing in the file says which. It's normally
+// read from a SCAN/WMS token in the folder/file name; when a folder carries no
+// token we ask ONCE and remember the answer here, per folder. Remembering it
+// against the FOLDER (rather than a mode/tab) is deliberate: there is no
+// "current source" to be in, so nothing can go stale and be silently wrong.
+const SRC_PREFIX = "okgen.source:";
+const dirOf = (p) => String(p || "").replace(/[\\/][^\\/]*$/, "");
+
+// The answer stored for this folder or the nearest labelled folder above it.
+function sourceFor(pathOrDir) {
+  let d = String(pathOrDir || "");
+  for (let i = 0; i < 64 && d; i++) {
+    const v = localStorage.getItem(SRC_PREFIX + d);
+    if (v) return v;
+    const up = d.replace(/[\\/][^\\/]*$/, "");
+    if (up === d) break;
+    d = up;
+  }
+  return null;
+}
+const rememberSource = (dir, src) => localStorage.setItem(SRC_PREFIX + dir, src);
+// Query-string / body fragment for a request about `path`.
+const srcParam = (path) => {
+  const s = sourceFor(path);
+  return s ? `&source=${encodeURIComponent(s)}` : "";
+};
+
 const getTree = (dir, signal) =>
-  api(`/api/tree?dir=${encodeURIComponent(dir)}`, signal ? { signal } : undefined);
-const getParse = (p) => api(`/api/parse?path=${encodeURIComponent(p)}`);
+  api(`/api/tree?dir=${encodeURIComponent(dir)}${srcParam(dir)}`,
+      signal ? { signal } : undefined);
+const getParse = (p) =>
+  api(`/api/parse?path=${encodeURIComponent(p)}${srcParam(dirOf(p))}`);
 const postJSON = (url, body) =>
   api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
@@ -215,7 +246,42 @@ async function openFolder(dir) {
   }
 }
 
+// Ask, ONCE per folder, whether its JSON files are SCAN or WMS — shown only
+// when the server couldn't tell from any name and no answer is stored yet.
+// Answering re-reads the folder so the keys shown are the right ones.
+function renderSourceAsk(tree) {
+  const box = $("#srcAsk");
+  if (!box) return;
+  box.innerHTML = "";
+  const info = tree && tree.json_source;
+  // Nothing to ask when the folder has no source-dependent JSON, or when a
+  // name/answer already settled it.
+  if (!info || info.resolved) { box.classList.add("hidden"); return; }
+  box.classList.remove("hidden");
+
+  const q = el("div", "src-ask-q", "Are these JSON files SCAN or WMS?");
+  const why = el("div", "src-ask-why",
+    `No SCAN or WMS in the folder or file names, so they're being read as ` +
+    `${info.source}. That decides which field is the unique key.`);
+  box.appendChild(q);
+  box.appendChild(why);
+  if (info.hint && info.hint.message) {
+    box.appendChild(el("div", "src-ask-hint", "⚠ " + info.hint.message));
+  }
+  const row = el("div", "src-ask-row");
+  (window.OKGEN_SOURCES || ["SCAN", "WMS"]).forEach((name) => {
+    const b = el("button", "src-btn", name);
+    b.addEventListener("click", () => {
+      rememberSource(tree.path, name);
+      openFolder(tree.path);           // reload with the answer applied
+    });
+    row.appendChild(b);
+  });
+  box.appendChild(row);
+}
+
 function renderTree(root) {
+  renderSourceAsk(root);
   const host = $("#tree");
   host.innerHTML = "";
   const ul = el("ul");
@@ -1346,7 +1412,20 @@ function renderForm(sec) {
       ? `${field.name}  ·  derived`
       : `${field.name}  ·  ${field.size != null ? field.size : "?"}ch`;
     if (color) { label.style.color = color; label.style.fontWeight = "700"; }  // configured field color
-    if (isKey) label.appendChild(el("span", "key-tag", "🔑 unique"));
+    if (isKey) {
+      label.appendChild(el("span", "key-tag", "🔑 unique"));
+      // For Calgary JSON the key field depends on where the file came from, so
+      // say which source was used and how it was decided — the passive
+      // confirmation that this really is the field Make Unique will renumber.
+      const js = state.view && state.view.json_source;
+      if (js) {
+        const tag = el("span", "src-tag", js.source);
+        tag.title = `source: ${js.source} (${js.reason})` +
+          (js.resolved ? "" : " — no SCAN/WMS found in the folder or file name");
+        if (!js.resolved) tag.classList.add("src-tag-assumed");
+        label.appendChild(tag);
+      }
+    }
     f.appendChild(label);
     f.appendChild(makeControl(sec, rec, field));
     grid.appendChild(f);
@@ -1621,7 +1700,8 @@ async function makeUniqueFolder(path) {
     return;
   }
   try {
-    const res = await postJSON("/api/unique/folder", { path });
+    const res = await postJSON("/api/unique/folder",
+                               { path, source: sourceFor(path) });
     await refreshFolder(path);
     const n = (res.rekeyed || []).filter((r) => r.to).length;
     setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
@@ -1640,7 +1720,8 @@ async function makeUniqueSelection() {
     return;
   }
   try {
-    const res = await postJSON("/api/unique/bulk", { paths });
+    const res = await postJSON("/api/unique/bulk",
+                               { paths, source: sourceFor(dirOf(paths[0])) });
     new Set(paths.map(folderOf)).forEach((f) => refreshFolder(f));
     const n = (res.folders || []).reduce((a, f) => a + (f.rekeyed || []).filter((r) => r.to).length, 0);
     setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
@@ -2068,7 +2149,8 @@ async function pasteInto(folder) {
   if (!state.clipboard.length) { setStatus("Clipboard empty", "err"); return; }
   if (!beginBusy("Pasting…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
-    const res = await postJSON("/api/file/copy-batch", { srcs: state.clipboard, dst_dir: folder });
+    const res = await postJSON("/api/file/copy-batch",
+      { srcs: state.clipboard, dst_dir: folder, source: sourceFor(folder) });
     await refreshFolder(folder);
     const c = res.copied.length, r = (res.renamed || []).length;
     const rk = (res.rekeyed || []).filter((x) => x.to).length, er = res.errors.length;
@@ -2258,7 +2340,8 @@ async function enterGenerateMode() {
 
   let scope;
   try {
-    scope = await postJSON("/api/generate/scope", { paths });
+    scope = await postJSON("/api/generate/scope",
+                           { paths, source: sourceFor(dirOf(paths[0])) });
   } catch (e) {
     panel.innerHTML = "";
     panel.appendChild(el("div", "bulk-note", "Could not read the source file(s): " + e.message));
@@ -2482,7 +2565,8 @@ function renderGeneratePanel(panel, paths, scope) {
     if (!spec.count) { results.innerHTML = ""; return; }
     let pv;
     try {
-      pv = await postJSON("/api/generate/preview", { paths, spec });
+      pv = await postJSON("/api/generate/preview",
+                          { paths, spec, source: sourceFor(dirOf(paths[0])) });
     } catch (e) {
       results.innerHTML = "";
       results.appendChild(el("div", "bulk-note", "Preview failed: " + e.message));
@@ -2571,7 +2655,8 @@ function renderGeneratePanel(panel, paths, scope) {
     }
     genBtn.disabled = true; topGen.disabled = true; cancelBtn.disabled = true;
     try {
-      const res = await postJSON("/api/generate/apply", { paths, spec });
+      const res = await postJSON("/api/generate/apply",
+                                 { paths, spec, source: sourceFor(dirOf(paths[0])) });
       setStatus(`Generated ${res.written} file(s)`, "ok");
       activityResult(`Generated ${res.written} files`, "ok");
       panelMessage(`Wrote ${res.written} file(s) into ${res.folder}`);

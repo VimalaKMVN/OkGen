@@ -1,0 +1,5 @@
+# SCAN/WMS source tokens for tests — mirrors production json_sources.yaml.
+sources:
+  SCAN: ["SCAN"]
+  WMS: ["WMS"]
+default: WMS

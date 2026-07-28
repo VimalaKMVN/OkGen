@@ -264,6 +264,29 @@ body {
   border: 1px solid #e0b000; border-radius: 3px; padding: 0 4px;
 }
 
+/* Which source (SCAN/WMS) decided this JSON file's key field. Muted when it
+   was read from a name, amber when it was only ASSUMED (nothing said so). */
+.src-tag {
+  margin-left: 4px; font-size: 9px; font-weight: 700; letter-spacing: .3px;
+  color: #6b7280; border: 1px solid #9ca3af; border-radius: 3px; padding: 0 4px;
+}
+.src-tag-assumed { color: #b45309; border-color: #f59e0b; border-style: dashed; }
+
+/* "Are these SCAN or WMS?" — asked once per unlabelled folder, above the tree */
+.src-ask {
+  margin: 0 0 6px; padding: 8px 10px; border-radius: 6px;
+  background: #fffbeb; border: 1px solid #f59e0b;
+}
+.src-ask-q { font-weight: 700; font-size: 12px; color: #92400e; }
+.src-ask-why { font-size: 11px; color: #78350f; margin-top: 3px; line-height: 1.35; }
+.src-ask-hint { font-size: 11px; color: #92400e; margin-top: 5px; font-weight: 600; }
+.src-ask-row { display: flex; gap: 6px; margin-top: 8px; }
+.src-btn {
+  flex: 1; padding: 4px 8px; font-size: 11px; font-weight: 700; cursor: pointer;
+  border: 1px solid #b45309; border-radius: 4px; background: #fff; color: #92400e;
+}
+.src-btn:hover { background: #fef3c7; }
+
 /* Repeating section table */
 .rec-table { overflow: auto; }
 table { border-collapse: collapse; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }

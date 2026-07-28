@@ -99,7 +99,9 @@ class Config:
         chains: Dict[str, ChainInfo],
         rules: List[dict],
         limits: Optional[Dict[str, Dict[str, int]]] = None,
-        unique_fields: Optional[Dict[str, str]] = None,
+        # {layout: field} for most layouts; {layout: {source: field}} for the
+        # Calgary JSON layouts (see unique_field / json_sources.yaml).
+        unique_fields: Optional[Dict[str, object]] = None,
         field_colors: Optional[Dict[str, str]] = None,
         section_counts: Optional[Dict[str, Dict[str, str]]] = None,
         nicelabel_path: Optional[str] = None,
@@ -117,7 +119,12 @@ class Config:
         derived_fields: Optional[Dict[str, list]] = None,
         isolated_chain_groups: Optional[List[set]] = None,
         tosca: Optional[dict] = None,
+        json_sources: Optional[Dict[str, List[str]]] = None,
+        json_source_default: Optional[str] = None,
     ):
+        # {source: [name tokens]} and the fallback source, for Calgary JSON.
+        self._json_sources = json_sources or {}
+        self._json_source_default = json_source_default or ""
         self._tosca = tosca or {}
         self._chains = chains
         # Calgary JSON files carry the chain as a code ("04") OR a name
@@ -364,11 +371,58 @@ class Config:
         return str(spec.get("default", ""))
 
     # ----- unique key field -----
-    def unique_field(self, layout: Optional[str]) -> Optional[str]:
-        """Field that must be unique within a folder for this layout, or None."""
+    def unique_field(self, layout: Optional[str],
+                     source: Optional[str] = None) -> Optional[str]:
+        """Field that must be unique within a folder for this layout, or None.
+
+        Most layouts map to a single field name and ``source`` is ignored. The
+        Calgary JSON layouts map to a ``{source: field}`` dict instead, because
+        SCAN and WMS send the same structure with a different identity field;
+        an unknown/missing ``source`` falls back to the configured default one.
+        """
         if layout is None:
             return None
-        return self._unique_fields.get(layout)
+        val = self._unique_fields.get(layout)
+        if isinstance(val, dict):
+            return val.get(source) or val.get(self._json_source_default)
+        return val
+
+    def unique_field_candidates(self, layout: Optional[str]) -> List[str]:
+        """Every field that is a key for this layout under ANY source.
+
+        More than one only for the source-dependent JSON layouts. Duplicate
+        detection compares all of them so a folder answered with the wrong
+        source still surfaces a collision instead of silently passing.
+        """
+        if layout is None:
+            return []
+        val = self._unique_fields.get(layout)
+        if isinstance(val, dict):
+            out = []
+            for f in val.values():        # dedupe, keep config order
+                if f and f not in out:
+                    out.append(f)
+            return out
+        return [val] if val else []
+
+    # ----- JSON source (SCAN / WMS) -----
+    @property
+    def json_sources(self) -> Dict[str, List[str]]:
+        """{source name: [name tokens]} used to resolve a JSON file's source."""
+        return dict(self._json_sources)
+
+    @property
+    def json_source_default(self) -> str:
+        """Source assumed when a name carries no token and none was chosen."""
+        return self._json_source_default
+
+    def source_dependent(self, layout: Optional[str]) -> bool:
+        """True when this layout's key actually differs between sources.
+
+        CalgaryCartonLabel maps to ``pickListId`` under both, so its source is
+        irrelevant and the UI shouldn't ask about a folder holding only those.
+        """
+        return len(self.unique_field_candidates(layout)) > 1
 
     # ----- record limits -----
     def max_records(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:
@@ -428,7 +482,24 @@ class Config:
         keys_path = cdir / "keys.yaml"
         if keys_path.is_file():
             data = yaml.safe_load(keys_path.read_text(encoding="utf-8")) or {}
-            unique_fields = {str(k): str(v) for k, v in (data.get("unique_fields") or {}).items()}
+            # A layout's key is either a plain field name (the 7 fixed-width /
+            # delimited layouts) OR a {source: field} map for the Calgary JSON
+            # layouts, whose identity field depends on where the file came
+            # from. Keep the mapping shape as authored — flattening it with
+            # str() would turn the dict into the string "{'SCAN': ...}".
+            unique_fields = {}
+            for k, v in (data.get("unique_fields") or {}).items():
+                unique_fields[str(k)] = ({str(s): str(f) for s, f in v.items()}
+                                         if isinstance(v, dict) else str(v))
+
+        json_sources: Dict[str, List[str]] = {}
+        json_source_default = ""
+        js_path = cdir / "json_sources.yaml"
+        if js_path.is_file():
+            data = yaml.safe_load(js_path.read_text(encoding="utf-8")) or {}
+            json_sources = {str(k): [str(w) for w in (v or [])]
+                            for k, v in (data.get("sources") or {}).items()}
+            json_source_default = str(data.get("default", "") or "")
 
         field_colors: Dict[str, str] = {}
         fc_path = cdir / "field_colors.yaml"
@@ -577,4 +648,5 @@ class Config:
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
                    nicelabel_warning, send_quips, send_done_quips, regions,
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
-                   trim_trailing, derived_fields, isolated_chain_groups, tosca)
+                   trim_trailing, derived_fields, isolated_chain_groups, tosca,
+                   json_sources, json_source_default)

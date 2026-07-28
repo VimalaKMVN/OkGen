@@ -16,6 +16,7 @@ from typing import Dict, List, NamedTuple, Optional
 
 from okgen.config import Config
 from okgen.detect import detect_from_header, detect_layout, read_chain, read_header_line
+from okgen.jsonsource import resolve_source
 from okgen.layout.registry import LayoutRegistry
 from okgen.okfile import ENCODING, OkFile, Record, new_record, parse_okfile
 
@@ -35,7 +36,8 @@ def _is_json_file(path: Path) -> bool:
 # --------------------------------------------------------------------------- #
 # File tree
 # --------------------------------------------------------------------------- #
-def build_tree(root, config: Config, registry=None) -> dict:
+def build_tree(root, config: Config, registry=None,
+               source: Optional[str] = None) -> dict:
     """List ONE level of a folder (lazy tree): immediate subfolders + .OK files.
 
     Subfolders are returned unexpanded (``children: None``) so the UI can fetch
@@ -63,7 +65,7 @@ def build_tree(root, config: Config, registry=None) -> dict:
         elif is_ok_file(entry):
             children.append(_file_node(entry, config, registry))
         elif _is_json_file(entry):
-            node = _file_node(entry, config, registry)
+            node = _file_node(entry, config, registry, source)
             if node.get("layout"):        # only list JSON that detects as a layout
                 children.append(node)
 
@@ -73,11 +75,45 @@ def build_tree(root, config: Config, registry=None) -> dict:
         "name": root.name or str(root),
         "path": str(root),
         "children": children,
+        # SCAN/WMS for this folder. Only present when it actually decides
+        # something — i.e. the folder holds JSON files of a layout whose key
+        # differs between sources. The client asks once when unresolved and
+        # sends the answer back as `source`.
+        "json_source": _folder_json_source(root, children, config, source),
     }
 
 
+def _folder_json_source(root: Path, children: List[dict], config: Config,
+                        source: Optional[str]) -> Optional[dict]:
+    """The folder's SCAN/WMS resolution, or None when it doesn't matter here.
+
+    A folder with no JSON files — or one holding only CalgaryCartonLabel, whose
+    key is ``pickListId`` under both sources — is never asked about.
+    """
+    layouts = {c.get("layout") for c in children if c.get("json")}
+    if not any(config.source_dependent(l) for l in layouts):
+        return None
+    # "_" has no suffix, so only the folder chain is examined, never a file
+    # name — and ancestors count, so a parent named SCAN covers its subfolders.
+    info = json_source_for(root / "_", config, source)
+    info["layouts"] = sorted(l for l in layouts if config.source_dependent(l))
+    # Only second-guess a source we ASSUMED. Once a name or the user has said
+    # so, trust it — a folder that keeps questioning a settled answer is noise.
+    info["hint"] = (None if info["resolved"] else _source_mismatch_hint(
+        children, {c.get("layout"): c.get("key_field") for c in children}))
+    return info
+
+
 def _flag_duplicate_keys(children: List[dict]) -> None:
-    """Mark files whose (layout, key_value) repeats within this folder."""
+    """Mark files whose (layout, key_value) repeats within this folder.
+
+    Only the RESOLVED key is compared, deliberately. Comparing every candidate
+    field as well would light up a warning on every file of a correct WMS
+    folder, because WMS ships a constant ``keytrol`` (``'0'`` on real carton
+    labels) that is not its identity and that Make Unique would never clear —
+    a permanent alarm nobody can silence. The wrong-source case is caught
+    instead by :func:`_source_mismatch_hint`, which says what to DO about it.
+    """
     counts: Dict[tuple, int] = {}
     for c in children:
         if c.get("type") == "file" and c.get("layout") and c.get("key_value") is not None:
@@ -86,6 +122,32 @@ def _flag_duplicate_keys(children: List[dict]) -> None:
     for c in children:
         if c.get("type") == "file" and c.get("layout") and c.get("key_value") is not None:
             c["duplicate"] = counts[(c["layout"], c["key_value"])] > 1
+
+
+def _source_mismatch_hint(children: List[dict], resolved_field_by_layout: dict):
+    """"These files share a <other key> — are they really SCAN?", or None.
+
+    The safety net for a folder whose source was ASSUMED (no SCAN/WMS token in
+    any name, no answer yet). If the key we are NOT using collides across files
+    while the one we are using doesn't, the assumption is probably wrong — the
+    files are likely from the other source, where that field IS the identity.
+    Advisory only: one folder-level line, never a per-file warning, and nothing
+    about how files are written.
+    """
+    by_field: Dict[tuple, int] = {}
+    for c in children:
+        if c.get("type") != "file" or not c.get("json"):
+            continue
+        for field, val in (c.get("key_values") or {}).items():
+            if field != resolved_field_by_layout.get(c.get("layout")) and val is not None:
+                by_field[(c["layout"], field, val)] = by_field.get((c["layout"], field, val), 0) + 1
+    dupes = {(lay, f) for (lay, f, _v), n in by_field.items() if n > 1}
+    if not dupes:
+        return None
+    lay, field = sorted(dupes)[0]
+    return {"field": field,
+            "message": (f"several files here share the same {field} — if these are "
+                        f"from the other source, set it so keys are checked correctly")}
 
 
 def _header_field(layout, name):
@@ -136,11 +198,39 @@ def _json_header(path: Path) -> dict:
     return data.get("header", {}) or {}
 
 
-def _file_node(path: Path, config: Config, registry=None) -> dict:
+def json_source_for(path, config: Config, override: Optional[str] = None,
+                    root=None) -> dict:
+    """Which source (SCAN/WMS) a JSON file came from — see :mod:`okgen.jsonsource`.
+
+    ``override`` is what the user answered for this folder, which the client
+    remembers and sends back; it beats any name-based match.
+    """
+    return resolve_source(path, config.json_sources, config.json_source_default,
+                          override, root).to_dict()
+
+
+def _unique_field_for(path, layout: Optional[str], config: Config,
+                      source: Optional[str] = None) -> Optional[str]:
+    """The key field for ONE file, resolving SCAN/WMS where it matters.
+
+    Only the Calgary JSON layouts key off the source; for every other layout
+    (and for CalgaryCartonLabel, whose key is ``pickListId`` either way) this is
+    exactly ``config.unique_field(layout)`` and no path walking happens.
+    """
+    if not config.source_dependent(layout):
+        return config.unique_field(layout)
+    return config.unique_field(
+        layout, resolve_source(path, config.json_sources,
+                               config.json_source_default, source).source)
+
+
+def _file_node(path: Path, config: Config, registry=None,
+               source: Optional[str] = None) -> dict:
     chain = ""
     layout = None
     key_field = None
     key_value = None
+    key_values: Dict[str, Optional[str]] = {}   # every candidate key (JSON only)
     is_json = False
     try:
         det = detect_layout(path)          # handles .OK (positional) and .json (data.type)
@@ -151,10 +241,16 @@ def _file_node(path: Path, config: Config, registry=None) -> dict:
             is_json = True
             header = _json_header(path)
             chain = (header.get("chain") or "").strip()
-            key_field = config.unique_field(layout)
+            key_field = _unique_field_for(path, layout, config, source)
             if key_field:
                 v = header.get(key_field)
                 key_value = None if v is None else str(v).strip()
+            # Every field that is a key under ANY source, so duplicate detection
+            # can flag a collision even if this folder's source was answered
+            # wrong (see _flag_duplicate_keys).
+            for cand in config.unique_field_candidates(layout):
+                cv = header.get(cand)
+                key_values[cand] = None if cv is None else str(cv).strip()
         else:
             header = read_header_line(path)
             delimited = bool(reg_layout is not None and getattr(reg_layout, "delimited", False))
@@ -181,6 +277,7 @@ def _file_node(path: Path, config: Config, registry=None) -> dict:
         "json": is_json,
         "key_field": key_field,
         "key_value": key_value,
+        "key_values": key_values,
         "duplicate": False,
     }
 
@@ -188,14 +285,17 @@ def _file_node(path: Path, config: Config, registry=None) -> dict:
 # --------------------------------------------------------------------------- #
 # Parse a file into an editor view
 # --------------------------------------------------------------------------- #
-def parse_file_view(path, registry: LayoutRegistry, config: Config) -> dict:
+def parse_file_view(path, registry: LayoutRegistry, config: Config,
+                    source: Optional[str] = None) -> dict:
     """The editor view of a file **as it is on disk**."""
     path = Path(path)
     okf = parse_okfile(path, registry=registry)
-    return _build_file_view(okf, path, config, disk_bytes=path.read_bytes())
+    return _build_file_view(okf, path, config, disk_bytes=path.read_bytes(),
+                            source=source)
 
 
-def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None) -> dict:
+def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None,
+                     source: Optional[str] = None) -> dict:
     """Render the editor view for a parsed file.
 
     ``disk_bytes`` is the on-disk content when the view reflects a saved file.
@@ -330,7 +430,13 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
         # never touched, so the editor already shows the clean result.
         "blank_lines_removed": getattr(okf, "blank_lines_removed", 0),
         "lines_space_trimmed": getattr(okf, "lines_space_trimmed", 0),
-        "key_field": config.unique_field(layout_name),  # unique field for this layout
+        # Unique field for this layout — SCAN/WMS resolved for the JSON layouts.
+        "key_field": _unique_field_for(path, layout_name, config, source),
+        # How that was decided, so the editor can show "key: keytrol (SCAN)"
+        # and ask once when a folder carries no SCAN/WMS token. None when the
+        # layout's key doesn't depend on the source.
+        "json_source": (json_source_for(path, config, source)
+                        if config.source_dependent(layout_name) else None),
         "raw_text": raw_text,  # for the Raw verify tab
         "sections": sections_out,
     }
@@ -1203,7 +1309,8 @@ def _unique_path(dst_dir: Path, name: str) -> Path:
     return candidate
 
 
-def copy_files(srcs, dst_dir, registry=None, config=None) -> dict:
+def copy_files(srcs, dst_dir, registry=None, config=None,
+               source: Optional[str] = None) -> dict:
     """Paste .OK files and/or whole folders into a folder.
 
     Files are copied; folders are copied recursively with all their contents.
@@ -1242,7 +1349,7 @@ def copy_files(srcs, dst_dir, registry=None, config=None) -> dict:
 
     rekeyed = []
     if registry is not None and config is not None and new_ok_files:
-        rekeyed = _uniquify_new_files(dd, new_ok_files, registry, config)
+        rekeyed = _uniquify_new_files(dd, new_ok_files, registry, config, source)
     return {"copied": copied, "renamed": renamed, "rekeyed": rekeyed, "errors": errors}
 
 
@@ -1308,7 +1415,7 @@ def _format_key(prefix: str, value: int, size: int, suffix: str = "",
     return prefix + body.zfill(pad) + suffix
 
 
-def _read_key_int(path: Path, registry, config):
+def _read_key_int(path: Path, registry, config, source: Optional[str] = None):
     """(layout, key_field, int_value | None, KeyParts) for a file's unique key."""
     try:
         layout = detect_layout(path).layout        # .OK (positional) or .json (data.type)
@@ -1316,7 +1423,7 @@ def _read_key_int(path: Path, registry, config):
         return (None, None, None, KeyParts("", None, "", 0))
     if not layout:
         return (None, None, None, KeyParts("", None, "", 0))
-    kf = config.unique_field(layout)
+    kf = _unique_field_for(path, layout, config, source)
     if not kf:
         return (layout, None, None, KeyParts("", None, "", 0))
     reg_layout = registry.get(layout)
@@ -1358,7 +1465,8 @@ def _set_key(path: Path, registry, key_field: str, new_int: int, size: int, back
     return new_str
 
 
-def _folder_key_state(folder: Path, registry, config, exclude: set):
+def _folder_key_state(folder: Path, registry, config, exclude: set,
+                      source: Optional[str] = None):
     """Per (layout, key-prefix) (used-int-set, max-int) from a folder's OK files.
 
     Keyed by prefix as well as layout so a literal prefix like ``C:`` gets its
@@ -1369,7 +1477,7 @@ def _folder_key_state(folder: Path, registry, config, exclude: set):
     for entry in folder.iterdir():
         if not (is_ok_file(entry) or _is_json_file(entry)) or entry.resolve() in exclude:
             continue
-        layout, kf, val, parts = _read_key_int(entry, registry, config)
+        layout, kf, val, parts = _read_key_int(entry, registry, config, source)
         if layout and kf and val is not None:
             space = (layout,) + parts.space
             used.setdefault(space, set()).add(val)
@@ -1377,12 +1485,14 @@ def _folder_key_state(folder: Path, registry, config, exclude: set):
     return used, maxv
 
 
-def _uniquify_new_files(folder: Path, new_files: List[Path], registry, config) -> List[dict]:
+def _uniquify_new_files(folder: Path, new_files: List[Path], registry, config,
+                        source: Optional[str] = None) -> List[dict]:
     """Re-key pasted files that collide with existing/earlier keys (max+1)."""
-    used, maxv = _folder_key_state(folder, registry, config, {p.resolve() for p in new_files})
+    used, maxv = _folder_key_state(folder, registry, config,
+                                   {p.resolve() for p in new_files}, source)
     rekeyed = []
     for p in new_files:
-        layout, kf, val, parts = _read_key_int(p, registry, config)
+        layout, kf, val, parts = _read_key_int(p, registry, config, source)
         if not (layout and kf):
             continue
         space = (layout,) + parts.space
@@ -1407,7 +1517,8 @@ def _uniquify_new_files(folder: Path, new_files: List[Path], registry, config) -
     return rekeyed
 
 
-def make_unique_in_folder(folder, registry, config, backup=True) -> dict:
+def make_unique_in_folder(folder, registry, config, backup=True,
+                          source: Optional[str] = None) -> dict:
     """Fix duplicate keys in a folder (keep first occurrence, re-key the rest)."""
     folder = Path(folder)
     if not folder.is_dir():
@@ -1418,7 +1529,7 @@ def make_unique_in_folder(folder, registry, config, backup=True) -> dict:
     maxv: Dict[tuple, int] = {}
     rekeyed = []
     for p in files:
-        layout, kf, val, parts = _read_key_int(p, registry, config)
+        layout, kf, val, parts = _read_key_int(p, registry, config, source)
         if not (layout and kf):
             continue
         space = (layout,) + parts.space
@@ -1444,7 +1555,8 @@ def make_unique_in_folder(folder, registry, config, backup=True) -> dict:
     return {"folder": str(folder), "rekeyed": rekeyed}
 
 
-def make_unique_files(paths, registry, config, backup=True) -> dict:
+def make_unique_files(paths, registry, config, backup=True,
+                      source: Optional[str] = None) -> dict:
     """Run Make Unique on every folder that contains a selected file."""
     folders = []
     seen = set()
@@ -1454,7 +1566,8 @@ def make_unique_files(paths, registry, config, backup=True) -> dict:
         if key not in seen:
             seen.add(key)
             folders.append(parent)
-    results = [make_unique_in_folder(f, registry, config, backup=backup) for f in folders]
+    results = [make_unique_in_folder(f, registry, config, backup=backup, source=source)
+               for f in folders]
     return {"folders": results}
 
 
@@ -2164,7 +2277,8 @@ def _templates_layout(paths: List[Path], registry, config):
     return layouts[0]
 
 
-def generate_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
+def generate_scope(paths, registry: LayoutRegistry, config: Config,
+                   source: Optional[str] = None) -> dict:
     """What can be varied when generating volume files from one OR MORE templates.
 
     With several templates each generated file draws its base record from a
@@ -2180,9 +2294,9 @@ def generate_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
         raise FileNotFoundError("no template selected")
     layout_name = _templates_layout(tpaths, registry, config)
     sp = tpaths[0]
-    view = parse_file_view(sp, registry, config)
+    view = parse_file_view(sp, registry, config, source)
     layout = registry.get(layout_name)
-    key_field = config.unique_field(layout_name)
+    key_field = _unique_field_for(sp, layout_name, config, source)
     locked = config.readonly_fields(layout_name) | config.hidden_fields(layout_name)
 
     def numeric_fields(fields):
@@ -2381,7 +2495,7 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
 
 
 def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder=None,
-                    write: bool = False):
+                    write: bool = False, source: Optional[str] = None):
     """Build ``count`` generated files from ONE OR MORE templates. Yields
     (filename, okf, notes) per file.
 
@@ -2392,12 +2506,12 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
     tpaths = _as_paths(paths)
     layout_name = _templates_layout(tpaths, registry, config)
     layout = registry.get(layout_name)
-    key_field = config.unique_field(layout_name)
+    key_field = _unique_field_for(tpaths[0], layout_name, config, source)
     key_size = getattr(_header_field(layout, key_field), "size", None)
 
     # Each template's key parts (prefix/suffix) — a generated file inherits its
     # picked template's, and keys are numbered per (layout, prefix, suffix) space.
-    key_parts_by_path = {p: _read_key_int(p, registry, config)[3] for p in tpaths}
+    key_parts_by_path = {p: _read_key_int(p, registry, config, source)[3] for p in tpaths}
 
     # Start keys above anything already used near the templates — each template's
     # source folder AND its immediate subfolders (earlier batches live in
@@ -2412,7 +2526,7 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
     for folder in scan_dirs:
         if not folder.is_dir():
             continue
-        _u, m = _folder_key_state(folder, registry, config, set())
+        _u, m = _folder_key_state(folder, registry, config, set(), source)
         for key, hi in m.items():
             maxv[key] = max(maxv.get(key, -1), hi)
     next_key: Dict[tuple, int] = {}     # (layout, prefix, suffix) -> next int
@@ -2452,7 +2566,7 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
 
 
 def generate_preview(paths, spec, registry: LayoutRegistry, config: Config,
-                     sample: int = 5) -> dict:
+                     sample: int = 5, source: Optional[str] = None) -> dict:
     """Build the first few files IN MEMORY so the user can check names/values."""
     count = int(spec.get("count") or 0)
     if count < 1:
@@ -2464,7 +2578,8 @@ def generate_preview(paths, spec, registry: LayoutRegistry, config: Config,
     layout_name = _templates_layout(tpaths, registry, config)
     rows = []
     for name, okf, note in _generate_batch(tpaths, spec, registry, config,
-                                           min(sample, count), write=False):
+                                           min(sample, count), write=False,
+                                           source=source):
         header = okf.records[0] if okf.records else None
         shown = {}
         for hf in spec.get("header_fields") or []:
@@ -2484,7 +2599,8 @@ def generate_preview(paths, spec, registry: LayoutRegistry, config: Config,
     }
 
 
-def generate_apply(paths, spec, registry: LayoutRegistry, config: Config) -> dict:
+def generate_apply(paths, spec, registry: LayoutRegistry, config: Config,
+                   source: Optional[str] = None) -> dict:
     """Write ``count`` generated files into a fresh folder, drawing each file's
     base record from a random one of the templates. All-or-nothing on
     validation: the spec is checked by building the first file before any IO."""
@@ -2501,14 +2617,16 @@ def generate_apply(paths, spec, registry: LayoutRegistry, config: Config) -> dic
         if not p.is_file():
             raise FileNotFoundError(f"not found: {p}")
     layout_name = _templates_layout(tpaths, registry, config)
-    next(_generate_batch(tpaths, spec, registry, config, 1, write=False))   # validate
+    next(_generate_batch(tpaths, spec, registry, config, 1, write=False,
+                         source=source))                                   # validate
 
     folder = _generate_folder(tpaths, count, layout_name, spec.get("dest"))
     folder.mkdir(parents=True, exist_ok=True)
 
     written, errors = [], []
     for name, _okf, note in _generate_batch(tpaths, spec, registry, config, count,
-                                            dest_folder=folder, write=True):
+                                            dest_folder=folder, write=True,
+                                            source=source):
         written.append({"name": name, "key": note["key"]})
     return {
         "folder": str(folder),

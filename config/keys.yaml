@@ -10,6 +10,16 @@ unique_fields:
   EUPreticket: po
   EUStyleHeader: keytrol
   EUCartonLabel: keytrol
-  CalgaryStyleHeader: headerASNid
-  CalgaryDistLabel: headerASNid
-  CalgaryCartonLabel: pickListId
+  # Calgary JSON layouts arrive from two sources — SCAN and WMS — with
+  # identical structure but a different identity field. Which one applies is
+  # resolved per folder from the file/folder name (see json_sources.yaml).
+  # CartonLabel uses pickListId either way, so its source doesn't matter.
+  CalgaryStyleHeader:
+    SCAN: keytrol
+    WMS: headerASNid
+  CalgaryDistLabel:
+    SCAN: keytrol
+    WMS: headerASNid
+  CalgaryCartonLabel:
+    SCAN: pickListId
+    WMS: pickListId

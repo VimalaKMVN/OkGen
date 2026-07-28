@@ -93,7 +93,16 @@ function install() {
     addEventListener(ev, fn) { if (ev === "error" || ev === "unhandledrejection") errors.push(fn); },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
   };
-  global.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  // A REAL in-memory store, not a no-op: anything the app remembers across
+  // calls (the per-folder SCAN/WMS answer, toggles) can't be tested if reads
+  // always come back null.
+  const store = new Map();
+  global.localStorage = {
+    getItem: (k) => (store.has(String(k)) ? store.get(String(k)) : null),
+    setItem: (k, v) => store.set(String(k), String(v)),
+    removeItem: (k) => store.delete(String(k)),
+    clear: () => store.clear(),
+  };
   global.Option = function (label, value) { const o = mkEl("option"); o.textContent = label; o.value = value; return o; };
   global.fetch = async () => ({ ok: true, json: async () => ({}) });
   global.setTimeout = global.setTimeout; global.clearTimeout = global.clearTimeout;
