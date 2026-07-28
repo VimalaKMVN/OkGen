@@ -460,3 +460,73 @@ def test_the_document_type_stays_locked_everywhere(tmp_path, registry, config):
                           scope["header_fields"]["CalgaryStyleHeader"]]
     gen = service.generate_scope(paths, registry, config)
     assert "type" not in [f["name"] for f in gen["header_fields"]]
+
+
+# --------------------------------------------------------------------------- #
+# The seven .OK layouts must be undisturbed by all of the above
+# --------------------------------------------------------------------------- #
+OK_LAYOUTS = ["StyleHeader", "Preticket", "CartonLabel", "DistLabels",
+              "EUPreticket", "EUStyleHeader", "EUCartonLabel"]
+
+
+@pytest.mark.parametrize("layout", OK_LAYOUTS)
+def test_ok_layouts_still_serialize_idempotently(tmp_path, registry, config, layout):
+    """The D26 guarantee, unchanged by the JSON work.
+
+    NOT byte-identity with the source file: opening normalizes junk (blank
+    lines, padding after the terminator), so several reference samples
+    legitimately differ on the first save. What must hold is that the result is
+    STABLE — serialize, re-parse, serialize again, and the bytes match — and
+    that every field value survives.
+    """
+    from okgen.okfile import parse_okfile
+    src = DATA_DIR / f"{layout}.OK"
+    if not src.is_file():
+        pytest.skip(f"no {layout}.OK sample")
+
+    once = parse_okfile(src, registry=registry)
+    first = once.to_bytes()
+    settled = tmp_path / src.name
+    settled.write_bytes(first)
+    assert parse_okfile(settled, registry=registry).to_bytes() == first
+
+    # every field of every record reads back identically
+    before = [r.values() for r in once.records]
+    after = [r.values() for r in parse_okfile(settled, registry=registry).records]
+    assert before == after
+
+
+@pytest.mark.parametrize("layout", ["EUPreticket", "EUStyleHeader", "EUCartonLabel"])
+def test_generate_will_not_randomize_an_isolated_chain(tmp_path, registry, config,
+                                                       layout):
+    """Europe (chain 05) is isolation-locked, so its `chain` is read-only in the
+    editor and rejected on save (D9).
+
+    Volume Generate used to offer it anyway and wrote straight through
+    `Record.set`, bypassing that check — generating EU files with chains like
+    28/07/82. Detection keys on the BOM + marker rather than the chain, so
+    `_assert_layout_stable` never caught it and the files looked fine.
+    """
+    src = DATA_DIR / f"{layout}.OK"
+    if not src.is_file():
+        pytest.skip(f"no {layout}.OK sample")
+    p = tmp_path / f"{layout}.OK"
+    p.write_bytes(src.read_bytes())
+
+    scope = service.generate_scope([str(p)], registry, config)
+    assert "chain" not in [f["name"] for f in scope["header_fields"]], \
+        "an isolation-locked chain must not be offered for randomizing"
+
+
+@pytest.mark.parametrize("layout", ["StyleHeader", "Preticket", "CartonLabel",
+                                    "DistLabels"])
+def test_a_freely_changeable_chain_is_still_offered(tmp_path, registry, config,
+                                                    layout):
+    """The NA banners are interchangeable, so nothing should have narrowed."""
+    src = DATA_DIR / f"{layout}.OK"
+    if not src.is_file():
+        pytest.skip(f"no {layout}.OK sample")
+    p = tmp_path / f"{layout}.OK"
+    p.write_bytes(src.read_bytes())
+    scope = service.generate_scope([str(p)], registry, config)
+    assert "chain" in [f["name"] for f in scope["header_fields"]]
