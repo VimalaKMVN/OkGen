@@ -85,7 +85,11 @@ function install() {
       return mkEl();
     },
     querySelectorAll: () => [],
-    addEventListener() {}, body: mkEl(), documentElement: mkEl(),
+    // Both halves are needed: a modal registers a document-level key handler
+    // and REMOVES it when it closes, so a stub without the remover throws the
+    // moment a dialog is driven to completion.
+    addEventListener() {}, removeEventListener() {},
+    body: mkEl(), documentElement: mkEl(),
   };
   const errors = [];
   global.document = doc;

@@ -11,6 +11,8 @@ import os
 import random
 import re
 import shutil
+import threading
+import uuid
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
@@ -253,9 +255,10 @@ def _editable_file(path: Path) -> bool:
     file OR a Calgary ``.json`` file.
 
     Copy, paste, delete and rename used to test ``is_ok_file`` alone, which
-    silently excluded every JSON file. Send to NiceLabel keeps the stricter
-    ``.OK`` test on purpose: that hand-off works differently for JSON and is
-    specified separately.
+    silently excluded every JSON file. Send to NiceLabel still tests the two
+    kinds separately — not because JSON is excluded, but because the hand-offs
+    differ: ``.OK`` is copied to a hot folder, ``.json`` is POSTed to an
+    endpoint (``_send_mode`` / ``okgen.nicelabel_post``).
     """
     return is_ok_file(path) or _is_json_file(path)
 
@@ -1332,8 +1335,54 @@ def run_tosca_script(paths, script, registry, config: Config) -> dict:
         raise EditError(str(exc))
 
 
+def _send_mode(paths) -> str:
+    """Which NiceLabel hand-off a selection wants: 'copy' (.OK) or 'post' (JSON).
+
+    'post' ONLY when every selected file is a ``.json``. Anything else — all
+    ``.OK``, or a mix — stays on the original hot-folder copy, which reports a
+    non-``.OK`` file as a per-file error exactly as it always has. The JSON
+    hand-off is strictly additive: it never changes what a selection containing
+    an ``.OK`` file does.
+    """
+    paths = list(paths or [])
+    all_json = bool(paths) and all(Path(p).suffix.lower() == ".json" for p in paths)
+    return "post" if all_json else "copy"
+
+
+def send_scope(paths, config: Config) -> dict:
+    """What a Send would do with this selection — for the confirmation dialog.
+
+    Returns the mode, a human destination, the warning to show and (for JSON)
+    whether the endpoint is configured at all, so the UI can say what to fix
+    instead of letting the user confirm a send that cannot run.
+    """
+    from okgen import nicelabel_post as nlp
+
+    mode = _send_mode(paths)
+    if mode == "copy":
+        dest = config.nicelabel_path() or ""
+        return {"mode": "copy", "count": len(paths or []), "configured": bool(dest),
+                "destination": dest, "warning": config.nicelabel_warning(),
+                "error": "" if dest else
+                         "NiceLabel path is not configured (config/nicelabel.yaml)"}
+    info = nlp.describe(config.nicelabel_post())
+    return {"mode": "post", "count": len(paths or []),
+            "configured": info.get("configured", False),
+            "destination": info.get("endpoint", ""),
+            "folder": info.get("folder", ""),
+            "username": info.get("username", ""),
+            "warning": info.get("warning", ""),
+            "error": info.get("error", "")}
+
+
 def send_to_nicelabel(paths, config: Config) -> dict:
-    """Copy selected .OK files into NiceLabel's incoming folder (overwriting)."""
+    """Copy selected .OK files into NiceLabel's incoming folder (overwriting).
+
+    Deliberately UNCHANGED by the JSON POST hand-off (D31): an all-``.json``
+    selection is routed to ``start_send_job`` by the caller, but anything that
+    reaches here behaves exactly as it always did, down to reporting a
+    non-``.OK`` file as a per-file error rather than refusing the batch.
+    """
     dest = config.nicelabel_path()
     if not dest:
         raise EditError("NiceLabel path is not configured (config/nicelabel.yaml)")
@@ -1352,6 +1401,93 @@ def send_to_nicelabel(paths, config: Config) -> dict:
         except OSError as exc:
             errors.append({"path": str(path), "error": str(exc)})
     return {"sent": sent, "errors": errors, "dest": str(dd)}
+
+
+# --------------------------------------------------------------------------- #
+# Send jobs (JSON POST runs in the background)
+# --------------------------------------------------------------------------- #
+# Posting 500 files one request at a time takes minutes — far longer than a
+# browser or a corporate proxy will hold a request open — so the run happens on
+# a worker thread and the client polls for live counters.
+
+_SEND_JOBS: Dict[str, dict] = {}
+_SEND_JOBS_LOCK = threading.Lock()
+_SEND_JOBS_KEEP = 20        # finished jobs retained, newest first
+
+
+def _job_update(job_id: str, **fields) -> None:
+    with _SEND_JOBS_LOCK:
+        job = _SEND_JOBS.get(job_id)
+        if job is not None:
+            job.update(fields)
+
+
+def _prune_jobs() -> None:
+    """Keep the most recent finished jobs; running ones are never dropped."""
+    finished = sorted((j["seq"], jid) for jid, j in _SEND_JOBS.items()
+                      if j["state"] != "running")
+    for _, jid in finished[:max(0, len(finished) - _SEND_JOBS_KEEP)]:
+        _SEND_JOBS.pop(jid, None)
+
+
+def start_send_job(paths, config: Config) -> dict:
+    """Validate the JSON send, start it on a worker thread, return a job handle.
+
+    Configuration problems (no endpoint, missing staging folder) are raised
+    HERE, synchronously, so the user is told immediately instead of having to
+    poll a job that was doomed before it started.
+    """
+    from okgen import nicelabel_post as nlp
+
+    if _send_mode(paths) != "post":
+        raise EditError(
+            "The POST hand-off takes .json files only — a selection holding an "
+            ".OK file is copied to the NiceLabel hot folder instead.")
+    paths = [str(p) for p in (paths or [])]
+    try:
+        settings = nlp.settings_from(config.nicelabel_post())
+        if not Path(settings.json_folder).is_dir():
+            raise nlp.PostError(
+                f"json_folder not found or unreachable: {settings.json_folder}")
+    except nlp.PostError as exc:
+        raise EditError(str(exc))
+
+    job_id = uuid.uuid4().hex
+    with _SEND_JOBS_LOCK:
+        _SEND_JOBS[job_id] = {
+            "id": job_id, "seq": len(_SEND_JOBS), "state": "running", "mode": "post",
+            "total": len(paths), "done": 0, "posted": 0, "failed": 0, "skipped": 0,
+            "result": None, "error": "",
+        }
+        _prune_jobs()
+
+    raw = config.nicelabel_post()
+
+    def worker():
+        try:
+            res = nlp.run(paths, raw,
+                          progress=lambda p: _job_update(job_id, **p))
+            _job_update(job_id, state="done", result=res)
+        except nlp.PostError as exc:
+            _job_update(job_id, state="error", error=str(exc))
+        except Exception as exc:                # pragma: no cover - safety net
+            _job_update(job_id, state="error",
+                        error=f"unexpected failure during send: {exc}")
+
+    threading.Thread(target=worker, name=f"okgen-send-{job_id[:8]}",
+                     daemon=True).start()
+    return {"job": job_id, "mode": "post", "total": len(paths),
+            "endpoint": nlp.redact_url(settings.endpoint_url),
+            "folder": settings.json_folder}
+
+
+def send_job_status(job_id: str) -> dict:
+    """Live counters for a send job; the full report once it finishes."""
+    with _SEND_JOBS_LOCK:
+        job = _SEND_JOBS.get(str(job_id))
+        if job is None:
+            raise EditError("that send job is unknown (it may have finished long ago)")
+        return dict(job)
 
 
 def delete_files(paths) -> dict:

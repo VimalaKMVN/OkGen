@@ -1682,7 +1682,7 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Bulk Rename (${count})…` : "Bulk Rename…", () => enterRenameMode());
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   add(count > 1 ? `🧹  Clean up ${count} files` : "🧹  Clean up file", () => cleanUpSelection());
-  add(count > 1 ? `🏷️  Send ${count} to NiceLabel` : "🏷️  Send to NiceLabel", () => sendToNiceLabel());
+  add(sendMenuLabel(count), () => sendToNiceLabel());
   add(count > 1 ? `▶  Run TOSCA Script (${count})` : "▶  Run TOSCA Script", () => runTosca());
   menu.appendChild(el("div", "ctx-sep"));
   add("Rename…", () => renameFile(node), count > 1);
@@ -1825,19 +1825,45 @@ async function cleanUpSelection() {
 // ---- Send to NiceLabel ----
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The two hand-offs read differently in the menu: .OK files are COPIED to the
+// watched hot folder, .json files are POSTed to an endpoint. A mixed selection
+// keeps the generic wording — the server refuses it and says why.
+function sendMenuLabel(count) {
+  const paths = [...state.selection];
+  const allJson = paths.length > 0 && paths.every((p) => /\.json$/i.test(p));
+  const verb = allJson ? "POST" : "Send";
+  const icon = allJson ? "📤" : "🏷️";
+  return count > 1 ? `${icon}  ${verb} ${count} to NiceLabel`
+                   : `${icon}  ${verb} to NiceLabel`;
+}
+
 // Custom confirm modal for Send: yellow warning + a guard checkbox that must
 // be ticked before the Send button enables. Resolves true (send) / false.
-function confirmSend(count, dest, warn) {
+//
+// `scope` comes from /api/send/scope and says which hand-off this selection
+// gets — .OK files are COPIED to the watched hot folder, .json files are POSTed
+// to an endpoint — so the dialog can name the real destination either way.
+function confirmSend(scope) {
+  const count = scope.count;
+  const post = scope.mode === "post";
   return new Promise((resolve) => {
     const ov = el("div", "modal-overlay");
     const card = el("div", "modal-card");
-    card.appendChild(el("h3", "modal-title", `Send ${count} file(s) to NiceLabel?`));
-    if (dest) card.appendChild(el("div", "modal-dest", dest));
+    card.appendChild(el("h3", "modal-title", post
+      ? `POST ${count} JSON file(s) to NiceLabel?`
+      : `Send ${count} file(s) to NiceLabel?`));
+    if (scope.destination) card.appendChild(el("div", "modal-dest", scope.destination));
+    if (post) {
+      const bits = [];
+      if (scope.username) bits.push(`as ${scope.username}`);
+      if (scope.folder) bits.push(`staged in ${scope.folder}`);
+      if (bits.length) card.appendChild(el("div", "modal-sub", bits.join(" · ")));
+    }
 
-    if (warn) {
+    if (scope.warning) {
       const box = el("div", "modal-warn");
       box.appendChild(el("span", "modal-warn-icon", "⚠"));
-      box.appendChild(el("span", "modal-warn-text", warn));
+      box.appendChild(el("span", "modal-warn-text", scope.warning));
       card.appendChild(box);
     }
 
@@ -1845,7 +1871,9 @@ function confirmSend(count, dest, warn) {
     const cb = el("input");
     cb.type = "checkbox";
     check.appendChild(cb);
-    check.appendChild(el("span", null, "I've confirmed the correct NiceLabel trigger(s) are running."));
+    check.appendChild(el("span", null, post
+      ? "I've confirmed this is the right endpoint, and these files are ready to go live."
+      : "I've confirmed the correct NiceLabel trigger(s) are running."));
     card.appendChild(check);
 
     const acts = el("div", "modal-actions");
@@ -1878,12 +1906,71 @@ function confirmSend(count, dest, warn) {
   });
 }
 
+// Poll a background POST run until it finishes, keeping the animation's
+// subtitle on the live counters. A 500-file run takes minutes, far longer than
+// a browser or corporate proxy will hold one request open — hence the job.
+async function followSendJob(jobId, total) {
+  for (;;) {
+    const st = await api(`/api/send/status/${encodeURIComponent(jobId)}`);
+    if (st.state === "running") {
+      updateSendProgress(st.done, st.total || total, st.posted, st.failed);
+      await delay(700);
+      continue;
+    }
+    if (st.state === "error") throw new Error(st.error || "the send failed");
+    return st.result;
+  }
+}
+
+// The JSON hand-off: confirm against the real endpoint, then run the POST as a
+// background job and poll it. Kept SEPARATE from the .OK path below so that one
+// stays exactly the code it has always been.
+async function sendJsonToNiceLabel(paths) {
+  let scope;
+  try {
+    scope = await postJSON("/api/send/scope", { paths });
+  } catch (e) {
+    setStatus("Send: " + e.message, "err");
+    return;
+  }
+  if (!scope.configured) {
+    setStatus("Send is not configured — " + (scope.error || "check config/"), "err");
+    return;
+  }
+  if (!(await confirmSend(scope))) return;
+  // overlay:false — Send has its own copy animation; don't stack the generic one.
+  if (!beginBusy("Posting to NiceLabel…", false)) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+
+  showCopyAnimation(paths.length, scope.destination, true);
+  const minOnScreen = delay(2000);   // keep the animation up long enough to register
+  try {
+    const handle = await postJSON("/api/send/start", { paths });
+    const res = await followSendJob(handle.job, paths.length);
+    await minOnScreen;
+    finishCopyAnimation(res);
+    const s = res.sent.length, er = res.errors.length;
+    setStatus(`Posted ${s} of ${paths.length} file(s) to NiceLabel` + (er ? `, ${er} failed` : ""),
+              er ? "err" : "ok");
+  } catch (e) {
+    await minOnScreen;
+    hideCopyAnimation();
+    setStatus("Send failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
+}
+
 async function sendToNiceLabel() {
   const paths = [...state.selection];
   if (!paths.length) return;
+  // Only an ALL-.json selection takes the POST route. Anything else — all .OK,
+  // or a mix — runs the original hot-folder copy below, unchanged.
+  if (paths.every((p) => /\.json$/i.test(p))) return sendJsonToNiceLabel(paths);
+
   const dest = window.OKGEN_NICELABEL || "the NiceLabel folder";
   const warn = window.OKGEN_NICELABEL_WARNING || "";
-  if (!(await confirmSend(paths.length, dest, warn))) return;
+  if (!(await confirmSend({ mode: "copy", count: paths.length,
+                            destination: dest, warning: warn }))) return;
   // overlay:false — Send has its own copy animation; don't stack the generic one.
   if (!beginBusy("Sending to NiceLabel…", false)) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
 
@@ -2080,7 +2167,7 @@ const SEND_DONE_QUIPS = (Array.isArray(window.OKGEN_SEND_DONE_QUIPS) && window.O
 let sendQuipTimer = null;
 const _pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
-function showCopyAnimation(n, dest) {
+function showCopyAnimation(n, dest, post) {
   hideCopyAnimation();
   const scene = _pick(SEND_SCENES);
   const overlay = el("div", "send-overlay");
@@ -2089,8 +2176,9 @@ function showCopyAnimation(n, dest) {
   overlay.innerHTML = `
     <div class="send-card">
       <div class="send-scene ${scene.cls}">${scene.html}</div>
-      <div class="send-title">Sending ${n} file(s) to NiceLabel…</div>
-      <div class="send-quip"></div>
+      <div class="send-title">${post ? "Posting" : "Sending"} ${n} file(s) to NiceLabel…</div>
+      <div class="send-quip"></div>${post ? `
+      <div class="send-progress">0 of ${n}</div>` : ""}
       <div class="send-sub">${safeDest}</div>
     </div>`;
   document.body.appendChild(overlay);
@@ -2112,22 +2200,66 @@ function showCopyAnimation(n, dest) {
   sendQuipTimer = setInterval(tick, 1300);
 }
 
+// Live counters while a POST run is in flight ("124 of 500 · 3 failed").
+function updateSendProgress(done, total, posted, failed) {
+  const box = $("#sendOverlay") && $("#sendOverlay").querySelector(".send-progress");
+  if (!box) return;
+  box.textContent = `${done} of ${total}` +
+    (posted ? ` · ${posted} posted` : "") +
+    (failed ? ` · ${failed} failed` : "");
+}
+
+// Per-file failures, so "3 failed" is actionable instead of just alarming.
+function buildSendReport(res) {
+  const box = el("div", "send-report");
+  const sum = res.summary;
+  if (sum) {
+    if (sum.aborted) box.appendChild(el("div", "send-report-abort", sum.aborted));
+    const causes = Object.entries(sum.failures_by_cause || {});
+    if (causes.length) {
+      box.appendChild(el("div", "send-report-causes",
+        causes.map(([c, n]) => `${n} ${c}`).join(" · ")));
+    }
+  }
+  const bad = (res.results || []).filter((r) => r.outcome !== "posted" && r.outcome !== "skipped");
+  const rows = bad.length ? bad.map((r) => `${r.name} — ${r.message}`)
+                          : (res.errors || []).map((e) => `${e.path} — ${e.error}`);
+  if (rows.length) {
+    const list = el("div", "send-report-list");
+    rows.slice(0, 50).forEach((line) => list.appendChild(el("div", "send-report-row", line)));
+    if (rows.length > 50) list.appendChild(el("div", "send-report-row", `…and ${rows.length - 50} more`));
+    box.appendChild(list);
+  }
+  if (sum && sum.log) box.appendChild(el("div", "send-report-log", `Log: ${sum.log}`));
+  if (sum && sum.failed) box.appendChild(el("div", "send-report-log",
+    `Failed copies are in ${sum.failed_dir}`));
+  return box;
+}
+
 function finishCopyAnimation(res) {
   const overlay = $("#sendOverlay");
   if (!overlay) return;
   if (sendQuipTimer) { clearInterval(sendQuipTimer); sendQuipTimer = null; }
   const s = res.sent.length, er = res.errors.length;
+  // Only the JSON POST result carries a summary; the .OK copy is reported
+  // exactly as it always was.
+  const post = res.mode === "post";
   const card = overlay.querySelector(".send-card");
   // Keep the scene playing for enjoyment; just show the result + OK.
   const title = card.querySelector(".send-title");
-  if (title) title.innerHTML = `<span class="send-ok-check">✓</span> Sent ${s} file(s) to NiceLabel${er ? ` · ${er} failed` : ""}`;
+  if (title) title.innerHTML = post
+    ? `<span class="send-ok-check">✓</span> Posted ${s} of ${res.summary.total} file(s)${er ? ` · ${er} failed` : ""}`
+    : `<span class="send-ok-check">✓</span> Sent ${s} file(s) to NiceLabel${er ? ` · ${er} failed` : ""}`;
   const quip = card.querySelector(".send-quip");
   if (quip) {
     quip.textContent = er ? "Some files didn't make it — check the list." : _pick(SEND_DONE_QUIPS);
     quip.classList.add("q-show");
   }
+  const prog = card.querySelector(".send-progress");
+  if (prog) prog.remove();
   const sub = card.querySelector(".send-sub");
   if (sub) sub.remove();
+  if (post && (er || res.summary.skipped)) card.appendChild(buildSendReport(res));
   if (!card.querySelector(".send-ok-btn")) {
     const btn = el("button", "btn btn-primary send-ok-btn", "OK");
     btn.addEventListener("click", hideCopyAnimation);
@@ -2312,7 +2444,7 @@ function showBulkMenu() {
   add(n === 1 ? "Generate volume files…" : `Generate volume files… (${n} source files)`,
       () => enterGenerateMode());
   menu.appendChild(el("div", "ctx-sep"));
-  add(`🏷️  Send ${n} to NiceLabel`, () => sendToNiceLabel());
+  add(sendMenuLabel(n), () => sendToNiceLabel());
   const r = $("#bulkBtn").getBoundingClientRect();
   menu.style.left = Math.max(8, r.right - 220) + "px";
   menu.style.top = (r.bottom + 4) + "px";

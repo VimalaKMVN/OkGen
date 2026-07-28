@@ -225,6 +225,16 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         return jsonify(service.bulk_rename_apply(
             body.get("paths", []), body.get("parts", []), body.get("separator", "_"), registry, config))
 
+    @app.post("/api/send/scope")
+    def send_scope():
+        # What a Send would do with this selection (copy to the hot folder vs
+        # POST to the endpoint) — drives the confirmation dialog's wording.
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.send_scope(body.get("paths", []), config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     @app.post("/api/send")
     def send():
         body = request.get_json(force=True, silent=True) or {}
@@ -232,6 +242,23 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
             return jsonify(service.send_to_nicelabel(body.get("paths", []), config))
         except service.EditError as exc:
             return _err(str(exc), 422)
+
+    @app.post("/api/send/start")
+    def send_start():
+        # JSON hand-off: kicks off the POST run on a worker thread and returns
+        # a job id to poll. Config problems still fail fast, right here.
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.start_send_job(body.get("paths", []), config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
+    @app.get("/api/send/status/<job_id>")
+    def send_status(job_id):
+        try:
+            return jsonify(service.send_job_status(job_id))
+        except service.EditError as exc:
+            return _err(str(exc), 404)
 
     @app.get("/api/tosca/scripts")
     def tosca_scripts():

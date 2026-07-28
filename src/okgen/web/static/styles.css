@@ -520,6 +520,24 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 }
 .send-sub { font-size: 11px; color: var(--text-dim); margin-top: 7px; word-break: break-all; }
 .send-done { color: var(--ok); font-size: 34px; line-height: 1; margin-bottom: 8px; }
+/* Live counters while a JSON POST run is in flight, and the failure report
+   that replaces them when it finishes. */
+.send-progress {
+  font-size: 12px; color: var(--text); margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.send-report {
+  margin-top: 12px; text-align: left; font-size: 11px;
+  border-top: 1px solid var(--border); padding-top: 10px;
+}
+.send-report-abort { color: #ffcf33; margin-bottom: 6px; }
+.send-report-causes { color: var(--text-dim); margin-bottom: 6px; }
+.send-report-list { max-height: 190px; overflow-y: auto; }
+.send-report-row {
+  color: var(--err); padding: 2px 0; word-break: break-all;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.send-report-log { color: var(--text-dim); margin-top: 6px; word-break: break-all; }
 .send-ok-check { color: var(--ok); font-weight: 700; }
 .send-ok-btn { margin-top: 12px; min-width: 90px; }
 
@@ -552,6 +570,10 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .modal-dest {
   color: var(--text-dim); font-size: 12px; margin-bottom: 16px;
   font-family: ui-monospace, Menlo, Consolas, monospace; word-break: break-all;
+}
+.modal-sub {
+  color: var(--text-dim); font-size: 11px; margin: -10px 0 16px;
+  word-break: break-all;
 }
 .modal-warn {
   display: flex; gap: 10px; align-items: flex-start;

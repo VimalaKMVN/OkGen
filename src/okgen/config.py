@@ -122,7 +122,11 @@ class Config:
         json_sources: Optional[Dict[str, List[str]]] = None,
         json_source_default: Optional[str] = None,
         date_fields: Optional[Dict[str, Dict[str, str]]] = None,
+        nicelabel_post: Optional[dict] = None,
     ):
+        # The JSON hand-off (HTTP POST) block — see nicelabel_post.yaml. The
+        # .OK hand-off (hot-folder copy) stays in nicelabel_path above.
+        self._nicelabel_post = nicelabel_post or {}
         # {layout|"*": {field: format}} — fields holding a moment in time.
         self._date_fields = date_fields or {}
         # {source: [name tokens]} and the fallback source, for Calgary JSON.
@@ -287,6 +291,14 @@ class Config:
     # ----- NiceLabel destination -----
     def nicelabel_path(self) -> Optional[str]:
         return self._nicelabel_path
+
+    def nicelabel_post(self) -> dict:
+        """The JSON POST hand-off config block (endpoint, credentials, folder).
+
+        Raw on purpose — ``okgen.nicelabel_post.settings_from`` owns validating
+        it, so the error messages live next to the code that needs the values.
+        """
+        return self._nicelabel_post
 
     def nicelabel_warning(self) -> str:
         return self._nicelabel_warning or (
@@ -587,6 +599,21 @@ class Config:
             if isinstance(done, list) and done:
                 send_done_quips = [str(q) for q in done]
 
+        # The JSON hand-off (HTTP POST). Like tosca.yaml, a malformed file must
+        # NOT stop OkGen from starting — it disables just this one action.
+        nicelabel_post: dict = {}
+        nlp_path = cdir / "nicelabel_post.yaml"
+        if nlp_path.is_file():
+            try:
+                nicelabel_post = yaml.safe_load(
+                    nlp_path.read_text(encoding="utf-8")) or {}
+                if not isinstance(nicelabel_post, dict):
+                    raise ValueError("top level must be a mapping")
+            except Exception as exc:
+                print(f"WARNING: could not parse {nlp_path} — the JSON send is "
+                      f"disabled. Fix the YAML and restart. ({exc})")
+                nicelabel_post = {}
+
         rename_tokens = None
         rt_path = cdir / "rename_tokens.yaml"
         if rt_path.is_file():
@@ -703,4 +730,4 @@ class Config:
                    nicelabel_warning, send_quips, send_done_quips, regions,
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
                    trim_trailing, derived_fields, isolated_chain_groups, tosca,
-                   json_sources, json_source_default, date_fields)
+                   json_sources, json_source_default, date_fields, nicelabel_post)

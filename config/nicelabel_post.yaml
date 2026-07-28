@@ -1,0 +1,82 @@
+# Send to NiceLabel — the JSON hand-off (HTTP POST).
+#
+# The .OK layouts hand off by COPYING into a watched hot folder (see
+# nicelabel.yaml). The Calgary JSON layouts hand off differently: each selected
+# .json file is POSTed to an endpoint, one request per file, so every file gets
+# its own success/failure verdict.
+#
+# Flow per file:  copy into `json_folder`  ->  POST  ->  move that COPY into
+# `json_folder/Processed` (success) or `json_folder/failed` (failure).
+# Your original selected file is NEVER moved or modified.
+
+# The URL that receives the POST. Required.
+endpoint_url: "CHANGE_ME"          # e.g. "https://nicelabel.internal.tjx.com/api/labels"
+
+# Staging folder. Selected files are copied here to be posted, and the copies
+# end up in Processed/ or failed/ underneath it. Must already exist.
+# (Windows paths: use double backslashes or forward slashes.)
+json_folder: "CHANGE_ME"           # e.g. "D:\\NiceLabel\\TJX GTA\\Automation\\JsonPost"
+
+# ---- Credentials (HTTP Basic) -------------------------------------------- #
+# Leave `username` blank to send no Authorization header at all.
+#
+# SECURITY: this file is tracked by git, so a literal password here WILL be
+# committed. Prefer the ${VAR} form below, which reads an environment variable
+# at run time — set it in run.bat or the service account's environment.
+username: "CHANGE_ME"
+password: "${OKGEN_NL_PASSWORD}"   # or a literal (committed to git — see above)
+
+# ---- Request shape -------------------------------------------------------- #
+# raw_json  = the file's exact bytes as the request body (byte-for-byte what is
+#             on disk), Content-Type: application/json.
+# multipart = multipart/form-data upload, the file under `multipart_field`.
+body_mode: raw_json
+multipart_field: "file"
+
+# Extra headers sent with every request (optional).
+headers: {}
+  # X-Source: "OkGen"
+
+# The file name is always sent as X-Filename so the receiver can log it.
+
+# ---- What counts as success ---------------------------------------------- #
+# HTTP codes treated as a successful post.
+success_statuses: [200, 201, 202, 204]
+
+# Some endpoints return 200 with a failure payload. If set, the response body
+# must contain `success_body_contains`, and must NOT contain
+# `failure_body_contains`, for the file to count as posted. Case-insensitive;
+# leave blank to check the status code only.
+success_body_contains: ""
+failure_body_contains: ""
+
+# ---- Timeouts, retries, TLS ----------------------------------------------- #
+timeout_seconds: 30
+retries: 2                    # extra attempts AFTER the first (0 = try once)
+retry_backoff_seconds: 1.0    # doubles each retry (1s, 2s, 4s…)
+
+# Retries apply ONLY to failures that could plausibly succeed on a second try:
+# network errors, timeouts, HTTP 5xx and 429. A 400/401/403/422 is never
+# retried — the request itself is wrong and repeating it will not help.
+
+# Stop the whole run the moment a file comes back 401/403. Bad credentials
+# would otherwise mean hundreds of rejected requests and, quite possibly, a
+# locked service account. Remaining files are left untouched (not even staged).
+stop_on_auth_failure: true
+
+# TLS verification. Set to false ONLY for an internal endpoint with a
+# self-signed certificate; better, point `ca_bundle` at your private CA's .pem.
+verify_tls: true
+ca_bundle: ""
+
+# ---- Housekeeping --------------------------------------------------------- #
+processed_dir: "Processed"
+failed_dir: "failed"
+
+# Write a per-run log (okgen_send_<timestamp>.log) into json_folder — the
+# per-file outcomes, for handing evidence to the vendor when files bounce.
+# Credentials are never written to it.
+write_log: true
+
+# Shown in the confirmation dialog before posting (JSON selections only).
+warning: "These files will be POSTed to the live NiceLabel endpoint. Make sure the endpoint and credentials below are the ones you intend."
