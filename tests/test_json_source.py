@@ -253,6 +253,39 @@ def test_one_named_file_overrides_the_folder_it_sits_in(tmp_path, registry, conf
     assert by_name["rerun_SCAN.json"]["key_field"] == "keytrol"     # its own name
 
 
+def test_rekeyed_files_report_which_source_they_resolved_to(tmp_path, registry, config):
+    """A mixed folder is the case where a bulk run is otherwise silent about
+    having renumbered two DIFFERENT fields."""
+    d = tmp_path / "Calgary_WMS_out"
+    d.mkdir()
+    fx = (FIX / SOURCE_DEPENDENT["CalgaryStyleHeader"]).read_bytes()
+    for n in ("a.json", "b.json", "one_SCAN.json", "two_SCAN.json"):
+        (d / n).write_bytes(fx)
+
+    rekeyed = service.make_unique_in_folder(d, registry, config,
+                                            backup=False)["rekeyed"]
+    got = {r["file"]: (r["field"], r["source"]) for r in rekeyed if r.get("to")}
+    # One file per source keeps its key (first occurrence wins), the rest move.
+    assert got, "identical files must be re-keyed"
+    for name, (field, src) in got.items():
+        if "SCAN" in name:
+            assert (field, src) == ("keytrol", "SCAN")
+        else:
+            assert (field, src) == ("headerASNid", "WMS")
+    assert {v[1] for v in got.values()} == {"SCAN", "WMS"}
+
+
+def test_source_is_absent_for_layouts_that_do_not_care(tmp_path, registry, config):
+    d = tmp_path / "plain"
+    d.mkdir()
+    fx = (FIX / "cartonlabel_minified.json").read_bytes()
+    for n in ("a.json", "b.json"):
+        (d / n).write_bytes(fx)
+    rekeyed = service.make_unique_in_folder(d, registry, config,
+                                            backup=False)["rekeyed"]
+    assert rekeyed and all(r["source"] is None for r in rekeyed)
+
+
 def test_carton_label_folder_is_never_asked_about(tmp_path, registry, config):
     """Its key is pickListId either way, so there is nothing to ask."""
     d = _folder_of_copies(tmp_path, "plain", "cartonlabel_minified.json", count=1)

@@ -1703,8 +1703,7 @@ async function makeUniqueFolder(path) {
     const res = await postJSON("/api/unique/folder",
                                { path, source: sourceFor(path) });
     await refreshFolder(path);
-    const n = (res.rekeyed || []).filter((r) => r.to).length;
-    setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
+    setStatus(rekeyedSummary(res.rekeyed), "ok");
   } catch (e) {
     setStatus("Make unique failed: " + e.message, "err");
   } finally {
@@ -1723,13 +1722,33 @@ async function makeUniqueSelection() {
     const res = await postJSON("/api/unique/bulk",
                                { paths, source: sourceFor(dirOf(paths[0])) });
     new Set(paths.map(folderOf)).forEach((f) => refreshFolder(f));
-    const n = (res.folders || []).reduce((a, f) => a + (f.rekeyed || []).filter((r) => r.to).length, 0);
-    setStatus(n ? `Made keys unique: ${n} file(s) re-keyed` : "Keys already unique", "ok");
+    setStatus(rekeyedSummary((res.folders || []).flatMap((f) => f.rekeyed || [])), "ok");
   } catch (e) {
     setStatus("Make unique failed: " + e.message, "err");
   } finally {
     state.busy = false;
   }
+}
+
+// What Make Unique actually did. Normally just a count — but when a selection
+// spanned MORE THAN ONE key field it says which, because that only happens
+// when the files resolved to different sources (a SCAN-named file inside a WMS
+// folder, say) and nothing else would reveal it: no file is open during a bulk
+// run, so the editor's key row can't show it. Silent in the single-source case.
+function rekeyedSummary(rekeyed) {
+  const done = (rekeyed || []).filter((r) => r.to);
+  if (!done.length) return "Keys already unique";
+  const base = `Made keys unique: ${done.length} file(s) re-keyed`;
+  const byField = new Map();
+  done.forEach((r) => {
+    const label = r.source ? `${r.field} (${r.source})` : r.field;
+    byField.set(label, (byField.get(label) || 0) + 1);
+  });
+  if (byField.size < 2) return base;
+  const parts = [...byField.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([label, n]) => `${n} ${label}`);
+  return `${base} — ${parts.join(", ")}`;
 }
 
 // ---- Clean up files (remove stray trailing blank lines) ----

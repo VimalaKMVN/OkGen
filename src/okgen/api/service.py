@@ -219,6 +219,20 @@ def json_source_for(path, config: Config, override: Optional[str] = None,
                           override, root).to_dict()
 
 
+def _source_name_for(path, layout: Optional[str], config: Config,
+                     source: Optional[str] = None) -> Optional[str]:
+    """The source a file resolved to, or None when its layout doesn't care.
+
+    Reported per re-keyed file so a bulk Make Unique over a MIXED folder can
+    say which field it renumbered for which files — otherwise that is invisible
+    (no file is open, so the editor's key row can't show it).
+    """
+    if not config.source_dependent(layout):
+        return None
+    return resolve_source(path, config.json_sources,
+                          config.json_source_default, source).source
+
+
 def _unique_field_for(path, layout: Optional[str], config: Config,
                       source: Optional[str] = None) -> Optional[str]:
     """The key field for ONE file, resolving SCAN/WMS where it matters.
@@ -1559,6 +1573,7 @@ def make_unique_in_folder(folder, registry, config, backup=True,
         u.add(new_int)
         maxv[space] = new_int
         rekeyed.append({"file": p.name, "field": kf,
+                        "source": _source_name_for(p, layout, config, source),
                         "from": (f"{parts.prefix}{val}{parts.suffix}"
                                  if val is not None else None),
                         "to": new_str})

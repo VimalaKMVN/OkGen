@@ -22,7 +22,8 @@ const APP = path.join(__dirname, "..", "..", "src", "okgen", "web", "static", "a
 const src = fs.readFileSync(APP, "utf8");
 const run = new Function(
   "document", "window", "localStorage", "Option", "fetch", "confirm", "prompt", "alert",
-  src + "\n;return { renderSourceAsk, sourceFor, rememberSource, srcParam, dirOf };");
+  src + "\n;return { renderSourceAsk, sourceFor, rememberSource, srcParam, dirOf," +
+        "\n           rekeyedSummary };");
 
 let api;
 try {
@@ -89,6 +90,32 @@ check("no source stored means no query param",
 api.rememberSource("/d/Calgary_WMS_typo", "SCAN");
 check("a stored answer overrides what the folder is named",
       api.sourceFor("/d/Calgary_WMS_typo") === "SCAN");
+
+// --- Make Unique summary: name the split ONLY when there is one ----------
+const S = api.rekeyedSummary;
+check("nothing to do says so", S([]) === "Keys already unique");
+check("entries with no 'to' don't count as re-keyed",
+      S([{ file: "a", error: "boom" }]) === "Keys already unique");
+
+const oneSource = [
+  { file: "a", field: "headerASNid", source: "WMS", to: "V1A" },
+  { file: "b", field: "headerASNid", source: "WMS", to: "V2A" },
+];
+check("a single-source run stays a plain count",
+      S(oneSource) === "Made keys unique: 2 file(s) re-keyed");
+
+const mixed = [
+  ...oneSource,
+  { file: "one_SCAN.json", field: "keytrol", source: "SCAN", to: "140039" },
+];
+check("a MIXED run names which field went with which source",
+      S(mixed) === "Made keys unique: 3 file(s) re-keyed — 2 headerASNid (WMS), 1 keytrol (SCAN)");
+
+// .OK layouts report no source at all — the split must still read cleanly.
+check("a field with no source is named without brackets",
+      S([{ file: "a", field: "keytrol", to: "1" },
+         { file: "b", field: "po", to: "2" }])
+      === "Made keys unique: 2 file(s) re-keyed — 1 keytrol, 1 po");
 
 let bad = 0;
 for (const [name, ok] of checks) {
