@@ -97,6 +97,16 @@ def _folder_json_source(root: Path, children: List[dict], config: Config,
     # name — and ancestors count, so a parent named SCAN covers its subfolders.
     info = json_source_for(root / "_", config, source)
     info["layouts"] = sorted(l for l in layouts if config.source_dependent(l))
+    if not info["resolved"]:
+        # Don't ask about a folder whose FILES all name their own source — the
+        # question would be pointless (nothing about the folder is used) and its
+        # "being read as WMS" wording would be plain wrong.
+        named = [json_source_for(c["path"], config, source) for c in children
+                 if c.get("json") and config.source_dependent(c.get("layout"))]
+        if named and all(n["reason"] == "file name" for n in named):
+            info.update(resolved=True, reason="file names",
+                        source=named[0]["source"] if len({n["source"] for n in named}) == 1
+                        else "mixed")
     # Only second-guess a source we ASSUMED. Once a name or the user has said
     # so, trust it — a folder that keeps questioning a settled answer is noise.
     info["hint"] = (None if info["resolved"] else _source_mismatch_hint(

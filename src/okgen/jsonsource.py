@@ -86,19 +86,18 @@ def resolve_source(path, sources: Dict[str, List[str]], default: str,
                    root=None) -> SourceResolution:
     """Decide the source for ``path``.
 
-    Precedence, most specific first:
+    Precedence, MOST SPECIFIC first:
 
-    1. ``override`` — what the user answered for this folder (remembered by the
-       UI), which beats any name.
-    2. the file's own name,
+    1. the file's own name — a file that names its source knows better than
+       anything said about the folder around it,
+    2. ``override`` — what the user answered for this folder (remembered by the
+       UI), which beats a folder NAME but not a file naming itself,
     3. each folder above it, nearest first (stopping at ``root`` when given),
     4. ``default``, reported as unresolved.
     """
-    if override and override in (sources or {}):
-        return SourceResolution(override, FROM_OVERRIDE, True)
-
     p = Path(path)
     file_hit = _match(p.stem, sources) if p.suffix else None
+    has_override = bool(override and override in (sources or {}))
 
     folder_hit = None
     folder_name = None
@@ -116,12 +115,17 @@ def resolve_source(path, sources: Dict[str, List[str]], default: str,
             break
 
     if file_hit:
-        # A file that names its source wins over the folder it happens to sit
-        # in, but a disagreement is worth reporting rather than swallowing.
+        # A file that names its source wins over the folder it sits in AND over
+        # a folder-level answer — both are statements about the folder, and this
+        # is a statement about the file. A disagreement with either is reported
+        # rather than swallowed.
+        other = override if has_override else folder_hit
         return SourceResolution(
             file_hit, FROM_FILE, True,
-            conflict=bool(folder_hit and folder_hit != file_hit),
+            conflict=bool(other and other != file_hit),
             matched_on=p.name)
+    if has_override:
+        return SourceResolution(override, FROM_OVERRIDE, True)
     if folder_hit:
         return SourceResolution(folder_hit, FROM_FOLDER, True, matched_on=folder_name)
     return SourceResolution(default, FROM_DEFAULT, False)

@@ -82,9 +82,23 @@ def test_substring_never_matches_a_token():
         assert r.resolved is False, f"{name} must not match a source token"
 
 
-def test_explicit_override_beats_every_name():
+def test_explicit_override_beats_a_folder_name():
     r = resolve_source("/d/Calgary_WMS/a.json", SOURCES, "WMS", override="SCAN")
     assert (r.source, r.reason, r.resolved) == ("SCAN", "override", True)
+
+
+def test_a_file_naming_itself_beats_a_stored_folder_answer():
+    """Most specific wins: the answer is about the FOLDER, the name is about
+    the FILE — so a SCAN file dropped into a folder answered WMS is still SCAN.
+    """
+    r = resolve_source("/d/plain/rerun_SCAN.json", SOURCES, "WMS", override="WMS")
+    assert (r.source, r.reason) == ("SCAN", "file name")
+    assert r.conflict is True          # it disagrees with the stored answer
+
+
+def test_a_stored_answer_still_applies_to_unnamed_files_beside_it():
+    r = resolve_source("/d/plain/5h4ayclu.f4b.json", SOURCES, "WMS", override="SCAN")
+    assert (r.source, r.reason) == ("SCAN", "override")
 
 
 def test_file_and_folder_disagreement_is_reported():
@@ -211,6 +225,32 @@ def test_unlabelled_folder_is_reported_unresolved_so_the_ui_can_ask(
     info = service.build_tree(d, config, registry)["json_source"]
     assert info["resolved"] is False and info["source"] == "WMS"
     assert info["layouts"] == ["CalgaryStyleHeader"]
+
+
+def test_folder_of_self_naming_files_is_not_asked_about(tmp_path, registry, config):
+    """Every file names its own source, so the folder's name decides nothing."""
+    d = tmp_path / "no_token_here"
+    d.mkdir()
+    for i in range(3):
+        (d / f"batch{i}_SCAN.json").write_bytes(
+            (FIX / SOURCE_DEPENDENT["CalgaryStyleHeader"]).read_bytes())
+
+    tree = service.build_tree(d, config, registry)
+    assert tree["json_source"]["resolved"] is True
+    assert tree["json_source"]["source"] == "SCAN"
+    assert all(c["key_field"] == "keytrol" for c in tree["children"])
+
+
+def test_one_named_file_overrides_the_folder_it_sits_in(tmp_path, registry, config):
+    d = tmp_path / "Calgary_WMS_out"
+    d.mkdir()
+    fx = (FIX / SOURCE_DEPENDENT["CalgaryStyleHeader"]).read_bytes()
+    (d / "ordinary.json").write_bytes(fx)
+    (d / "rerun_SCAN.json").write_bytes(fx)
+
+    by_name = {c["name"]: c for c in service.build_tree(d, config, registry)["children"]}
+    assert by_name["ordinary.json"]["key_field"] == "headerASNid"   # folder: WMS
+    assert by_name["rerun_SCAN.json"]["key_field"] == "keytrol"     # its own name
 
 
 def test_carton_label_folder_is_never_asked_about(tmp_path, registry, config):
