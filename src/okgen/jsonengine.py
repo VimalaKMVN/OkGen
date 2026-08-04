@@ -150,6 +150,11 @@ class JsonState:
         self.data = data
         self.spans = spans
         self.edits: Dict[Tuple, str] = {}
+        # Every array section that is a real list in THIS file, recorded at
+        # parse time (see :func:`parse`). Structural changes are otherwise
+        # inferred from the surviving records, which cannot see an array whose
+        # rows were ALL removed — there is no record left to name it.
+        self.array_paths: List[Tuple] = []
 
     def serialize(self, records=None) -> bytes:
         """The document with staged edits applied.
@@ -185,7 +190,13 @@ class JsonState:
     # ----- structural (row) changes -----
     def _apply_structure(self, text: str, records) -> str:
         """Rebuild every array whose row membership or order changed."""
-        wanted: Dict[Tuple, list] = {}
+        # Seed with every array the FILE has, not just the ones records still
+        # mention: deleting the last row of an array leaves no record carrying
+        # its `array_path`, so an emptied array would otherwise look untouched
+        # and be silently left alone (bulk "keep 0 rows" reported success and
+        # wrote nothing). An array nothing touched still compares equal below
+        # and is never rebuilt, so this costs no bytes.
+        wanted: Dict[Tuple, list] = {ap: [] for ap in self.array_paths}
         for rec in records:
             ap = getattr(rec, "array_path", None)
             if ap is not None:
@@ -195,10 +206,6 @@ class JsonState:
 
         changed = {ap: rows for ap, rows in wanted.items()
                    if _row_layout(rows) != tuple(range(len(_at(self.data, ap) or [])))}
-        # Arrays that HAD rows and now have none also count as changed.
-        for ap in wanted:
-            if not wanted[ap] and (_at(self.data, ap) or []):
-                changed[ap] = []
         if not changed:
             return text                                   # nothing structural
 
@@ -447,7 +454,10 @@ def parse(text: str, layout):
         base = ("data",) + jp
         if sec.json_kind == "array":
             arr = _at(data, base)
-            arr = arr if isinstance(arr, list) else []
+            if isinstance(arr, list):
+                state.array_paths.append(base)
+            else:
+                arr = []                 # absent or null: no rows, nothing to rebuild
             for i in range(len(arr)):
                 records.append(JsonRecord(state, sec, idx, base + (i,),
                                           array_path=base, orig_index=i))

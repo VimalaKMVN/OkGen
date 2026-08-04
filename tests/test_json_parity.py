@@ -272,6 +272,92 @@ def test_bulk_row_ops_reach_the_disk(tmp_path, registry, config, op, expected):
 
 
 # --------------------------------------------------------------------------- #
+# Emptying an array — the last row is the one the engine could not see
+#
+# Structural changes were inferred from the array_path the surviving records
+# carry. Remove them ALL and no record names the array, so it looked untouched:
+# "keep 0 rows" reported `changed` and wrote nothing, and so did deleting the
+# final row by hand. The array set is now taken from the FILE at parse time.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("fixture,layout,section,jpath", ROW_CASES)
+def test_bulk_keep_zero_actually_empties_the_array(
+        tmp_path, registry, config, fixture, layout, section, jpath):
+    p = _copy(tmp_path, fixture)
+    assert _rows(p, jpath), "fixture must start with rows to be a real test"
+
+    res = service.bulk_op_apply([str(p)], layout, section,
+                                {"type": "keep", "count": 0},
+                                registry, config, backup=False)
+
+    assert res["results"][0]["status"] == "changed"
+    assert _rows(p, jpath) == [], "reported success but the rows are still there"
+
+
+@pytest.mark.parametrize("fixture,layout,section,jpath", ROW_CASES)
+def test_deleting_the_last_row_by_hand_also_empties_the_array(
+        tmp_path, registry, config, fixture, layout, section, jpath):
+    """Same defect, reached through the single-file editor instead of bulk."""
+    p = _copy(tmp_path, fixture)
+    view = service.parse_file_view(p, registry, config)
+    idxs = [r["index"] for s in view["sections"] if s["name"] == section
+            for r in (s.get("records") or [])]
+    assert idxs
+
+    service.apply_edits(p, [], registry, config=config, backup=False,
+                        ops=[{"type": "delete", "record_index": i}
+                             for i in reversed(idxs)])
+
+    assert _rows(p, jpath) == []
+
+
+@pytest.mark.parametrize("fixture,layout,section,jpath", ROW_CASES)
+def test_an_emptied_file_still_parses_and_reopens(
+        tmp_path, registry, config, fixture, layout, section, jpath):
+    """An empty array must be valid JSON that OkGen can open again — an
+    emptied section that bricks the file would be worse than the no-op."""
+    p = _copy(tmp_path, fixture)
+    service.bulk_op_apply([str(p)], layout, section, {"type": "keep", "count": 0},
+                          registry, config, backup=False)
+
+    json.loads(p.read_text(encoding="utf-8"))            # still valid JSON
+    view = service.parse_file_view(p, registry, config)
+    assert view["layout"] == layout                      # still detects
+    sec = next(s for s in view["sections"] if s["name"] == section)
+    assert (sec.get("records") or []) == []
+    # the OTHER sections are untouched — only the emptied one lost its rows
+    for other in view["sections"]:
+        if other["name"] not in (section, "Header"):
+            assert other.get("records"), f"{other['name']} lost its rows too"
+
+
+def test_seeding_the_array_after_emptying_it_works(tmp_path, registry, config):
+    """Emptying must not be a one-way door: the section takes a new first row."""
+    p = _copy(tmp_path, "distlabel.json")
+    service.bulk_op_apply([str(p)], "CalgaryDistLabel", "Stores",
+                          {"type": "keep", "count": 0}, registry, config,
+                          backup=False)
+    assert _rows(p, ("header", "stores")) == []
+
+    si = _section_index(service.parse_file_view(p, registry, config), "Stores")
+    service.add_record(p, si, [], registry, config, preview=False, backup=False)
+    assert len(_rows(p, ("header", "stores"))) == 1
+
+
+def test_a_file_whose_array_is_already_empty_is_left_byte_exact(
+        tmp_path, registry, config):
+    """Knowing every array must not make an UNCHANGED one get rebuilt — the
+    D20 byte-exact promise covers a file that already carries `[]`."""
+    p = _copy(tmp_path, "distlabel.json")
+    service.bulk_op_apply([str(p)], "CalgaryDistLabel", "Stores",
+                          {"type": "keep", "count": 0}, registry, config,
+                          backup=False)
+    emptied = p.read_bytes()
+
+    service.apply_edits(p, [], registry, config=config, backup=False)
+    assert p.read_bytes() == emptied
+
+
+# --------------------------------------------------------------------------- #
 # Naming + file ops
 # --------------------------------------------------------------------------- #
 def test_bulk_rename_keeps_the_json_extension(tmp_path, registry, config):
