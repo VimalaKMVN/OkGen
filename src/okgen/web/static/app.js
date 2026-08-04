@@ -2024,7 +2024,10 @@ function pickTosca(scripts, count, warning) {
 }
 
 function showToscaResult(res) {
-  const ov = el("div", "modal-overlay");
+  // Pinned to the BOTTOM-RIGHT (see .modal-corner): the TOSCA script opens its
+  // own console window on top of the browser, which covered a centred card, so
+  // these messages sit beside it rather than behind it.
+  const ov = el("div", "modal-overlay modal-corner");
   const card = el("div", "modal-card modal-wide");
   card.appendChild(el("h3", "modal-title", `TOSCA '${res.script}' — ${res.written} row(s) written`));
   // Everything below the title scrolls, so long .bat/workbook paths and long row

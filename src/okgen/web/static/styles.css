@@ -609,6 +609,33 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .modal-wide .tosca-rows { max-height: none; }        /* the body scrolls instead */
 .modal-wide .modal-actions { padding-top: 14px; flex: none; }
 
+/* ----- Corner RESULT window (TOSCA run only) -----
+   Running a TOSCA script launches its OWN console window (D21: CREATE_NEW_CONSOLE
+   + `cmd /k`, deliberately visible), which opens on top of the browser and
+   covered a centred result card — OkGen's messages were there but unreadable.
+   Pinning them to the bottom-right keeps them beside that console instead of
+   behind it. Applied to the TOSCA run result ONLY; Convert and the Send report
+   stay centred, since neither launches a window to compete with. */
+.modal-overlay.modal-corner {
+  align-items: flex-end; justify-content: flex-end;
+  padding: 0 18px 18px 0;
+  /* Lighter than the centred backdrop: a corner window shouldn't black out the
+     tree behind it, and the point is to be readable ALONGSIDE another window. */
+  background: rgba(0, 0, 0, 0.25);
+}
+.modal-overlay.modal-corner .modal-card.modal-wide {
+  width: min(720px, 62vw); max-width: min(720px, 62vw);
+  max-height: 70vh;
+}
+/* Narrow viewport: a "corner" window that spans the screen isn't one, so it
+   simply becomes a bottom sheet. */
+@media (max-width: 760px) {
+  .modal-overlay.modal-corner { padding: 0 8px 8px; }
+  .modal-overlay.modal-corner .modal-card.modal-wide {
+    width: calc(100vw - 16px); max-width: calc(100vw - 16px);
+  }
+}
+
 /* ---- Generate volume files panel ---- */
 .gen-cols { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 14px; align-items: flex-start; }
 .gen-group {
