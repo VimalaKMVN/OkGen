@@ -92,3 +92,90 @@ def test_region_mapping(cfg):
 def test_read_chain(cfg):
     assert read_chain(DATA_DIR / "StyleHeader.OK") == "03"
     assert read_chain(DATA_DIR / "CartonLabel.OK") == "01"
+
+
+# --------------------------------------------------------------------------- #
+# A chain may be given by NAME (Calgary JSON) where rules are written by CODE
+# --------------------------------------------------------------------------- #
+def test_chain_name_matches_a_code_based_rule(cfg):
+    """Calgary JSON files carry the chain as 'Winners'/'HomeSense' rather than
+    '04'/'06', but display rules are written against the 2-char code. The name
+    must resolve to the code so ONE rule set serves both engines."""
+    by_code = cfg.label("format", "A", chain="03", layout="StyleHeader", fmt="A")
+    by_name = cfg.label("format", "A", chain="Homegoods", layout="StyleHeader", fmt="A")
+    assert by_code == "Regular Tag (Homegoods)"
+    assert by_name == by_code, "a chain NAME must resolve like its code"
+
+
+def test_chain_name_matching_is_case_insensitive(cfg):
+    assert (cfg.label("format", "A", chain="homegoods", layout="StyleHeader", fmt="A")
+            == "Regular Tag (Homegoods)")
+
+
+def test_an_unknown_chain_still_falls_through(cfg):
+    """A value that is neither a code nor a name must not crash or match — it
+    just fails the chain criterion and a less specific rule applies."""
+    assert cfg.label("format", "A", chain="99", layout="StyleHeader") == "Format A"
+
+
+# --------------------------------------------------------------------------- #
+# The SHIPPED config wires the Calgary JSON layouts into the .OK format lists
+# --------------------------------------------------------------------------- #
+SHIPPED_CONFIG = Path(__file__).resolve().parents[1] / "config"
+
+shipped = pytest.mark.skipif(not (SHIPPED_CONFIG / "display.yaml").is_file(),
+                             reason="shipped config not present")
+
+
+@pytest.fixture(scope="module")
+def prod():
+    return Config.load(SHIPPED_CONFIG)
+
+
+@shipped
+@pytest.mark.parametrize("layout,chain,code,label", [
+    # Every (layout, chain, format) combination present in the real Calgary
+    # samples, resolved from the SAME lists the .OK layouts use.
+    ("CalgaryStyleHeader", "04", "B", "Blue Gum"),
+    ("CalgaryStyleHeader", "04", "C", "Coordinate Hard"),
+    ("CalgaryStyleHeader", "04", "F", "Tough Tag"),
+    ("CalgaryStyleHeader", "04", "S", "Small Gum"),
+    ("CalgaryStyleHeader", "03", "A", "Regular Tag"),
+    ("CalgaryCartonLabel", "Winners", "1", "Carton Label"),
+    ("CalgaryCartonLabel", "HomeSense", "1", "Carton Label"),
+    ("CalgaryCartonLabel", "01", "2", "Carton Ad Label"),
+    ("CalgaryDistLabel", "06", "7", "Distribution Label"),
+    ("CalgaryDistLabel", "04", "7", "Distribution Label"),
+])
+def test_calgary_json_layouts_resolve_format_names(prod, layout, chain, code, label):
+    assert prod.label("format", code, chain=chain, layout=layout) == label
+
+
+@shipped
+@pytest.mark.parametrize("json_layout,ok_layout,chain", [
+    ("CalgaryStyleHeader", "StyleHeader", "04"),
+    ("CalgaryCartonLabel", "CartonLabel", "04"),
+    ("CalgaryDistLabel", "DistLabels", "06"),
+])
+def test_json_format_options_are_the_same_list_as_the_ok_layout(
+        prod, json_layout, ok_layout, chain):
+    """The point of the change: no second list to keep in sync."""
+    assert (prod.options("format", chain=chain, layout=json_layout)
+            == prod.options("format", chain=chain, layout=ok_layout) != {})
+
+
+@shipped
+def test_an_unmapped_format_code_is_shown_verbatim(prod):
+    """A code outside the list must render as itself, never be remapped."""
+    assert prod.label("format", "Q", chain="Winners", layout="CalgaryStyleHeader") == "Q"
+
+
+@shipped
+@pytest.mark.parametrize("layout,chain,code,label", [
+    ("StyleHeader", "03", "A", "Regular Tag"),
+    ("Preticket", "01", "B", "Regular Gum Label"),
+    ("CartonLabel", "04", "1", "Carton Label"),
+    ("DistLabels", "06", "7", "Distribution Label"),
+])
+def test_the_ok_layouts_are_unaffected(prod, layout, chain, code, label):
+    assert prod.label("format", code, chain=chain, layout=layout) == label

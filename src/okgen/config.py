@@ -287,13 +287,19 @@ class Config:
         Falls back to the chain registry for the ``chain`` field itself.
         Returns {} when no rule applies (field is free-form / not coded).
         """
+        # Rules are written against the 2-char chain CODE, but a Calgary JSON
+        # file may carry the chain by NAME ("Winners") — resolve to the code so
+        # one rule set serves both engines. A code resolves to itself.
+        info = self.chain(chain)
+        chain_code = info.code if info is not None else chain
+
         best: Optional[dict] = None
         best_score = -1
         for rule in self._rules:
             match = rule.get("match", {})
             if match.get("field") != field:
                 continue
-            if not _crit_matches(match.get("chain"), chain):
+            if not _crit_matches(match.get("chain"), chain_code):
                 continue
             if not _crit_matches(match.get("layout"), layout):
                 continue

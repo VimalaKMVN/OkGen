@@ -106,7 +106,7 @@ rules:
   # TJMAXX formats
   - match:
       chain: ["01"]
-      layout: [StyleHeader, Preticket]
+      layout: [StyleHeader, Preticket, CalgaryStyleHeader]
       field: format
     values:
       A: "Purple Tag"
@@ -132,7 +132,7 @@ rules:
   # Marshalls formats
   - match:
       chain: ["02"]
-      layout: [StyleHeader, Preticket]
+      layout: [StyleHeader, Preticket, CalgaryStyleHeader]
       field: format
     values:
       A: "Purple Tag"
@@ -160,7 +160,7 @@ rules:
   # Homegoods formats
   - match:
       chain: ["03"]
-      layout: [StyleHeader, Preticket]
+      layout: [StyleHeader, Preticket, CalgaryStyleHeader]
       field: format
     values:
       A: "Regular Tag"
@@ -179,7 +179,7 @@ rules:
   # Winners and HomeSense formats
   - match:
       chain: ["04", "06"]
-      layout: [StyleHeader, Preticket]
+      layout: [StyleHeader, Preticket, CalgaryStyleHeader]
       field: format
     values:
       A: "Coordinate Gum Label"
@@ -207,7 +207,7 @@ rules:
   # TJMAXX formats
   - match:
       chain: ["01", "02"]
-      layout: [CartonLabel]
+      layout: [CartonLabel, CalgaryCartonLabel]
       field: format
     values:
       1: "Carton Label"
@@ -223,7 +223,7 @@ rules:
   # TJMAXX formats
   - match:
       chain: ["01", "02"]
-      layout: [DistLabels]
+      layout: [DistLabels, CalgaryDistLabel]
       field: format
     values:
       7: "Distribution Label"
@@ -235,7 +235,7 @@ rules:
   # Homegoods formats
   - match:
       chain: ["03"]
-      layout: [CartonLabel]
+      layout: [CartonLabel, CalgaryCartonLabel]
       field: format
     values:
       1: "Carton Label"
@@ -248,7 +248,7 @@ rules:
   # Homegoods Winners HomeSense formats
   - match:
       chain: ["03", "04", "06"]
-      layout: [DistLabels]
+      layout: [DistLabels, CalgaryDistLabel]
       field: format
     values:
       7: "Distribution Label"
@@ -258,7 +258,7 @@ rules:
   # Winers Homesense formats
   - match:
       chain: ["04", "06"]
-      layout: [CartonLabel]
+      layout: [CartonLabel, CalgaryCartonLabel]
       field: format
     values:
       1: "Carton Label"
