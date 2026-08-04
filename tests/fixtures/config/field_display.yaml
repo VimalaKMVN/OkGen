@@ -84,3 +84,12 @@ literal:
     - fiber
     - approx_size
     - country
+
+# Mirrors production: JSON store numbers are zero-padded to the field's size.
+pad_zeros:
+  CalgaryStyleHeader:
+    - store
+  CalgaryDistLabel:
+    - store
+  CalgaryCartonLabel:
+    - store

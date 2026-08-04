@@ -208,3 +208,250 @@ def _convert(registry, config):
     template = okjson.load_template(spec, Path(config.config_dir))
     okf = parse_okfile(DATA_DIR / "StyleHeader.OK", registry["StyleHeader"])
     return okjson.convert(okf, registry["StyleHeader"], spec, template)
+
+
+# --------------------------------------------------------------------------- #
+# DistLabels -> distributionLabels (a different SHAPE from StyleHeader)
+# --------------------------------------------------------------------------- #
+def _convert_dl(registry, config):
+    spec = config.conversion_for("DistLabels")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(DATA_DIR / "DistLabels.OK", registry["DistLabels"])
+    return okjson.convert(okf, registry["DistLabels"], spec, template)
+
+
+@pytest.fixture
+def dl_sources(tmp_path):
+    out = []
+    for i in range(2):
+        p = tmp_path / f"DL_{i}.OK"
+        shutil.copy2(DATA_DIR / "DistLabels.OK", p)
+        out.append(str(p))
+    return out
+
+
+def test_distlabels_converts_to_a_valid_calgary_distlabel(registry, config, dl_sources):
+    res = service.convert_apply(dl_sources, registry, config)
+    assert res["written"] == 2 and res["errors"] == []
+    for f in sorted(Path(res["folder"]).glob("*.json")):
+        assert detect.detect_layout(f).layout == "CalgaryDistLabel"
+        okf = parse_okfile(f, registry=registry)
+        assert okf.to_bytes() == f.read_bytes()          # byte-exact round-trip
+
+
+def test_distlabels_header_values(registry, config):
+    doc, _ = _convert_dl(registry, config)
+    h = doc["data"]["header"]
+    assert h["chain"] == "01" and h["format"] == "7"
+    assert h["keytrol"] == "550034" and h["headerSuffix"] == "AAA"
+    assert h["style"] == "304678" and h["department"] == "61"
+    assert h["transmitDate"] == "2017-04-04"             # ISO
+    assert h["distroDate"] == "20170404"                 # raw 8-digit
+    assert h["description"] == "#NAVY LATTICE"
+    # retailPrice carries the dot, like styleHeaders, and is HEADER-ONLY
+    assert h["retailPrice"] == "16.99"
+    assert not any("retailPrice" in s for s in h["stores"])
+    assert doc["data"]["details"] == []
+
+
+def test_distlabels_stores_carry_every_ok_row(registry, config):
+    doc, _ = _convert_dl(registry, config)
+    stores = doc["data"]["header"]["stores"]
+    assert len(stores) == 10
+    assert stores[0]["store"] == "0090" and stores[0]["cartonSequence"] == "76418"
+    assert stores[1]["cartonSequence"] == "08011"        # per-row .OK data
+    assert stores[0]["puertoRicoFlag"] == "N"
+    assert stores[0]["units"] == "1"                     # 00001 zero-stripped
+    assert stores[0]["adDate"] == "0000"
+
+
+def test_distlabels_shape_differs_from_styleheader(registry, config):
+    """lanes/sizes are null (not a placeholder row) and details[] is EMPTY —
+    the opposite of styleHeaders on both counts."""
+    doc, _ = _convert_dl(registry, config)
+    h = doc["data"]["header"]
+    assert h["lanes"] is None and h["sizes"] is None
+    assert doc["data"]["details"] == []
+
+
+def test_store_number_pads_to_four(registry, config):
+    """A 3-digit store gets a leading zero (user rule)."""
+    spec = config.conversion_for("DistLabels")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(DATA_DIR / "DistLabels.OK", registry["DistLabels"])
+    okf.sections()["Store"][0].set("store", " 202")
+    doc, _ = okjson.convert(okf, registry["DistLabels"], spec, template)
+    assert doc["data"]["header"]["stores"][0]["store"] == "0202"
+
+
+def test_distlabels_keys_unique_across_batch(registry, config, dl_sources):
+    res = service.convert_apply(dl_sources, registry, config)
+    keys = [json.loads(f.read_text())["data"]["header"]["keytrol"]
+            for f in sorted(Path(res["folder"]).glob("*.json"))]
+    assert keys == ["550034", "550035"]
+
+
+def test_layout_max_lengths_are_declared(registry):
+    """Sizes supplied by the user for fields the specs left as None. They are a
+    VALIDATION change on three existing layouts, so they are pinned here."""
+    want = {"puertoRicoFlag": 1, "cartonSequence": 5, "qtyToPrint": 5}
+    for name in ("CalgaryDistLabel", "CalgaryStyleHeader", "CalgaryCartonLabel"):
+        stores = next(s for s in registry[name].sections if s.name == "Stores")
+        got = {f.name: f.size for f in stores.fields if f.name in want}
+        assert got == want, f"{name} store sizes: {got}"
+    details = next(s for s in registry["CalgaryStyleHeader"].sections
+                   if s.name == "Details")
+    for fld in ("item", "fact1", "fact2", "fact3"):
+        assert next(f for f in details.fields if f.name == fld).size == 20
+
+
+# --------------------------------------------------------------------------- #
+# null_when_blank — present as a field, but JSON null when the .OK has no value
+# --------------------------------------------------------------------------- #
+def test_unsourced_store_fields_are_null_not_template_values(registry, config):
+    """A StyleHeader .OK has no store section, so nothing in the placeholder can
+    have come from the file — these must read as null, not carry values borrowed
+    from the unrelated order the template came from."""
+    doc, _ = _convert(registry, config)
+    store = doc["data"]["header"]["stores"][0]
+    for fld in ("puertoRicoFlag", "cartonSequence", "qtyToPrint"):
+        assert fld in store, f"{fld} must still be PRESENT as a field"
+        assert store[fld] is None, f"{fld} should be null, got {store[fld]!r}"
+
+
+def test_distlabels_keeps_real_store_values_but_nulls_the_unsourced(registry, config):
+    """puertoRicoFlag and cartonSequence DO come from the .OK here, so they keep
+    their values; qtyToPrint has no source at all, so it is null."""
+    doc, _ = _convert_dl(registry, config)
+    store = doc["data"]["header"]["stores"][0]
+    assert store["puertoRicoFlag"] == "N"
+    assert store["cartonSequence"] == "76418"
+    assert "qtyToPrint" in store and store["qtyToPrint"] is None
+
+
+def test_blank_ok_value_becomes_null_per_row(registry, config):
+    """Blanking a value in the .OK nulls that row only — the others keep data."""
+    spec = config.conversion_for("DistLabels")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(DATA_DIR / "DistLabels.OK", registry["DistLabels"])
+    okf.sections()["Store"][0].set("prflag", " ")
+    okf.sections()["Store"][0].set("cartseq", "     ")
+    doc, _ = okjson.convert(okf, registry["DistLabels"], spec, template)
+    rows = doc["data"]["header"]["stores"]
+    assert rows[0]["puertoRicoFlag"] is None and rows[0]["cartonSequence"] is None
+    assert rows[1]["puertoRicoFlag"] == "N" and rows[1]["cartonSequence"] == "08011"
+
+
+def test_item_and_facts_null_when_the_ok_has_none(registry, config):
+    """They carry .OK values when present, and null when not — never the
+    template's placeholder text."""
+    spec = config.conversion_for("StyleHeader")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(DATA_DIR / "StyleHeader.OK", registry["StyleHeader"])
+    hdr = okf.sections()["Header"][0]
+    assert okjson.convert(okf, registry["StyleHeader"], spec, template)[0] \
+        ["data"]["details"][0]["item"] == "ITEMITEMITEMITEMITEM"
+    for fld, width in (("item", 20), ("fact1", 20), ("fact2", 20), ("fact3", 20)):
+        hdr.set(fld, " " * width)
+    doc, _ = okjson.convert(okf, registry["StyleHeader"], spec, template)
+    d = doc["data"]["details"][0]
+    for fld in ("item", "fact1", "fact2", "fact3"):
+        assert fld in d and d[fld] is None, f"{fld} should be null, got {d[fld]!r}"
+
+
+# --------------------------------------------------------------------------- #
+# pad_zeros — a 3-digit store must be stored as 4 digits on EVERY write path
+# --------------------------------------------------------------------------- #
+FIXJ = Path(__file__).resolve().parent / "fixtures" / "calgary"
+
+
+@pytest.fixture
+def json_file(tmp_path):
+    p = tmp_path / "dl.json"
+    shutil.copy2(FIXJ / "distlabel.json", p)
+    return p
+
+
+def _store(p, key="store", row=0):
+    return json.loads(p.read_text())["data"]["header"]["stores"][row][key]
+
+
+def test_single_edit_pads_a_three_digit_store(registry, config, json_file):
+    view = service.parse_file_view(str(json_file), registry, config)
+    sec = next(s for s in view["sections"] if s["name"] == "Stores")
+    idx = sec["records"][0]["index"]
+    service.apply_edits(str(json_file),
+                        [{"record_index": idx, "field": "store", "value": "202"}],
+                        registry=registry, config=config)
+    assert _store(json_file) == "0202"
+
+
+def test_bulk_set_pads_a_three_digit_store(registry, config, json_file):
+    service.bulk_op_apply([str(json_file)], "CalgaryDistLabel", "Stores",
+                          {"type": "set", "field": "store", "value": "202"},
+                          registry, config)
+    assert _store(json_file) == "0202"
+
+
+def test_bulk_list_pads_a_three_digit_store(registry, config, json_file):
+    """Bulk must not bypass what single editing enforces (the D30 lesson)."""
+    service.bulk_op_apply([str(json_file)], "CalgaryDistLabel", "Stores",
+                          {"type": "list", "field": "store", "values": "202"},
+                          registry, config)
+    assert _store(json_file) == "0202"
+
+
+def test_blank_store_stays_blank(registry, config, json_file):
+    """Padding an empty field to '0000' would invent a store nobody entered."""
+    service.bulk_op_apply([str(json_file)], "CalgaryDistLabel", "Stores",
+                          {"type": "set", "field": "store", "value": "' '"},
+                          registry, config)
+    assert _store(json_file) == ""
+
+
+def test_four_digit_store_is_untouched(registry, config, json_file):
+    service.bulk_op_apply([str(json_file)], "CalgaryDistLabel", "Stores",
+                          {"type": "set", "field": "store", "value": "0345"},
+                          registry, config)
+    assert _store(json_file) == "0345"
+
+
+def test_only_declared_fields_are_padded(registry, config, json_file):
+    """`units` is not in pad_zeros, so it must stay exactly as typed."""
+    service.bulk_op_apply([str(json_file)], "CalgaryDistLabel", "Stores",
+                          {"type": "set", "field": "units", "value": "5"},
+                          registry, config)
+    assert _store(json_file, "units") == "5"
+
+
+def test_conversion_also_pads_a_three_digit_store(registry, config):
+    """The other half of the ask: a store arriving as 3 digits in the .OK."""
+    spec = config.conversion_for("DistLabels")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(DATA_DIR / "DistLabels.OK", registry["DistLabels"])
+    okf.sections()["Store"][0].set("store", " 202")
+    doc, _ = okjson.convert(okf, registry["DistLabels"], spec, template)
+    assert doc["data"]["header"]["stores"][0]["store"] == "0202"
+
+
+def test_padding_is_digits_only(registry, config, json_file):
+    """Non-numeric values must be left EXACTLY as typed — the existing padding
+    rules (literal fields, preserved spaces, no zeros on free text) own that
+    case on every edit path, and this must not reach into them."""
+    service.bulk_op_apply([str(json_file)], "CalgaryDistLabel", "Stores",
+                          {"type": "set", "field": "store", "value": "AB"},
+                          registry, config)
+    assert _store(json_file) == "AB", "a non-numeric store must not become '00AB'"
+
+
+def test_ok_layouts_are_not_touched_by_pad_zeros(registry, config, tmp_path):
+    """.OK store padding was already correct via the fixed-width engine — the
+    JSON-only rule must not change it."""
+    p = tmp_path / "DistLabels.OK"
+    shutil.copy2(DATA_DIR / "DistLabels.OK", p)
+    assert config.pad_zero_fields("DistLabels") == set()
+    service.bulk_op_apply([str(p)], "DistLabels", "Store",
+                          {"type": "set", "field": "store", "value": "202"},
+                          registry, config)
+    okf = parse_okfile(p, registry=registry)
+    assert okf.sections()["Store"][0].get("store") == "0202"   # engine, not us

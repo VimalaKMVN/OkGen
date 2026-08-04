@@ -615,6 +615,34 @@ def _unquote_blank(value):
     return value
 
 
+def _pad_zero_value(value, layout_name, field, size, config: Config = None):
+    """Left-pad a `pad_zeros` field with zeros to its declared size.
+
+    Fixed-width layouts pad by construction; JSON values are trimmed strings, so
+    a store typed as ``202`` would be stored as ``202`` and rejected downstream,
+    which expects ``0202``. Applied on EVERY write path rather than in the
+    editor, so bulk cannot bypass what single-file editing enforces (D30's
+    lesson — the rule was right, the parallel write paths skipped it).
+
+    DIGITS ONLY, and deliberately so. The existing padding rules (D15 literal
+    fields, preserved leading/trailing spaces, never zero-padding free text)
+    already cover every other case on every edit path — this must not reach
+    them. A non-numeric value is left exactly as typed, so it fails width
+    validation loudly instead of being silently turned into ``00AB``.
+
+    A blank value stays blank too: padding an empty field to ``0000`` would
+    invent a store number nobody entered.
+    """
+    if config is None or not config.is_pad_zero(layout_name, field):
+        return value
+    if not isinstance(value, str) or size is None:
+        return value
+    core = value.strip()
+    if core == "" or not core.isdigit():
+        return value
+    return core.rjust(int(size), "0")
+
+
 def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
     """Validate field widths, then apply edits in place. Raises EditError."""
     for e in edits:                     # ' ' / '' / "" -> explicit blank (spaces)
@@ -659,6 +687,8 @@ def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
         value = e["value"]
         if not e.get("_blank"):        # an explicit blank stays blank
             value = _coerce_date(okf.layout.name, e["field"], value, config)
+            value = _pad_zero_value(value, okf.layout.name, e["field"],
+                                    rec._field(e["field"]).size, config)  # noqa: SLF001
         rec.set(e["field"], value, literal=literal)
 
 
@@ -2067,6 +2097,8 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
             first_old = recs[0].get(field) if recs else None
             # a blank token writes spaces on any field (numeric included)
             literal = blank or (config is not None and config.is_literal(layout_name, field))
+            if not blank:
+                value = _pad_zero_value(value, layout_name, field, size, config)
             for r in recs:
                 cur = r.get(field)
                 r.set(field, value, literal=literal)
@@ -2097,7 +2129,8 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
                 # a blank ("") choice writes spaces on any field
                 # a blank ("") or space-padded pick writes literal spaces on any
                 # field (numeric included, which would otherwise zero-fill)
-                r.set(field, pick,
+                padded = _pad_zero_value(pick, layout_name, field, size, config)
+                r.set(field, padded,
                       literal=base_literal or pick != pick.strip() or pick == "")
             return {"name": name, "status": "change",
                     "detail": f"{field} from {len(values)} allowed value(s) "
@@ -2254,6 +2287,7 @@ def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry,
         return {"name": name, "status": "error", "current": current, "new": value,
                 "error": (f"chain cannot change from {(current or '').strip()} to "
                           f"{value.strip()}: Europe is isolated from the other chains")}
+    value = _pad_zero_value(value, okf.layout.name, field, f.size, config)
     header.set(field, value,
                literal=config is not None and config.is_literal(okf.layout.name, field))
     new = header.get(field)

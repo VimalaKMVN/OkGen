@@ -115,6 +115,17 @@ def _apply(rule: dict, raw_value) -> Tuple[object, str]:
     return fn(raw_value), "derived"
 
 
+def _is_blank(v) -> bool:
+    return v is None or (isinstance(v, str) and v.strip() == "")
+
+
+def _nulled(value):
+    """A field declared ``null_when_blank`` shows up in the document but with a
+    JSON null when the .OK file has nothing for it — rather than silently
+    inheriting the template's value, which would look like real data."""
+    return (None, "null") if _is_blank(value) else (value, None)
+
+
 # --------------------------------------------------------------------------- #
 # Conversion
 # --------------------------------------------------------------------------- #
@@ -161,20 +172,44 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
     for field, rule in (spec.get("header") or {}).items():
         src = rule.get("from")
         if src not in H:
-            note(field, "template", header.get(field), f"no .OK field {src!r}")
+            if rule.get("null_when_blank"):
+                header[field] = None
+                note(field, "null", None, "no .OK source")
+            else:
+                note(field, "template", header.get(field), f"no .OK field {src!r}")
             continue
         value, prov = _apply(rule, H[src])
+        if rule.get("null_when_blank"):
+            nulled, np = _nulled(value)
+            value, prov = nulled, (np or prov)
         header[field] = value
         note(field, prov, value, src)
 
     # --- nested arrays -----------------------------------------------------
     for arr_name, arr_spec in (spec.get("arrays") or {}).items():
         rows = _section_values(okf, layout, arr_spec.get("section", ""))
+        # Fields that must show as JSON null rather than inherit the template's
+        # value when the .OK has nothing for them. Applied to the placeholder
+        # row too, so an .OK layout with no such section (a StyleHeader has no
+        # stores) still reports them as present-but-empty rather than as data
+        # borrowed from an unrelated order.
+        nullable = set(arr_spec.get("null_when_blank") or [])
+
+        mapped_fields = set(arr_spec.get("fields") or {})
+
         if not _has_real_rows(rows):
+            # No .OK rows at all, so nothing here can have come from the file.
+            placeholder = header.get(arr_name)
+            if isinstance(placeholder, list) and nullable:
+                for item in placeholder:
+                    for field in nullable:
+                        if field in item:
+                            item[field] = None
             note(f"{arr_name}[]", "template",
-                 f"{len(header.get(arr_name) or [])} placeholder row(s)",
+                 f"{len(placeholder or [])} placeholder row(s)",
                  "no real rows in .OK")
             continue
+
         proto = (header.get(arr_name) or [{}])[0]
         out = []
         for row in rows:
@@ -185,6 +220,14 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
                 src = rule.get("from")
                 if src in row:
                     item[field], _ = _apply(rule, row[src])
+            for field in nullable:
+                if field not in item:
+                    continue
+                # Unmapped: there is no .OK source for it at all, so the
+                # template's value is not this order's data — always null.
+                # Mapped: null only when the .OK itself is blank.
+                if field not in mapped_fields or _is_blank(item.get(field)):
+                    item[field] = None
             out.append(item)
         header[arr_name] = out
         note(f"{arr_name}[]", "ok", f"{len(out)} row(s)", arr_spec.get("section"))
@@ -202,9 +245,16 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
             for field, rule in (det_spec.get("fields") or {}).items():
                 src = rule.get("from")
                 if src not in row:
+                    if rule.get("null_when_blank"):
+                        item[field] = None
+                        if not out:
+                            note(f"details.{field}", "null", None, "no .OK source")
                     continue
                 item[field], prov = _apply(rule, row[src])
-                if len(out) == 0:
+                if rule.get("null_when_blank"):
+                    nulled, np = _nulled(item[field])
+                    item[field], prov = nulled, (np or prov)
+                if not out:
                     note(f"details.{field}", prov, item[field], src)
             out.append(item)
         data["details"] = out

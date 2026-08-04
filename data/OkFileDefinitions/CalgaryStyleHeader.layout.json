@@ -459,7 +459,8 @@
           "size": 4
         },
         {
-          "name": "puertoRicoFlag"
+          "name": "puertoRicoFlag",
+          "size": 1
         },
         {
           "name": "units",
@@ -477,7 +478,8 @@
           "size": 5
         },
         {
-          "name": "cartonSequence"
+          "name": "cartonSequence",
+          "size": 5
         },
         {
           "name": "numberOfPacks",
@@ -492,7 +494,8 @@
           "size": 1
         },
         {
-          "name": "qtyToPrint"
+          "name": "qtyToPrint",
+          "size": 5
         },
         {
           "name": "puertoRicoStoreSeq"
@@ -583,16 +586,20 @@
           "size": 4
         },
         {
-          "name": "item"
+          "name": "item",
+          "size": 20
         },
         {
-          "name": "fact1"
+          "name": "fact1",
+          "size": 20
         },
         {
-          "name": "fact2"
+          "name": "fact2",
+          "size": 20
         },
         {
-          "name": "fact3"
+          "name": "fact3",
+          "size": 20
         }
       ]
     }

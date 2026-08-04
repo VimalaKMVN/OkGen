@@ -87,3 +87,23 @@ literal:
     - fiber
     - approx_size
     - country
+
+# --------------------------------------------------------------------------- #
+# pad_zeros — values LEFT-padded with zeros to the field's declared size.
+#
+# Fixed-width .OK layouts pad by construction: a 4-char field is always 4 chars.
+# JSON values are trimmed strings, so a store typed as `202` (or arriving as 3
+# digits from an input file) would be stored as `202` and REJECTED downstream,
+# which expects `0202`. Applied on every write path — single edit, Bulk Edit
+# (set / list / random / unique) and volume generation — so it cannot be
+# bypassed by one of them.
+#
+# A blank value stays blank: padding an empty field to `0000` would invent a
+# store number that was never entered.
+pad_zeros:
+  CalgaryStyleHeader:
+    - store
+  CalgaryDistLabel:
+    - store
+  CalgaryCartonLabel:
+    - store

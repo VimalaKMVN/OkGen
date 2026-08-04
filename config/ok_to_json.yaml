@@ -64,7 +64,12 @@ conversions:
         fields:
           size:     { from: size, transform: blank_to_null }
           quantity: { from: qty, transform: strip_zeros }
-      # `stores` has no .OK counterpart on this layout -> template placeholder.
+      # A StyleHeader .OK has NO store section, so the template placeholder row
+      # stands — but these three must read as present-and-empty (JSON null)
+      # rather than carry values borrowed from an unrelated order.
+      stores:
+        section: Store                    # not present on this layout
+        null_when_blank: [puertoRicoFlag, cartonSequence, qtyToPrint]
 
     # --- data.details[] ----------------------------------------------------
     # The reshape: an .OK StyleHeader has NO detail rows, but the JSON needs
@@ -74,6 +79,12 @@ conversions:
       fields:
         style:               { from: style }
         type:                { from: type }
+        # item/fact1-3 show as null when the .OK carries nothing for them,
+        # rather than inheriting the template's text.
+        item:                { from: item, null_when_blank: true }
+        fact1:               { from: fact1, null_when_blank: true }
+        fact2:               { from: fact2, null_when_blank: true }
+        fact3:               { from: fact3, null_when_blank: true }
         pastSeasonIndicator: { from: psi, raw: true }
         messageCode1:        { from: message1 }
         messageCode2:        { from: message2 }
@@ -85,10 +96,60 @@ conversions:
         ladderPlanMMYY:      { from: ladder_mmdd }
         ladderPlan:          { from: ladder_mmdd, transform: mmyy_to_first_of_month }
         category:            { from: category }
-        item:                { from: item }
-        fact1:               { from: fact1 }
-        fact2:               { from: fact2 }
-        fact3:               { from: fact3 }
+
+  DistLabels:
+    target: CalgaryDistLabel
+    template: templates/CalgaryDistLabel.json
+    source: SCAN
+    key: keytrol
+
+    # --- data.header -------------------------------------------------------
+    header:
+      chain:          { from: chain }
+      format:         { from: format }
+      keytrol:        { from: keytrol }
+      headerSuffix:   { from: hsuffix }
+      style:          { from: style }
+      department:     { from: dept }
+      transmitDate:   { from: date, transform: iso_date }
+      distroDate:     { from: date }              # raw 8-digit, as the samples carry it
+      houseNumber:    { from: housenum }
+      description:    { from: desc }
+      area:           { from: area }
+      # Decimal form with the dot ('001699' -> '16.99'), same as styleHeaders,
+      # and HEADER-ONLY: distributionLabels have no store- or detail-level
+      # retailPrice. (User-confirmed against the live system — the sample files
+      # in hand still carry the older un-dotted '999999' form.)
+      retailPrice:    { from: price, transform: implied_2dp }
+      # Counts (storeLines / numberOfStores / lineCount) are deliberately left at
+      # their template values — see PLAN §6; nothing recalculates them yet.
+
+    # --- nested arrays -----------------------------------------------------
+    # distributionLabels carry `lanes`/`sizes` as null (not [{}]), so they are
+    # not declared here and keep the template's null.
+    arrays:
+      stores:
+        section: Store
+        # Present-but-empty rather than template-inherited. puertoRicoFlag and
+        # cartonSequence DO come from the .OK here; qtyToPrint has no source at
+        # all, so it reads as null.
+        null_when_blank: [puertoRicoFlag, cartonSequence, qtyToPrint]
+        fields:
+          store:          { from: store, transform: pad_left_4 }
+          puertoRicoFlag: { from: prflag }
+          units:          { from: units, transform: strip_zeros }
+          distroType:     { from: distr_type }
+          storeQuantity:  { from: store_qty, transform: strip_zeros }
+          cartonSequence: { from: cartseq }
+          adDate:         { from: ad }
+          # `date` and `qtyToPrint` have no .OK source -> template value.
+
+    # No `details:` block — every distributionLabels sample carries an EMPTY
+    # details[], unlike styleHeaders where it is built from the .OK header.
+    #
+    # Unmapped on purpose: the .OK `seq` field (the spec says sequence is
+    # "calculated on our end") and the whole TSticker section (no JSON target,
+    # and no sample data exists for it — see PLAN §6).
 
 # Available transforms (okgen/okjson.py):
 #   trim                    default — strip surrounding pad

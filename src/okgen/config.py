@@ -144,9 +144,11 @@ class Config:
         nicelabel_post_error: Optional[str] = None,
         ok_to_json: Optional[dict] = None,
         config_dir: Optional[str] = None,
+        pad_zero_fields: Optional[Dict[str, set]] = None,
     ):
         # .OK -> Calgary JSON conversion mapping (ok_to_json.yaml). `config_dir`
         # is kept because the mapping names a TEMPLATE file relative to it.
+        self._pad_zero_fields = pad_zero_fields or {}
         self._ok_to_json = ok_to_json or {}
         self._config_dir = config_dir or ""
         # The JSON hand-off (HTTP POST) block — see nicelabel_post.yaml. The
@@ -419,6 +421,24 @@ class Config:
     def is_literal(self, layout: Optional[str], field: Optional[str]) -> bool:
         return bool(field) and field in self.literal_fields(layout)
 
+    # ----- zero-padded fields (JSON layouts have no fixed width) -----
+    def pad_zero_fields(self, layout: Optional[str]) -> set:
+        """Fields whose value is LEFT-padded with zeros to the field's declared
+        size on every write.
+
+        Fixed-width layouts pad by construction — a 4-char field is always 4
+        chars. JSON values are trimmed strings, so a store typed as ``202``
+        would be stored as ``202`` and rejected downstream, which expects
+        ``0202``. Same ``"*"``-plus-layout merge as :meth:`literal_fields`.
+        """
+        names = set(self._pad_zero_fields.get("*", set()))
+        if layout:
+            names |= set(self._pad_zero_fields.get(layout, set()))
+        return names
+
+    def is_pad_zero(self, layout: Optional[str], field: Optional[str]) -> bool:
+        return bool(field) and field in self.pad_zero_fields(layout)
+
     # ----- trailing zero-fill (Preticket-style filler rows) -----
     def zero_fill(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:
         """How many trailing all-zero filler rows this section keeps, or None."""
@@ -690,6 +710,7 @@ class Config:
         hidden_fields: Dict[str, set] = {}
         readonly_fields: Dict[str, set] = {}
         literal_fields: Dict[str, set] = {}
+        pad_zero_fields: Dict[str, set] = {}
         fd_path = cdir / "field_display.yaml"
         if fd_path.is_file():
             data = yaml.safe_load(fd_path.read_text(encoding="utf-8")) or {}
@@ -704,6 +725,10 @@ class Config:
             literal_fields = {
                 str(l): {str(f) for f in (fs or [])}
                 for l, fs in (data.get("literal") or {}).items()
+            }
+            pad_zero_fields = {
+                str(l): {str(f) for f in (fs or [])}
+                for l, fs in (data.get("pad_zeros") or {}).items()
             }
 
         detail_fill: Dict[str, dict] = {}
@@ -795,4 +820,5 @@ class Config:
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
                    trim_trailing, derived_fields, isolated_chain_groups, tosca,
                    json_sources, json_source_default, date_fields, nicelabel_post,
-                   nicelabel_post_error, ok_to_json, str(cdir))
+                   nicelabel_post_error, ok_to_json, str(cdir),
+                   pad_zero_fields=pad_zero_fields)
