@@ -676,3 +676,14 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
   white-space: pre-wrap; word-break: break-word;
 }
 .send-ok-row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
+
+/* SCAN / WMS — read from the file's own headerASNid. Outlined rather than
+   solid, so it never reads as a second chain badge. */
+.src-badge {
+  display: inline-flex; align-items: center;
+  height: 15px; padding: 0 4px; border-radius: 3px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.3px;
+  background: transparent; flex: 0 0 auto;
+}
+.src-badge-wms { color: #7ec8e3; border: 1px solid #3d6b80; }
+.src-badge-scan { color: #c3a6e0; border: 1px solid #6a4f85; }

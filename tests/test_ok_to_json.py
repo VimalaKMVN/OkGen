@@ -113,8 +113,10 @@ def test_unmapped_fields_keep_the_template_value(registry, config):
         (FIXTURE_CONFIG / "templates" / "CalgaryStyleHeader.json").read_text())
     h, th = doc["data"]["header"], template["data"]["header"]
     assert h["purchaseOrderNumber"] == th["purchaseOrderNumber"]
-    assert h["headerASNid"] == th["headerASNid"]
     assert h["coordinateIndicator"] == th["coordinateIndicator"]
+    # headerASNid is NOT template-inherited: it decides the source, and a .OK
+    # StyleHeader has no ASN field, so the converted file is genuinely SCAN.
+    assert h["headerASNid"] is None
     assert any(r["provenance"] == "template" for r in report)
 
 
@@ -605,3 +607,68 @@ def test_counts_follow_the_rows_when_the_ok_changes(registry, config):
     doc, _ = okjson.convert(okf, registry["DistLabels"], spec, template)
     assert len(doc["data"]["header"]["stores"]) == 6
     assert doc["data"]["header"]["numberOfStores"] == "6"
+
+
+def test_converted_files_are_scan_by_their_own_payload(registry, config):
+    """The folder name used to be what made these SCAN while the file carried a
+    borrowed ASN from the template — three signals, two of them wrong. Now the
+    payload says SCAN, so the folder name is merely a label."""
+    from okgen.jsonsource import source_from_header
+    for lay in ("StyleHeader", "DistLabels", "CartonLabel"):
+        spec = config.conversion_for(lay)
+        template = okjson.load_template(spec, Path(config.config_dir))
+        okf = parse_okfile(DATA_DIR / f"{lay}.OK", registry[lay])
+        doc, _ = okjson.convert(okf, registry[lay], spec, template)
+        header = doc["data"]["header"]
+        assert header["headerASNid"] is None, lay
+        resolved = source_from_header(header, config.json_sources,
+                                      config.json_source_default)
+        assert resolved.source == "SCAN", lay
+        # ...and that is what makes keytrol (not a borrowed ASN) the key.
+        assert config.unique_field(spec["target"], "SCAN") == spec["key"]
+
+
+# --------------------------------------------------------------------------- #
+# Keys are unique ACROSS batches, not just within one
+# --------------------------------------------------------------------------- #
+def test_a_second_batch_does_not_reproduce_the_first_batch_keys(
+        tmp_path, registry, config, sources):
+    """Each run used to start numbering from scratch, so converting the same
+    sources twice produced the same keys again — invisible while the batches sat
+    in separate folders, and a pile of duplicates the moment they were merged.
+    Keys now start above everything already used nearby (as D13 does for
+    volume generation)."""
+    runs = [service.convert_apply(sources, registry, config) for _ in range(3)]
+    keys = []
+    for res in runs:
+        keys += [json.loads(f.read_text())["data"]["header"]["keytrol"]
+                 for f in sorted(Path(res["folder"]).glob("*.json"))]
+    assert len(keys) == 9
+    assert len(set(keys)) == 9, f"keys repeated across batches: {keys}"
+    assert keys == sorted(keys), "each batch should continue the sequence"
+
+
+def test_cross_batch_uniqueness_uses_the_right_field_per_layout(
+        tmp_path, registry, config):
+    """CartonLabel numbers pickListId, not keytrol."""
+    srcs = []
+    for i in range(2):
+        p = tmp_path / f"CL_{i}.OK"
+        shutil.copy2(DATA_DIR / "CartonLabel.OK", p)
+        srcs.append(str(p))
+    ids = []
+    for _ in range(2):
+        res = service.convert_apply(srcs, registry, config)
+        ids += [json.loads(f.read_text())["data"]["header"]["pickListId"]
+                for f in sorted(Path(res["folder"]).glob("*.json"))]
+    assert ids == ["00144", "00145", "00146", "00147"]
+
+
+def test_numbering_spaces_stay_separate_from_the_source_ok_files(
+        tmp_path, registry, config, sources):
+    """A converted CalgaryStyleHeader must not be pushed along by the .OK
+    StyleHeader it came from — different layouts, separate key spaces (D14)."""
+    res = service.convert_apply(sources, registry, config)
+    keys = [json.loads(f.read_text())["data"]["header"]["keytrol"]
+            for f in sorted(Path(res["folder"]).glob("*.json"))]
+    assert keys[0] == "550000", "started above the .OK file's own key space"

@@ -1,23 +1,25 @@
 """Which SOURCE a Calgary JSON file came from — SCAN or WMS.
 
-The two sources send **structurally identical** JSON; the only difference is
-which header field is that file's unique key (``keytrol`` for SCAN,
-``headerASNid`` for WMS on StyleHeader/DistLabel — CartonLabel uses
-``pickListId`` either way). Nothing in the payload distinguishes them: SCAN
-populates ``headerASNid`` too, and WMS carries a real-looking ``keytrol``, so
-the source has to be *declared* rather than inferred from the data.
+**The file itself says which it is: a WMS file carries a ``headerASNid``, a SCAN
+file does not.** The `.OK` formats that feed the SCAN side have no ASN ID field
+at all (StyleHeader, Preticket, CartonLabel, DistLabels and EUPreticket — only
+the two EU GTA layouts have one), so a SCAN document has nothing to put there.
 
-It is declared by NAME: a ``SCAN`` or ``WMS`` token in the file name or in any
-folder above it. Anything unlabelled falls back to the configured default
-(``WMS``), because the two mistakes are not equally bad — a WMS folder read as
-SCAN would renumber ``keytrol``, which WMS ships as a constant placeholder, so
-the fallback is chosen to fail toward "missed duplicate" rather than "fabricated
-key". The UI asks once per folder and remembers the answer, which arrives here
-as ``override``.
+That replaces an earlier belief — recorded in D27 — that SCAN populated
+``headerASNid`` too and the source therefore had to be DECLARED by name. It
+does not, so it is read from the payload instead, per FILE rather than per
+folder. Confirmed against every sample in hand: 24 of 24 carry an ASN, they are
+all WMS, and three distributionLabels that share one ``keytrol`` (140589) have
+distinct ASNs — which only works if the ASN is the identity.
 
-Matching is on whole TOKENS, not substrings: ``Calgary_SCAN_2026`` matches,
-``SCANNED`` does not. A substring match would silently point Make Unique at the
-wrong field.
+The source decides the KEY on StyleHeader/DistLabel (``keytrol`` for SCAN,
+``headerASNid`` for WMS). CartonLabel keys on ``pickListId`` under both, but
+still HAS a source and still reports it — knowing where a carton label came
+from is useful even though it changes nothing about the key.
+
+Name-based resolution is kept only as an explicit override for a caller that
+passes one; nothing in the UI does. Matching is on whole TOKENS, never
+substrings: ``Calgary_SCAN_2026`` matches, ``SCANNED`` does not.
 """
 
 from __future__ import annotations
@@ -31,7 +33,11 @@ from typing import Dict, List, Optional
 # "Calgary_SCAN-2026", "Calgary SCAN", and "SCAN.json" all yield a "SCAN" token.
 _TOKEN_SPLIT = re.compile(r"[^A-Za-z0-9]+")
 
+# The header field whose presence means "this came from WMS".
+ASN_FIELD = "headerASNid"
+
 # Where a resolution came from, most specific first.
+FROM_PAYLOAD = "the file's own headerASNid"
 FROM_OVERRIDE = "override"
 FROM_FILE = "file name"
 FROM_FOLDER = "folder name"
@@ -129,3 +135,23 @@ def resolve_source(path, sources: Dict[str, List[str]], default: str,
     if folder_hit:
         return SourceResolution(folder_hit, FROM_FOLDER, True, matched_on=folder_name)
     return SourceResolution(default, FROM_DEFAULT, False)
+
+
+def source_from_header(header: Optional[dict], sources: Dict[str, List[str]],
+                       default: str) -> SourceResolution:
+    """The source of a Calgary JSON file, read from its own header.
+
+    A populated ``headerASNid`` means WMS; anything empty — null, "", spaces, or
+    the key missing entirely — means SCAN. An unreadable header falls back to
+    the configured default and is reported UNRESOLVED, so callers can tell
+    "this file says SCAN" apart from "we could not tell".
+    """
+    if header is None:
+        return SourceResolution(default, FROM_DEFAULT, False)
+    names = set(sources or {})
+    asn = header.get(ASN_FIELD)
+    is_wms = asn is not None and str(asn).strip() != ""
+    picked = "WMS" if is_wms else "SCAN"
+    if picked not in names:                  # a site renamed its sources
+        return SourceResolution(default, FROM_DEFAULT, False)
+    return SourceResolution(picked, FROM_PAYLOAD, True, matched_on=ASN_FIELD)

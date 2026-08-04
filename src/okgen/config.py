@@ -544,12 +544,23 @@ class Config:
         return self._json_source_default
 
     def source_dependent(self, layout: Optional[str]) -> bool:
-        """True when this layout's key actually differs between sources.
+        """True when this layout's KEY actually differs between sources.
 
-        CalgaryCartonLabel maps to ``pickListId`` under both, so its source is
-        irrelevant and the UI shouldn't ask about a folder holding only those.
+        CalgaryCartonLabel maps to ``pickListId`` under both, so its source
+        changes nothing about the key. It still HAS a source — see
+        :meth:`has_source`; the two questions are separate.
         """
         return len(self.unique_field_candidates(layout)) > 1
+
+    def has_source(self, layout: Optional[str]) -> bool:
+        """True when this layout carries a SCAN/WMS source at all.
+
+        Every Calgary JSON layout does, CartonLabel included: knowing where a
+        file came from is worth reporting even where it does not change the key.
+        No ``.OK`` layout has one — they map to a single field, not a per-source
+        dict.
+        """
+        return layout is not None and isinstance(self._unique_fields.get(layout), dict)
 
     # ----- record limits -----
     def max_records(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:

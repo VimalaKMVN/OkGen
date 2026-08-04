@@ -1,19 +1,21 @@
 """SCAN vs WMS — which field is a Calgary JSON file's unique key.
 
-The two sources send structurally identical JSON and differ only in their
-identity field (``keytrol`` for SCAN, ``headerASNid`` for WMS on StyleHeader
-and DistLabel; ``pickListId`` for CartonLabel either way). Nothing in the
-payload says which is which, so the source is declared by a SCAN/WMS token in
-the file or folder name, or answered once per folder and remembered by the UI
-(arriving here as an explicit ``source``).
+**The file says which it is.** A WMS document carries a ``headerASNid``; a SCAN
+one does not, because the .OK formats feeding the SCAN side have no ASN field at
+all. So the source is read from the payload, per FILE, and the folder prompt and
+its remembered answers are gone.
+
+The source decides the KEY on StyleHeader/DistLabel (``keytrol`` for SCAN,
+``headerASNid`` for WMS). CartonLabel HAS a source and reports it, but keys on
+``pickListId`` under both — those are two separate questions.
 
 The tests that matter most:
 
-* the OTHER seven layouts are completely unaffected, whatever source is passed;
-* Make Unique renumbers the field the resolved source selects — and only that
+* the OTHER seven layouts are completely unaffected;
+* Make Unique renumbers the field the file's own source selects — and only that
   one, leaving the other source's field byte-identical;
-* ``SCANNED`` does not match ``SCAN`` (token matching, not substring), because
-  a false match would silently point Make Unique at the wrong field.
+* a SCAN file's blank ``headerASNid`` is never filled in with a fabricated
+  number, which is what happened when an unlabelled folder defaulted to WMS.
 """
 import json
 import os
@@ -23,7 +25,7 @@ import pytest
 
 from okgen.api import service
 from okgen.config import Config
-from okgen.jsonsource import resolve_source
+from okgen.jsonsource import resolve_source, source_from_header
 from okgen.layout.registry import LayoutRegistry
 
 DATA_DIR = Path(
@@ -150,204 +152,175 @@ def test_other_layouts_ignore_the_source_entirely(config, layout):
 
 
 # --------------------------------------------------------------------------- #
-# End to end: the folder name decides which field Make Unique renumbers
+# Reading the source from the payload
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("asn,expected", [
+    ("S403902978943435A", "WMS"),      # a real ASN -> WMS
+    ("", "SCAN"),                      # every shape of "no value" -> SCAN
+    ("   ", "SCAN"),
+    (None, "SCAN"),
+])
+def test_the_header_decides_the_source(asn, expected):
+    r = source_from_header({"headerASNid": asn}, SOURCES, "WMS")
+    assert r.source == expected and r.resolved is True
+
+
+def test_a_missing_key_is_scan_and_an_unreadable_header_is_not_resolved():
+    assert source_from_header({}, SOURCES, "WMS").source == "SCAN"
+    unknown = source_from_header(None, SOURCES, "WMS")
+    assert unknown.resolved is False and unknown.source == "WMS"
+
+
+# --------------------------------------------------------------------------- #
+# End to end: the FILE decides which field Make Unique renumbers
 # --------------------------------------------------------------------------- #
 def _header(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))["data"]["header"]
 
 
-def _folder_of_copies(tmp_path, name, fixture, count=3):
-    """A folder of identical files — i.e. duplicates under EITHER source."""
+def _folder_of_copies(tmp_path, name, fixture, count=3, source="WMS"):
+    """A folder of identical files — duplicates under EITHER key.
+
+    ``source`` shapes the payload rather than the folder name: SCAN files get a
+    blank ``headerASNid``, which is what a real SCAN document looks like.
+    """
     d = tmp_path / name
     d.mkdir()
+    doc = json.loads((FIX / fixture).read_text(encoding="utf-8"))
+    if source == "SCAN":
+        doc["data"]["header"]["headerASNid"] = None
     for i in range(count):
-        (d / f"f{i}.json").write_bytes((FIX / fixture).read_bytes())
+        (d / f"f{i}.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
     return d
 
 
 @pytest.mark.parametrize("layout,fixture", sorted(SOURCE_DEPENDENT.items()))
-@pytest.mark.parametrize("folder,expected_field,untouched_field", [
-    ("Calgary_SCAN_2026", "keytrol", "headerASNid"),
-    ("Calgary_WMS_out", "headerASNid", "keytrol"),
+@pytest.mark.parametrize("source,expected_field,untouched_field", [
+    ("SCAN", "keytrol", "headerASNid"),
+    ("WMS", "headerASNid", "keytrol"),
 ])
-def test_make_unique_renumbers_the_field_the_source_selects(
-        tmp_path, registry, config, layout, fixture, folder, expected_field,
+def test_make_unique_renumbers_the_field_the_payload_selects(
+        tmp_path, registry, config, layout, fixture, source, expected_field,
         untouched_field):
-    d = _folder_of_copies(tmp_path, folder, fixture)
+    """The folder name says nothing — deliberately neutral. Only the payload."""
+    d = _folder_of_copies(tmp_path, "Batch07", fixture, source=source)
     before = _header(d / "f0.json")
 
     res = service.make_unique_in_folder(d, registry, config, backup=False)
 
     assert res["rekeyed"], "identical files must be re-keyed"
     assert {r["field"] for r in res["rekeyed"]} == {expected_field}
-    # The OTHER source's field is left exactly as it was in every file.
     for f in sorted(d.iterdir()):
         assert _header(f)[untouched_field] == before[untouched_field]
-    # ...and the selected field is now unique across the folder.
     vals = [_header(f)[expected_field] for f in sorted(d.iterdir())]
     assert len(set(vals)) == len(vals)
 
 
 @pytest.mark.parametrize("layout,fixture", sorted(SOURCE_DEPENDENT.items()))
-def test_answering_the_source_beats_an_unlabelled_folder(
+def test_a_scan_file_never_gets_a_fabricated_asn(
         tmp_path, registry, config, layout, fixture):
-    """What the UI stores per folder overrides the WMS default."""
-    d = _folder_of_copies(tmp_path, "no_token_here", fixture)
-    before = _header(d / "f0.json")
-
-    res = service.make_unique_in_folder(d, registry, config, backup=False,
-                                        source="SCAN")
-
-    assert {r["field"] for r in res["rekeyed"]} == {"keytrol"}
+    """The bug this replaced: an unlabelled folder defaulted to WMS, so Make
+    Unique wrote invented ASN IDs ('1', '2') into files that have none, and
+    left the real duplicate keytrol alone."""
+    d = _folder_of_copies(tmp_path, "Batch07", fixture, source="SCAN")
+    service.make_unique_in_folder(d, registry, config, backup=False)
     for f in sorted(d.iterdir()):
-        assert _header(f)["headerASNid"] == before["headerASNid"]
+        asn = _header(f)["headerASNid"]
+        assert asn is None or str(asn).strip() == "", f"ASN fabricated: {asn!r}"
 
 
 @pytest.mark.parametrize("layout,fixture", sorted(SOURCE_DEPENDENT.items()))
-def test_tree_and_view_report_the_resolved_source(
-        tmp_path, registry, config, layout, fixture):
-    d = _folder_of_copies(tmp_path, "Calgary_SCAN_x", fixture, count=1)
+@pytest.mark.parametrize("source,key", [("SCAN", "keytrol"), ("WMS", "headerASNid")])
+def test_tree_and_view_report_the_source_from_the_file(
+        tmp_path, registry, config, layout, fixture, source, key):
+    d = _folder_of_copies(tmp_path, "Batch07", fixture, count=1, source=source)
 
-    tree = service.build_tree(d, config, registry)
-    assert tree["json_source"]["source"] == "SCAN"
-    assert tree["json_source"]["resolved"] is True
-    assert tree["children"][0]["key_field"] == "keytrol"
+    node = service.build_tree(d, config, registry)["children"][0]
+    assert node["source"] == source           # the badge
+    assert node["key_field"] == key
 
     view = service.parse_file_view(d / "f0.json", registry, config)
-    assert view["key_field"] == "keytrol"
-    assert view["json_source"]["source"] == "SCAN"
+    assert view["key_field"] == key
+    assert view["json_source"]["source"] == source
 
 
-def test_unlabelled_folder_is_reported_unresolved_so_the_ui_can_ask(
-        tmp_path, registry, config):
-    d = _folder_of_copies(tmp_path, "nothing_in_the_name",
-                          SOURCE_DEPENDENT["CalgaryStyleHeader"], count=1)
-    info = service.build_tree(d, config, registry)["json_source"]
-    assert info["resolved"] is False and info["source"] == "WMS"
-    assert info["layouts"] == ["CalgaryStyleHeader"]
-
-
-def test_folder_of_self_naming_files_is_not_asked_about(tmp_path, registry, config):
-    """Every file names its own source, so the folder's name decides nothing."""
-    d = tmp_path / "no_token_here"
+def test_one_folder_can_hold_both_sources(tmp_path, registry, config):
+    """Impossible under the old per-folder model — this is the real gain."""
+    d = tmp_path / "Mixed"
     d.mkdir()
-    for i in range(3):
-        (d / f"batch{i}_SCAN.json").write_bytes(
-            (FIX / SOURCE_DEPENDENT["CalgaryStyleHeader"]).read_bytes())
-
-    tree = service.build_tree(d, config, registry)
-    assert tree["json_source"]["resolved"] is True
-    assert tree["json_source"]["source"] == "SCAN"
-    assert all(c["key_field"] == "keytrol" for c in tree["children"])
-
-
-def test_one_named_file_overrides_the_folder_it_sits_in(tmp_path, registry, config):
-    d = tmp_path / "Calgary_WMS_out"
-    d.mkdir()
-    fx = (FIX / SOURCE_DEPENDENT["CalgaryStyleHeader"]).read_bytes()
-    (d / "ordinary.json").write_bytes(fx)
-    (d / "rerun_SCAN.json").write_bytes(fx)
+    doc = json.loads((FIX / "styleheader_fmtB.json").read_text(encoding="utf-8"))
+    (d / "wms.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    doc["data"]["header"]["headerASNid"] = None
+    (d / "scan.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
     by_name = {c["name"]: c for c in service.build_tree(d, config, registry)["children"]}
-    assert by_name["ordinary.json"]["key_field"] == "headerASNid"   # folder: WMS
-    assert by_name["rerun_SCAN.json"]["key_field"] == "keytrol"     # its own name
+    assert by_name["wms.json"]["source"] == "WMS"
+    assert by_name["wms.json"]["key_field"] == "headerASNid"
+    assert by_name["scan.json"]["source"] == "SCAN"
+    assert by_name["scan.json"]["key_field"] == "keytrol"
+
+
+def test_cartonlabel_reports_a_source_but_keys_the_same_either_way(
+        tmp_path, registry, config):
+    """Two separate questions: where it came from, and what its key is."""
+    d = tmp_path / "Cartons"
+    d.mkdir()
+    doc = json.loads((FIX / "cartonlabel_minified.json").read_text(encoding="utf-8"))
+    (d / "wms.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    doc["data"]["header"]["headerASNid"] = None
+    (d / "scan.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    by_name = {c["name"]: c for c in service.build_tree(d, config, registry)["children"]}
+    assert by_name["wms.json"]["source"] == "WMS"
+    assert by_name["scan.json"]["source"] == "SCAN"
+    for c in by_name.values():
+        assert c["key_field"] == "pickListId"      # unchanged by the source
 
 
 def test_rekeyed_files_report_which_source_they_resolved_to(tmp_path, registry, config):
-    """A mixed folder is the case where a bulk run is otherwise silent about
-    having renumbered two DIFFERENT fields."""
-    d = tmp_path / "Calgary_WMS_out"
+    d = tmp_path / "Mixed"
     d.mkdir()
-    fx = (FIX / SOURCE_DEPENDENT["CalgaryStyleHeader"]).read_bytes()
-    for n in ("a.json", "b.json", "one_SCAN.json", "two_SCAN.json"):
-        (d / n).write_bytes(fx)
+    doc = json.loads((FIX / "styleheader_fmtB.json").read_text(encoding="utf-8"))
+    for i in (0, 1):
+        (d / f"wms{i}.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    doc["data"]["header"]["headerASNid"] = None
+    for i in (0, 1):
+        (d / f"scan{i}.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
 
-    rekeyed = service.make_unique_in_folder(d, registry, config,
-                                            backup=False)["rekeyed"]
-    got = {r["file"]: (r["field"], r["source"]) for r in rekeyed if r.get("to")}
-    # One file per source keeps its key (first occurrence wins), the rest move.
-    assert got, "identical files must be re-keyed"
-    for name, (field, src) in got.items():
-        if "SCAN" in name:
-            assert (field, src) == ("keytrol", "SCAN")
-        else:
-            assert (field, src) == ("headerASNid", "WMS")
-    assert {v[1] for v in got.values()} == {"SCAN", "WMS"}
-
-
-def test_source_is_absent_for_layouts_that_do_not_care(tmp_path, registry, config):
-    d = tmp_path / "plain"
-    d.mkdir()
-    fx = (FIX / "cartonlabel_minified.json").read_bytes()
-    for n in ("a.json", "b.json"):
-        (d / n).write_bytes(fx)
-    rekeyed = service.make_unique_in_folder(d, registry, config,
-                                            backup=False)["rekeyed"]
-    assert rekeyed and all(r["source"] is None for r in rekeyed)
+    res = service.make_unique_in_folder(d, registry, config, backup=False)
+    by_file = {r["file"]: r for r in res["rekeyed"]}
+    assert by_file, "duplicates should have been re-keyed"
+    for name, r in by_file.items():
+        expected = "SCAN" if name.startswith("scan") else "WMS"
+        assert r["source"] == expected
+        assert r["field"] == ("keytrol" if expected == "SCAN" else "headerASNid")
 
 
-def test_carton_label_folder_is_never_asked_about(tmp_path, registry, config):
-    """Its key is pickListId either way, so there is nothing to ask."""
-    d = _folder_of_copies(tmp_path, "plain", "cartonlabel_minified.json", count=1)
-    assert service.build_tree(d, config, registry)["json_source"] is None
-
-
-def test_ok_file_folder_has_no_source_block(tmp_path, registry, config):
-    """A folder of .OK files must be completely unaffected."""
+def test_source_is_absent_for_ok_layouts(tmp_path, registry, config):
+    """No .OK layout has a source at all — the concept does not apply."""
     d = tmp_path / "okfiles"
     d.mkdir()
     (d / "StyleHeader.OK").write_bytes((DATA_DIR / "StyleHeader.OK").read_bytes())
-    tree = service.build_tree(d, config, registry)
-    assert tree["json_source"] is None
-    assert tree["children"][0]["key_field"] == "keytrol"      # its own, unchanged
+    node = service.build_tree(d, config, registry)["children"][0]
+    assert node["source"] is None
+    assert node["key_field"] == "keytrol"     # its one key, source-independent
+    assert config.has_source("StyleHeader") is False
 
 
-# --------------------------------------------------------------------------- #
-# The safety net for a folder whose source was only ASSUMED
-# --------------------------------------------------------------------------- #
-def _write_variant(path, keytrol, asn):
-    doc = json.loads((FIX / SOURCE_DEPENDENT["CalgaryStyleHeader"]).read_text())
-    doc["data"]["header"]["keytrol"] = keytrol
-    doc["data"]["header"]["headerASNid"] = asn
-    Path(path).write_text(json.dumps(doc))
+def test_duplicates_are_flagged_on_the_key_the_payload_selects(
+        tmp_path, registry, config):
+    d = _folder_of_copies(tmp_path, "Batch07", "styleheader_fmtB.json",
+                          count=2, source="SCAN")
+    kids = service.build_tree(d, config, registry)["children"]
+    assert all(c["duplicate"] for c in kids), "identical keytrols must be flagged"
+    assert all(c["key_field"] == "keytrol" for c in kids)
 
 
-def test_unlabelled_folder_hints_when_the_other_key_collides(tmp_path, registry, config):
-    """Distinct headerASNid but a shared keytrol => probably SCAN, not WMS."""
-    d = tmp_path / "unlabelled"
-    d.mkdir()
-    for i in range(3):
-        _write_variant(d / f"f{i}.json", keytrol="140038", asn=f"V40380420894058{i}A")
-
-    info = service.build_tree(d, config, registry)["json_source"]
-    assert info["resolved"] is False
-    assert info["hint"] and info["hint"]["field"] == "keytrol"
-
-
-def test_a_named_folder_is_never_second_guessed(tmp_path, registry, config):
-    """Real WMS files share a placeholder keytrol — that must NOT nag or warn.
-
-    This is the case that rules out comparing every candidate key for
-    duplicates: a correct WMS folder would otherwise carry a permanent warning
-    on every file that Make Unique could never clear.
-    """
-    d = tmp_path / "Calgary_WMS_real"
-    d.mkdir()
-    for i in range(3):
-        _write_variant(d / f"f{i}.json", keytrol="0", asn=f"V40380420894058{i}A")
-
-    tree = service.build_tree(d, config, registry)
-    assert tree["json_source"]["hint"] is None
-    assert not any(c["duplicate"] for c in tree["children"]), \
-        "a constant WMS keytrol must not read as a duplicate"
-
-
-def test_duplicates_are_flagged_on_the_resolved_key(tmp_path, registry, config):
-    d = tmp_path / "Calgary_SCAN_dupes"
-    d.mkdir()
-    for i in range(3):
-        _write_variant(d / f"f{i}.json", keytrol="140038", asn=f"V40380420894058{i}A")
-
-    tree = service.build_tree(d, config, registry)
-    assert all(c["duplicate"] for c in tree["children"]), \
-        "a shared keytrol IS a duplicate once the folder is known to be SCAN"
+def test_has_source_and_source_dependent_are_different_questions(config):
+    assert config.has_source("CalgaryCartonLabel") is True
+    assert config.source_dependent("CalgaryCartonLabel") is False
+    for layout in ("CalgaryStyleHeader", "CalgaryDistLabel"):
+        assert config.has_source(layout) and config.source_dependent(layout)
+    for layout in SOURCE_INDEPENDENT:
+        if not layout.startswith("Calgary"):
+            assert config.has_source(layout) is False

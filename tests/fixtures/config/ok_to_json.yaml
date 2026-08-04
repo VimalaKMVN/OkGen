@@ -48,8 +48,13 @@ conversions:
       category:       { from: category }          # 3 OR 4 digits — never padded
       totalQuantity:  { from: tot_qty, transform: strip_zeros }
       retailPrice:    { from: ret_price, transform: implied_2dp }
-      # Not listed -> template value. Notably purchaseOrderNumber (no .OK
-      # source) and headerASNid (SCAN files carry one, but `keytrol` is the key).
+      # A converted file's source is decided by this field, exactly like any
+      # other Calgary JSON: it is taken from the .OK when that layout has an
+      # ASN field, and is NULL when it does not. None of the three convertible
+      # layouts has one, so every converted file is a SCAN file — which is what
+      # makes `keytrol` its key rather than a borrowed ASN from the template.
+      headerASNid:    { from: header_asn_id, null_when_blank: true }
+      # Not listed -> template value. Notably purchaseOrderNumber (no .OK source).
 
     # --- nested arrays on the header --------------------------------------
     # An .OK section with no real rows leaves the template's single blank
@@ -129,6 +134,12 @@ conversions:
       # retailPrice. (User-confirmed against the live system — the sample files
       # in hand still carry the older un-dotted '999999' form.)
       retailPrice:    { from: price, transform: implied_2dp }
+      # A converted file's source is decided by this field, exactly like any
+      # other Calgary JSON: it is taken from the .OK when that layout has an
+      # ASN field, and is NULL when it does not. None of the three convertible
+      # layouts has one, so every converted file is a SCAN file — which is what
+      # makes `keytrol` its key rather than a borrowed ASN from the template.
+      headerASNid:    { from: header_asn_id, null_when_blank: true }
 
     # Counted from the rows actually emitted (lanes/sizes excluded on purpose).
     counts:
@@ -203,6 +214,12 @@ conversions:
       coordinateIndicator: { from: coord }
       houseNumber:      { from: house }
       retailPrice:      { from: ret_price, transform: implied_2dp, null_when_blank: true }
+      # A converted file's source is decided by this field, exactly like any
+      # other Calgary JSON: it is taken from the .OK when that layout has an
+      # ASN field, and is NULL when it does not. None of the three convertible
+      # layouts has one, so every converted file is a SCAN file — which is what
+      # makes `keytrol` its key rather than a borrowed ASN from the template.
+      headerASNid:    { from: header_asn_id, null_when_blank: true }
       # purchaseOrderNumber has no .OK source -> template value.
       # numberOfStores is NOT mapped from the .OK header: it declares 38 while
       # the file carries 91 store rows. It is counted below instead.

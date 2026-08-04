@@ -18,7 +18,7 @@ from typing import Dict, List, NamedTuple, Optional
 
 from okgen.config import Config
 from okgen.detect import detect_from_header, detect_layout, read_chain, read_header_line
-from okgen.jsonsource import resolve_source
+from okgen.jsonsource import resolve_source, source_from_header
 from okgen.layout.registry import LayoutRegistry
 from okgen.okfile import ENCODING, OkFile, Record, new_record, parse_okfile
 
@@ -211,28 +211,48 @@ def _json_header(path: Path) -> dict:
 
 
 def json_source_for(path, config: Config, override: Optional[str] = None,
-                    root=None) -> dict:
-    """Which source (SCAN/WMS) a JSON file came from — see :mod:`okgen.jsonsource`.
+                    root=None, header: Optional[dict] = None) -> dict:
+    """Which source (SCAN/WMS) a Calgary JSON file came from.
 
-    ``override`` is what the user answered for this folder, which the client
-    remembers and sends back; it beats any name-based match.
+    Read from the FILE'S OWN header: a populated ``headerASNid`` means WMS, an
+    empty or absent one means SCAN (see :mod:`okgen.jsonsource`). ``header`` is
+    accepted so callers that have already read it — the tree does, for every
+    file — pay nothing extra.
+
+    ``override`` still wins if a caller passes one, and a name-based match is
+    the last resort before the default. Nothing in the UI sends either any
+    more: the file answers for itself.
     """
+    if override:
+        return resolve_source(path, config.json_sources,
+                              config.json_source_default, override, root).to_dict()
+    if header is None:
+        try:
+            header = _json_header(path)
+        except Exception:                       # noqa: BLE001 — unreadable file
+            header = None
+    if header is not None:
+        return source_from_header(header, config.json_sources,
+                                  config.json_source_default).to_dict()
     return resolve_source(path, config.json_sources, config.json_source_default,
                           override, root).to_dict()
 
 
 def _source_name_for(path, layout: Optional[str], config: Config,
                      source: Optional[str] = None) -> Optional[str]:
-    """The source a file resolved to, or None when its layout doesn't care.
+    """The source a file resolved to, or None when the layout has none.
 
     Reported per re-keyed file so a bulk Make Unique over a MIXED folder can
     say which field it renumbered for which files — otherwise that is invisible
     (no file is open, so the editor's key row can't show it).
+
+    Note this answers for EVERY Calgary JSON layout, including CartonLabel:
+    the source is worth knowing there even though the key (``pickListId``) is
+    the same either way.
     """
-    if not config.source_dependent(layout):
+    if not config.has_source(layout):
         return None
-    return resolve_source(path, config.json_sources,
-                          config.json_source_default, source).source
+    return json_source_for(path, config, source).get("source")
 
 
 def _unique_field_for(path, layout: Optional[str], config: Config,
@@ -241,13 +261,12 @@ def _unique_field_for(path, layout: Optional[str], config: Config,
 
     Only the Calgary JSON layouts key off the source; for every other layout
     (and for CalgaryCartonLabel, whose key is ``pickListId`` either way) this is
-    exactly ``config.unique_field(layout)`` and no path walking happens.
+    exactly ``config.unique_field(layout)`` and the file is never read for it.
     """
     if not config.source_dependent(layout):
         return config.unique_field(layout)
     return config.unique_field(
-        layout, resolve_source(path, config.json_sources,
-                               config.json_source_default, source).source)
+        layout, json_source_for(path, config, source).get("source"))
 
 
 def _editable_file(path: Path) -> bool:
@@ -271,6 +290,8 @@ def _file_node(path: Path, config: Config, registry=None,
     key_value = None
     key_values: Dict[str, Optional[str]] = {}   # every candidate key (JSON only)
     is_json = False
+    json_source = None          # SCAN / WMS, from the file's own headerASNid
+    source_reason = None
     try:
         det = detect_layout(path)          # handles .OK (positional) and .json (data.type)
         layout = det.layout
@@ -280,7 +301,14 @@ def _file_node(path: Path, config: Config, registry=None,
             is_json = True
             header = _json_header(path)
             chain = (header.get("chain") or "").strip()
-            key_field = _unique_field_for(path, layout, config, source)
+            # Free: the header is already in hand, and the source is one field
+            # of it. Reported for EVERY Calgary layout — CartonLabel included,
+            # where it is informational rather than key-changing.
+            if config.has_source(layout):
+                src_info = json_source_for(path, config, source, header=header)
+                json_source = src_info.get("source")
+                source_reason = src_info.get("reason")
+            key_field = _unique_field_for(path, layout, config, source or json_source)
             if key_field:
                 v = header.get(key_field)
                 key_value = None if v is None else str(v).strip()
@@ -314,6 +342,8 @@ def _file_node(path: Path, config: Config, registry=None,
         "chain_info": chain_info,
         "layout": layout,
         "json": is_json,
+        "source": json_source,
+        "source_reason": source_reason,
         "key_field": key_field,
         "key_value": key_value,
         "key_values": key_values,
@@ -3079,7 +3109,49 @@ def convert_scope(paths, registry, config: Config) -> dict:
     }
 
 
-def _convert_one(path: Path, registry, config: Config, used_keys: set):
+def _convert_scan_dirs(sources: List[Path], out_dir: Optional[Path]) -> set:
+    """Folders whose keys a new batch must not collide with.
+
+    Each source's own folder AND its immediate subfolders — earlier batches live
+    in ``converted_*`` subfolders beside the sources — plus the destination.
+    Same reasoning as volume generation (D13): without it, a second run of the
+    same sources reproduces the first run's keys exactly.
+    """
+    dirs = set()
+    for p in sources:
+        parent = p.parent
+        dirs.add(parent)
+        try:
+            dirs.update(d for d in parent.iterdir() if d.is_dir())
+        except OSError:                             # unreadable folder — skip
+            pass
+    if out_dir is not None:
+        dirs.add(Path(out_dir))
+    return dirs
+
+
+def _convert_used_keys(sources: List[Path], out_dir: Optional[Path],
+                       registry, config: Config) -> Dict[tuple, set]:
+    """{(layout, prefix, suffix): {ints already taken}} near this batch.
+
+    Keys are per numbering SPACE, so a converted CalgaryStyleHeader never
+    collides with the .OK StyleHeader it came from — different layouts, separate
+    spaces (D14).
+    """
+    used: Dict[tuple, set] = {}
+    for folder in _convert_scan_dirs(sources, out_dir):
+        if not folder.is_dir():
+            continue
+        try:
+            found, _max = _folder_key_state(folder, registry, config, set())
+        except OSError:                             # unreadable folder — skip
+            continue
+        for space, ints in found.items():
+            used.setdefault(space, set()).update(ints)
+    return used
+
+
+def _convert_one(path: Path, registry, config: Config, used_keys: Dict[tuple, set]):
     """Convert one file in memory. Returns (name, document, report)."""
     from okgen import okjson
     layout_name, spec = _conversion_for(path, registry, config)
@@ -3102,23 +3174,22 @@ def _convert_one(path: Path, registry, config: Config, used_keys: set):
         raw = header.get(key_field)
         parts = _split_key(raw)
         if parts.value is not None:
+            # Numbering space is per (layout, prefix, suffix) — 'C:00144' and
+            # '00144' never displace each other (D14).
+            space = (spec.get("target"),) + parts.space
+            taken = used_keys.setdefault(space, set())
+            n = parts.value
+            while n in taken:
+                n += 1
             # JSON values are trimmed strings, so render directly rather than
             # via _format_key (which pads into a FIXED-width .OK field). The
-            # digit run keeps its original width, so any literal prefix/suffix
-            # stays at the same offset (D14).
-            def _render(n: int) -> str:
-                return f"{parts.prefix}{str(n).zfill(parts.width)}{parts.suffix}"
-            n = parts.value
-            while _render(n) in used_keys:
-                n += 1
-            value = _render(n)
+            # digit run keeps its width, so a literal suffix stays put.
+            value = f"{parts.prefix}{str(n).zfill(parts.width)}{parts.suffix}"
             if value != str(raw):
                 header[key_field] = value
                 report.append({"field": key_field, "provenance": "unique",
                                "value": value, "source": f"re-keyed from {raw!r}"})
-            used_keys.add(value)
-        elif raw is not None:
-            used_keys.add(str(raw))
+            taken.add(n)
     return doc, report
 
 
@@ -3131,7 +3202,7 @@ def convert_preview(paths, registry, config: Config, limit: int = 5) -> dict:
     from okgen import okjson
     scope = convert_scope(paths, registry, config)
     sel = [Path(f["path"]) for f in scope["files"]]
-    used: set = set()
+    used = _convert_used_keys(sel, None, registry, config)
     samples, errors = [], list(scope["blocked"])
     for p in sel[:limit]:
         try:
@@ -3180,7 +3251,9 @@ def convert_apply(paths, registry, config: Config, dest=None) -> dict:
             n += 1
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    used: set = set()
+    # Start above every key already used nearby, so a second batch of the same
+    # sources cannot reproduce the first batch's keys.
+    used = _convert_used_keys(sel, out_dir, registry, config)
     written, errors = [], list(scope["blocked"])
     for p in sel:
         try:
