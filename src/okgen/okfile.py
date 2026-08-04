@@ -45,6 +45,9 @@ class Record:
     # computed by walking the actual delimiters. None for fixed-width records,
     # which derive spans from the layout's start/size instead.
     field_spans: Optional[Dict[str, tuple]] = None
+    # The layout's record terminator ('\\'), so a fixed-width span can stop at
+    # the end of this record's own body — see :meth:`body_end`.
+    terminator: str = ""
 
     @property
     def marker(self) -> str:
@@ -58,6 +61,26 @@ class Record:
                 return f
         raise KeyError(f"no field {name!r} in section {self.section.name!r}")
 
+    def body_end(self) -> int:
+        """Index just past this record's last field byte.
+
+        The record terminator (``\\``) and any trailing ``\\r`` are structure,
+        not field content, so they sit outside every span — the delimited
+        walker already guarantees this (see :func:`_delim_spans`); this is the
+        fixed-width equivalent. It matters for records that are SHORTER than
+        the layout: Canada files (Winners/HomeSense) commonly stop at the last
+        field they carry, so a StyleHeader line can end ``...FREENG\\`` with
+        nothing after it.
+        """
+        end = len(self.raw)
+        while end > self.offset and self.raw[end - 1] == "\r":
+            end -= 1
+        term = self.terminator
+        if term and end - len(term) >= self.offset \
+                and self.raw[end - len(term):end] == term:
+            end -= len(term)
+        return end
+
     def _span(self, f: Field):
         """(start, end) raw-string indices for a field, or None if unsized."""
         if self.field_spans is not None:
@@ -66,7 +89,14 @@ class Record:
         if f.start is None or f.size is None:
             return None
         start = self.offset + f.start - 1
-        return start, start + f.size
+        end = start + f.size
+        # Clamp to the record's own body. On a full-length record this changes
+        # nothing (no field's span reaches the terminator); on a short one it
+        # keeps the terminator out of the last field it carries, and gives a
+        # field the record does not reach at all an empty span rather than a
+        # slice of the line ending.
+        body = self.body_end()
+        return min(start, body), min(end, body)
 
     def get(self, name: str) -> Optional[str]:
         """Raw field slice (padding included), or None if the field is unsized."""
@@ -308,7 +338,8 @@ def _assign_delimited(raws: List[str], layout: Layout) -> List[Record]:
             sec = header_sec
         else:
             sec = router.resolve(_delim_record_marker(raw, layout.delimiter))
-        rec = Record(raw=raw, offset=0, section=sec, index=i)
+        rec = Record(raw=raw, offset=0, section=sec, index=i,
+                     terminator=layout.record_terminator or "")
         if sec is not None:
             rec.field_spans = _delim_spans(
                 raw, sec, layout.delimiter, layout.record_terminator, is_header
@@ -328,7 +359,8 @@ def new_record(raw: str, section: Optional[Section], layout: Layout,
     clobbering the record-type marker and orphaning the row. Always build
     cloned/seeded rows through this helper so their spans match a parsed row's.
     """
-    rec = Record(raw=raw, offset=offset, section=section, index=index)
+    rec = Record(raw=raw, offset=offset, section=section, index=index,
+                 terminator=getattr(layout, "record_terminator", "") or "")
     if section is not None and getattr(layout, "delimited", False):
         rec.field_spans = _delim_spans(
             raw, section, layout.delimiter, layout.record_terminator, is_header
@@ -343,17 +375,20 @@ def _assign_records(raws: List[str], layout: Layout) -> List[Record]:
     header_sec = layout.sections[0] if layout.sections else None
     router = _MarkerRouter(layout.sections[1:])
     records: List[Record] = []
+    term = getattr(layout, "record_terminator", "") or ""
 
     for i, raw in enumerate(raws):
         if i == 0:
-            rec = Record(raw=raw, offset=1, section=header_sec, index=i)
+            rec = Record(raw=raw, offset=1, section=header_sec, index=i,
+                         terminator=term)
         else:
             first = raw[:1]
             marked = first in DETAIL_MARKERS
             # A marker char is a one-byte prefix (offset 1); marker-less detail
             # lines (alphanumeric first char) route under the "" marker.
             sec = router.resolve(first if marked else "")
-            rec = Record(raw=raw, offset=1 if marked else 0, section=sec, index=i)
+            rec = Record(raw=raw, offset=1 if marked else 0, section=sec,
+                         index=i, terminator=term)
             if sec is None:
                 rec.issues.append(f"marker {first!r} has no matching section")
         records.append(rec)

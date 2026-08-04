@@ -3630,3 +3630,59 @@ def test_literal_fields_keep_leading_and_middle_spaces_all_sections(
     # CartonLabel's sample has no populated section carrying a literal field
     if layout != "CartonLabel":
         assert tested > 0, f"{layout}: discovered no literal field to exercise"
+
+
+# --------------------------------------------------------------------------- #
+# Short records (Canada .OK files) through the service edit path
+# --------------------------------------------------------------------------- #
+def _canada_file(tmp_path, registry):
+    """A StyleHeader.OK truncated after `item` — the line ends '...FREENG\\'."""
+    raw = (DATA_DIR / "StyleHeader.OK").read_bytes().decode("latin-1")
+    lines = raw.split("\r\n")
+    lines[0] = lines[0][:1 + 170 - 1] + "FREENG" + "\\"
+    p = tmp_path / "CanadaStyleHeader.OK"
+    p.write_bytes("\r\n".join(lines).encode("latin-1"))
+    return p
+
+
+def test_short_record_renders_without_the_terminator(tmp_path, registry, config):
+    """The reported bug, at the layer the user sees: `item` showed as 'FREENG\\'."""
+    view = service.parse_file_view(str(_canada_file(tmp_path, registry)), registry, config)
+    vals = view["sections"][0]["records"][0]["values"]
+    assert vals["item"] == "FREENG"
+    assert vals["fact1"] == "" and vals["fact2"] == "" and vals["fact3"] == ""
+
+
+def test_short_record_edit_within_its_room_succeeds(tmp_path, registry, config):
+    p = _canada_file(tmp_path, registry)
+    service.apply_edits(str(p), [{"section_index": 0, "record_index": 0,
+                                  "field": "item", "value": "FRECAN"}],
+                        registry, config=config)
+    header = p.read_bytes().split(b"\r\n")[0]
+    assert header.endswith(b"FRECAN\\")
+
+
+def test_short_record_over_capacity_edit_is_a_field_error_not_a_crash(
+        tmp_path, registry, config):
+    """`item` is declared 20 wide but this line only reaches 6 of it. That must
+    come back as a per-field EditError (which the editor shows beside the
+    field), not as a raw ValueError escaping as a 500."""
+    p = _canada_file(tmp_path, registry)
+    before = p.read_bytes()
+    with pytest.raises(service.EditError) as ei:
+        service.apply_edits(str(p), [{"section_index": 0, "record_index": 0,
+                                      "field": "item", "value": "FRENCHENGLISH"}],
+                            registry, config=config)
+    assert "line ends" in str(ei.value)
+    assert p.read_bytes() == before, "a refused edit must write nothing"
+
+
+def test_short_record_absent_field_edit_is_a_field_error(tmp_path, registry, config):
+    p = _canada_file(tmp_path, registry)
+    before = p.read_bytes()
+    with pytest.raises(service.EditError) as ei:
+        service.apply_edits(str(p), [{"section_index": 0, "record_index": 0,
+                                      "field": "fact1", "value": "X"}],
+                            registry, config=config)
+    assert "not present in this record" in str(ei.value)
+    assert p.read_bytes() == before

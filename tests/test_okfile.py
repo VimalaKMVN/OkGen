@@ -279,3 +279,80 @@ def test_eu_delimited_edit_roundtrips(registry, filename):
 
     h.set("keytrol", old_key)
     assert okf.to_bytes() == clean, "reverting must restore exact bytes"
+
+
+# --------------------------------------------------------------------------- #
+# Short records — Canada (Winners / HomeSense) .OK files commonly stop at the
+# last field they actually carry, so the line ends '...FREENG\' with nothing
+# after it. The terminator must stay OUT of that last field, and the fields the
+# line never reaches must read blank.
+# --------------------------------------------------------------------------- #
+def _canada_styleheader(tmp_path, item="FREENG"):
+    """A real StyleHeader.OK truncated after `item`, ending at the terminator."""
+    raw = (DATA_DIR / "StyleHeader.OK").read_bytes().decode("latin-1")
+    lines = raw.split("\r\n")
+    item_start = 1 + 170 - 1                     # header offset + item.start - 1
+    lines[0] = lines[0][:item_start] + item + "\\"
+    p = tmp_path / "CanadaStyleHeader.OK"
+    p.write_bytes("\r\n".join(lines).encode("latin-1"))
+    return p
+
+
+def test_short_record_keeps_the_terminator_out_of_the_last_field(registry, tmp_path):
+    """The reported bug: `item` rendered as 'FREENG\\' (terminator, and the \\r,
+    bleeding into the field) because a fixed-width span was sliced straight out
+    of a line that ends before the field does."""
+    okf = parse_okfile(_canada_styleheader(tmp_path), registry=registry)
+    h = okf.sections()["Header"][0]
+    assert h.get("item") == "FREENG"
+    assert "\\" not in h.get("item") and "\r" not in h.get("item")
+
+
+def test_short_record_reads_missing_trailing_fields_as_blank(registry, tmp_path):
+    """fact1-3 are simply not in the file, and must stay blank — never a slice
+    of the line ending."""
+    okf = parse_okfile(_canada_styleheader(tmp_path), registry=registry)
+    h = okf.sections()["Header"][0]
+    for fld in ("fact1", "fact2", "fact3"):
+        assert h.get(fld) == "", f"{fld} = {h.get(fld)!r}"
+    assert h.get("keytrol") == "550000"           # fields BEFORE the cut are intact
+    assert h.get("size_rec") == "04"
+
+
+def test_short_record_roundtrips_byte_exact(registry, tmp_path):
+    p = _canada_styleheader(tmp_path)
+    okf = parse_okfile(p, registry=registry)
+    assert okf.to_bytes() == p.read_bytes()
+
+
+def test_short_record_edit_keeps_the_line_length_and_terminator(registry, tmp_path):
+    """Editing the truncated field writes within its real room, so the record
+    terminator is not pushed and the line keeps its length."""
+    p = _canada_styleheader(tmp_path)
+    okf = parse_okfile(p, registry=registry)
+    h = okf.sections()["Header"][0]
+    before = len(h.raw)
+    h.set("item", "FRECAN", literal=True)
+    assert h.get("item") == "FRECAN"
+    assert len(h.raw) == before
+    assert h.raw.rstrip("\r").endswith("FRECAN\\")
+
+
+def test_short_record_refuses_a_value_the_line_has_no_room_for(registry, tmp_path):
+    """`item` is declared 20 wide, but this record only reaches 6 of it —
+    writing more would move the terminator, so it is refused, not truncated."""
+    okf = parse_okfile(_canada_styleheader(tmp_path), registry=registry)
+    h = okf.sections()["Header"][0]
+    with pytest.raises(ValueError):
+        h.set("item", "FRENCHENGLISH", literal=True)
+    assert h.get("item") == "FREENG", "a refused write must change nothing"
+
+
+def test_full_length_records_are_unaffected(registry, tmp_path):
+    """The clamp is a no-op wherever the record reaches its declared length —
+    the reference StyleHeader still reads its trailing fields in full."""
+    okf = parse_okfile(DATA_DIR / "StyleHeader.OK", registry=registry)
+    h = okf.sections()["Header"][0]
+    assert h.get("item") == "ITEMITEMITEMITEMITEM"
+    assert h.get("fact3") == "FACT3FACT3FACT3FACT3"
+    assert len(h.get("fact3")) == 20

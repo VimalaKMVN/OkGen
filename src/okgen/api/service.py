@@ -691,10 +691,30 @@ def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
         except KeyError as exc:
             errors.append({"edit": e, "error": str(exc)})
             continue
+        # The record's OWN capacity, not the layout's declared size: a short
+        # record (Canada .OK files often stop at the last field they carry)
+        # holds fewer characters than the layout allows, and a field it does
+        # not reach at all holds none. Without this the write escapes as a raw
+        # ValueError from Record.set instead of a per-field message.
+        # JSON records address values by key path, not by span, so they have no
+        # line to run out of — the layout size is the only limit there.
+        span_of = getattr(rec, "_span", None)
+        span = span_of(f) if span_of is not None else None
+        room = (span[1] - span[0]) if span is not None else f.size
         if f.size is not None and len(e["value"]) > f.size:
             errors.append({
                 "edit": e,
                 "error": f"value '{e['value']}' exceeds field '{e['field']}' size {f.size}",
+            })
+        elif room is not None and len(e["value"]) > room:
+            errors.append({
+                "edit": e,
+                "error": (f"value '{e['value']}' does not fit field '{e['field']}' "
+                          f"in this record: the line ends after {room} character(s) "
+                          f"of it, so writing more would move the record terminator"
+                          if room else
+                          f"field '{e['field']}' is not present in this record — "
+                          f"the line ends before it, so it cannot be edited"),
             })
         # Chain edits cannot cross an isolation boundary (e.g. Europe <-> NA).
         if config is not None and e["field"] == "chain":
