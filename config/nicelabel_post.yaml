@@ -5,9 +5,10 @@
 # .json file is POSTed to an endpoint, one request per file, so every file gets
 # its own success/failure verdict.
 #
-# Flow per file:  copy into `json_folder`  ->  POST  ->  move that COPY into
-# `json_folder/Processed` (success) or `json_folder/failed` (failure).
-# Your original selected file is NEVER moved or modified.
+# Flow per file:  read the bytes  ->  POST.  Nothing is staged, copied or moved:
+# your selected files are READ and never written, and the receiving system owns
+# the record of what it accepted. The whole batch goes over ONE connection kept
+# alive, which is what keeps a large run fast.
 #
 # ############################################################################
 # # WINDOWS PATHS: DO NOT PUT A BACKSLASH PATH IN "DOUBLE QUOTES".           #
@@ -25,10 +26,6 @@
 # The URL that receives the POST. Required.
 endpoint_url: "CHANGE_ME"          # e.g. "https://nicelabel.internal.tjx.com/api/labels"
 
-# Staging folder. Selected files are copied here to be posted, and the copies
-# end up in Processed/ or failed/ underneath it. Must already exist.
-# SINGLE quotes for a Windows path — see the banner at the top of this file.
-json_folder: 'CHANGE_ME'           # e.g. 'D:\NiceLabel\TJX GTA\Automation\JsonPost'
 
 # ---- Credentials (HTTP Basic) -------------------------------------------- #
 # Leave `username` blank to send no Authorization header at all.
@@ -82,13 +79,14 @@ stop_on_auth_failure: true
 verify_tls: true
 ca_bundle: ""
 
-# ---- Housekeeping --------------------------------------------------------- #
-processed_dir: "Processed"
-failed_dir: "failed"
-
-# Write a per-run log (okgen_send_<timestamp>.log) into json_folder — the
-# per-file outcomes, for handing evidence to the vendor when files bounce.
-# Credentials are never written to it.
+# ---- Run log -------------------------------------------------------------- #
+# The full report is ALWAYS shown in OkGen after a run. It is also written to
+# okgen_send_<timestamp>.log for handing evidence to the vendor when files
+# bounce. Credentials are never written to it.
+#
+# Default location is a `logs` folder NEXT TO OKGEN. Name a folder here to put
+# it elsewhere (SINGLE quotes for a Windows path — see the banner above).
+log_folder: ""
 write_log: true
 
 # Shown in the confirmation dialog before posting (JSON selections only).

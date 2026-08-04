@@ -24,8 +24,11 @@ const RESULT = {
   summary: {
     total: 3, posted: 2, failed: 1, skipped: 0, not_attempted: 0,
     failures_by_cause: { server: 1 }, aborted: "",
-    log: "/stage/okgen_send_20260728_101500.log",
-    failed_dir: "/stage/failed",
+    log: "/okgen/logs/okgen_send_20260728_101500.log",
+    report: "OkGen — Send to NiceLabel (JSON POST)\nResult   : 2 posted, 1 failed",
+    endpoint: "https://nicelabel.example/api/labels",
+    username: "labeluser",
+    elapsed_seconds: 1.4, files_per_second: 2.1,
   },
   results: [
     { name: "A.json", outcome: "posted", message: "HTTP 200" },
@@ -58,7 +61,8 @@ const src = fs.readFileSync(APP, "utf8");
 const run = new Function(
   "document", "window", "localStorage", "Option", "fetch", "confirm", "prompt", "alert",
   src + "\n;return { state, sendToNiceLabel, confirmSend, buildSendReport," +
-        "\n           sendMenuLabel, showCopyAnimation, updateSendProgress };");
+        "\n           showSendReport, sendMenuLabel, showCopyAnimation," +
+        "\n           updateSendProgress };");
 
 let api;
 try {
@@ -111,7 +115,21 @@ check("the failed file is named with its reason",
       /C\.json — HTTP 500 Internal Server Error/.test(reportText));
 check("failures are grouped by cause", /1 server/.test(reportText));
 check("the log path is offered", /okgen_send_20260728/.test(reportText));
-check("it says where the failed copies went", /\/stage\/failed/.test(reportText));
+
+// --- the full run report is viewable in-app, and copyable -------------------
+api.showSendReport(RESULT);
+const reportModal = doc.body.children.filter(
+  (e) => (e.className || "").includes("modal-overlay")).pop();
+check("a report window opens", !!reportModal);
+const rmText = descendants(reportModal).map((e) => e.textContent).join(" | ");
+const rmClasses = descendants(reportModal).map((e) => e.className || "").join(" ");
+check("the report window is wide", /modal-wide/.test(rmClasses));
+check("it shows the summary line", /2 posted, 1 failed/.test(rmText));
+check("it shows the endpoint and user",
+      /nicelabel\.example/.test(rmText) && /labeluser/.test(rmText));
+check("it shows throughput", /files\/sec/.test(rmText) || /2\.1/.test(rmText));
+check("it offers a Copy report button", /Copy report/.test(rmText));
+check("it names the log file it also wrote", /okgen_send_20260728/.test(rmText));
 
 const aborted = api.buildSendReport({
   ...RESULT,

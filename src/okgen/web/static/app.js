@@ -2048,23 +2048,27 @@ function pickTosca(scripts, count, warning) {
 
 function showToscaResult(res) {
   const ov = el("div", "modal-overlay");
-  const card = el("div", "modal-card");
+  const card = el("div", "modal-card modal-wide");
   card.appendChild(el("h3", "modal-title", `TOSCA '${res.script}' — ${res.written} row(s) written`));
-  card.appendChild(el("div", "modal-dest", res.workbook));
+  // Everything below the title scrolls, so long .bat/workbook paths and long row
+  // lists stay inside the window instead of running off it.
+  const body = el("div", "modal-body");
+  card.appendChild(body);
+  body.appendChild(el("div", "modal-dest", res.workbook));
   if (res.launched) {
     const ok = el("div", "tosca-launch ok",
       "▶ TOSCA started (fire-and-forget). Launched .bat: " + (res.bat || "?"));
-    card.appendChild(ok);
+    body.appendChild(ok);
   } else if (res.launch_error) {
     const bad = el("div", "tosca-launch warn", "TOSCA not started: " + res.launch_error);
-    card.appendChild(bad);
+    body.appendChild(bad);
   }
   const rows = res.rows || [];
   if (rows.length) {
     const tbl = el("div", "tosca-rows");
     rows.forEach((r) => tbl.appendChild(
       el("div", "tosca-row", `${r.chain} · ${r.process} · ${r.format}`)));
-    card.appendChild(tbl);
+    body.appendChild(tbl);
   }
   // Files this script doesn't apply to (.OK selected for a JSON script, or vice
   // versa) — reported, never silently dropped.
@@ -2075,7 +2079,7 @@ function showToscaResult(res) {
     box.appendChild(el("span", "modal-warn-text",
       `${skipped.length} file(s) not applicable to this script: `
       + skipped.map((s) => s.file).join(", ")));
-    card.appendChild(box);
+    body.appendChild(box);
   }
   const errs = res.errors || [];
   if (errs.length) {
@@ -2083,7 +2087,7 @@ function showToscaResult(res) {
     box.appendChild(el("span", "modal-warn-icon", "⚠"));
     box.appendChild(el("span", "modal-warn-text",
       `${errs.length} file(s) could not be used: ` + errs.map((e) => `${e.file} (${e.error})`).join("; ")));
-    card.appendChild(box);
+    body.appendChild(box);
   }
   const acts = el("div", "modal-actions");
   const ok = el("button", "btn btn-primary", "Close");
@@ -2251,9 +2255,62 @@ function buildSendReport(res) {
     box.appendChild(list);
   }
   if (sum && sum.log) box.appendChild(el("div", "send-report-log", `Log: ${sum.log}`));
-  if (sum && sum.failed) box.appendChild(el("div", "send-report-log",
-    `Failed copies are in ${sum.failed_dir}`));
   return box;
+}
+
+// The full run report — same text as the log file, shown in OkGen so nobody has
+// to go looking for it, with one click to put it on the clipboard.
+function showSendReport(res) {
+  const sum = res.summary || {};
+  const ov = el("div", "modal-overlay");
+  const card = el("div", "modal-card modal-wide");
+  card.appendChild(el("h3", "modal-title",
+    `Send report — ${sum.posted || 0} posted, ${sum.failed || 0} failed`
+    + (sum.skipped ? `, ${sum.skipped} skipped` : "")));
+
+  const body = el("div", "modal-body");
+  card.appendChild(body);
+
+  const meta = [];
+  if (sum.endpoint) meta.push(sum.endpoint + (sum.username ? `  (user: ${sum.username})` : ""));
+  if (sum.elapsed_seconds != null) {
+    meta.push(`${sum.elapsed_seconds}s`
+      + (sum.files_per_second ? `  ·  ${sum.files_per_second} files/sec` : ""));
+  }
+  if (meta.length) body.appendChild(el("div", "modal-dest", meta.join("   ·   ")));
+  if (sum.aborted) {
+    const warn = el("div", "modal-warn");
+    warn.appendChild(el("span", "modal-warn-icon", "⚠"));
+    warn.appendChild(el("span", "modal-warn-text", sum.aborted));
+    body.appendChild(warn);
+  }
+  const pre = el("pre", "send-report-text");
+  pre.textContent = sum.report || "(no report)";
+  body.appendChild(pre);
+  if (sum.log) body.appendChild(el("div", "send-report-log", `Also written to: ${sum.log}`));
+
+  const acts = el("div", "modal-actions");
+  const copy = el("button", "btn", "Copy report");
+  copy.addEventListener("click", async () => {
+    const text = sum.report || "";
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      // Clipboard API needs a secure context; fall back to a scratch textarea.
+      const ta = el("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } finally { ta.remove(); }
+    }
+    copy.textContent = "Copied ✓";
+    setTimeout(() => { copy.textContent = "Copy report"; }, 1600);
+  });
+  const ok = el("button", "btn btn-primary", "Close");
+  ok.addEventListener("click", () => ov.remove());
+  acts.appendChild(copy); acts.appendChild(ok); card.appendChild(acts);
+  ov.appendChild(card); document.body.appendChild(ov);
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
+  ok.focus();
 }
 
 function finishCopyAnimation(res) {
@@ -2281,9 +2338,16 @@ function finishCopyAnimation(res) {
   if (sub) sub.remove();
   if (post && (er || res.summary.skipped)) card.appendChild(buildSendReport(res));
   if (!card.querySelector(".send-ok-btn")) {
+    const row = el("div", "send-ok-row");
+    if (post && res.summary && res.summary.report) {
+      const view = el("button", "btn send-ok-btn", "View report");
+      view.addEventListener("click", () => { hideCopyAnimation(); showSendReport(res); });
+      row.appendChild(view);
+    }
     const btn = el("button", "btn btn-primary send-ok-btn", "OK");
     btn.addEventListener("click", hideCopyAnimation);
-    card.appendChild(btn);
+    row.appendChild(btn);
+    card.appendChild(row);
     btn.focus();   // Enter/Space closes it
   }
 }
@@ -3003,18 +3067,20 @@ function confirmConvert(pv) {
 
 function showConvertResult(res) {
   const ov = el("div", "modal-overlay");
-  const card = el("div", "modal-card");
+  const card = el("div", "modal-card modal-wide");
   card.appendChild(el("h3", "modal-title", `Converted ${res.written} file(s)`));
-  card.appendChild(el("div", "modal-dest", res.folder));
+  const body = el("div", "modal-body");
+  card.appendChild(body);
+  body.appendChild(el("div", "modal-dest", res.folder));
   const tbl = el("div", "tosca-rows");
   (res.files || []).forEach((f) =>
     tbl.appendChild(el("div", "tosca-row", `${f.source}  →  ${f.name}`)));
-  card.appendChild(tbl);
+  body.appendChild(tbl);
   (res.errors || []).forEach((e) => {
     const box = el("div", "modal-warn");
     box.appendChild(el("span", "modal-warn-icon", "⚠"));
     box.appendChild(el("span", "modal-warn-text", `${e.file}: ${e.error}`));
-    card.appendChild(box);
+    body.appendChild(box);
   });
   const acts = el("div", "modal-actions");
   const ok = el("button", "btn btn-primary", "Close");

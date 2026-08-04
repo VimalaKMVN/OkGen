@@ -8,8 +8,9 @@ happily agree with whatever the code does.
 
 import json
 import threading
+from pathlib import Path
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
@@ -27,15 +28,29 @@ class _Endpoint:
 
     ``plan`` is a list of (status, body) consumed one per request; once it runs
     out the last entry repeats. ``delay`` sleeps before replying (for timeouts).
+    ``close_after`` closes the connection after that many requests, so the
+    stale-keep-alive path can be exercised.
+
+    Speaks HTTP/1.1 so keep-alive is available, and counts CONNECTIONS as well
+    as requests — that count is what proves the batch reuses one socket.
     """
 
-    def __init__(self, plan=None, delay=0.0):
+    def __init__(self, plan=None, delay=0.0, close_after=0):
         self.plan = list(plan or [(200, '{"status":"OK"}')])
         self.delay = delay
+        self.close_after = close_after
         self.requests = []          # (headers, body) per received POST
+        self.connections = 0        # how many sockets the client opened
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"       # without this there is no keep-alive
+
+            def setup(self):
+                outer.connections += 1
+                self._served = 0
+                super().setup()
+
             def do_POST(self):
                 length = int(self.headers.get("Content-Length") or 0)
                 payload = self.rfile.read(length)
@@ -45,16 +60,21 @@ class _Endpoint:
                 i = min(len(outer.requests) - 1, len(outer.plan) - 1)
                 status, body = outer.plan[i]
                 raw = body.encode("utf-8")
+                self._served += 1
+                drop = outer.close_after and self._served >= outer.close_after
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(raw)))
+                if drop:
+                    self.send_header("Connection", "close")
+                    self.close_connection = True
                 self.end_headers()
                 self.wfile.write(raw)
 
             def log_message(self, *a):      # keep pytest output clean
                 pass
 
-        self.server = HTTPServer(("127.0.0.1", 0), Handler)
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
     @property
@@ -71,10 +91,9 @@ class _Endpoint:
         self.server.server_close()
 
 
-def _cfg(endpoint, folder, **over):
+def _cfg(endpoint, folder=None, **over):
     raw = {
         "endpoint_url": endpoint,
-        "json_folder": str(folder),
         "username": "labeluser",
         "password": "s3cret",
         "retries": 0,
@@ -87,7 +106,8 @@ def _cfg(endpoint, folder, **over):
 
 
 def _files(tmp_path, n=1, prefix="Style"):
-    """n real .json files in a 'working' folder, plus a separate staging folder."""
+    """n real .json files in a 'working' folder, plus a scratch folder that the
+    run must leave completely alone (there is no staging any more)."""
     work = tmp_path / "work"
     work.mkdir(exist_ok=True)
     stage = tmp_path / "stage"
@@ -109,7 +129,9 @@ def _run(paths, raw):
 # The happy path
 # --------------------------------------------------------------------------- #
 
-def test_posts_each_file_and_files_it_under_processed(tmp_path):
+def test_posts_each_file_and_writes_nothing_to_disk(tmp_path):
+    """One request per file, and NO filesystem side effects at all — there is no
+    staging folder, no Processed/, no failed/."""
     paths, stage = _files(tmp_path, 3)
     with _Endpoint() as ep:
         res = _run(paths, _cfg(ep.url, stage))
@@ -117,9 +139,9 @@ def test_posts_each_file_and_files_it_under_processed(tmp_path):
     assert res["summary"]["posted"] == 3
     assert res["summary"]["failed"] == 0
     assert len(ep.requests) == 3                      # one request per file
-    assert sorted(p.name for p in (stage / "Processed").iterdir()) == [
-        "Style0.json", "Style1.json", "Style2.json"]
-    assert list((stage / "failed").iterdir()) == []
+    assert list(stage.iterdir()) == [], "the run wrote something to disk"
+    assert sorted(p.name for p in (tmp_path / "work").iterdir()) == [
+        "Style0.json", "Style1.json", "Style2.json"]  # sources exactly as they were
 
 
 def test_the_original_file_is_never_moved_or_modified(tmp_path):
@@ -182,7 +204,7 @@ def test_multipart_mode_wraps_the_file(tmp_path):
 # Failures
 # --------------------------------------------------------------------------- #
 
-def test_server_error_lands_in_failed_with_the_response_body(tmp_path):
+def test_server_error_is_reported_with_the_response_body(tmp_path):
     paths, stage = _files(tmp_path, 1)
     with _Endpoint(plan=[(500, "loader offline")]) as ep:
         res = _run(paths, _cfg(ep.url, stage))
@@ -192,8 +214,7 @@ def test_server_error_lands_in_failed_with_the_response_body(tmp_path):
     assert r["status"] == 500
     assert r["error_class"] == nlp.ERR_SERVER
     assert "loader offline" in r["body"]
-    assert [p.name for p in (stage / "failed").iterdir()] == ["Style0.json"]
-    assert list((stage / "Processed").iterdir()) == []
+    assert list(stage.iterdir()) == []          # a failure writes nothing either
 
 
 def test_a_5xx_is_retried_and_a_4xx_is_not(tmp_path):
@@ -215,7 +236,6 @@ def test_a_transient_failure_that_recovers_is_a_success(tmp_path):
         res = _run(paths, _cfg(ep.url, stage, retries=2))
     assert res["summary"]["posted"] == 1
     assert res["results"][0]["attempts"] == 2
-    assert [p.name for p in (stage / "Processed").iterdir()] == ["Style0.json"]
 
 
 def test_auth_failure_stops_the_run_and_leaves_the_rest_untouched(tmp_path):
@@ -228,9 +248,8 @@ def test_auth_failure_stops_the_run_and_leaves_the_rest_untouched(tmp_path):
     assert outcomes == ["failed"] + ["not_attempted"] * 4
     assert res["summary"]["not_attempted"] == 4
     assert "authentication" in res["summary"]["aborted"].lower()
-    # The four untried files were never even staged.
-    assert [p.name for p in (stage / "failed").iterdir()] == ["Style0.json"]
-    assert list((stage / "Processed").iterdir()) == []
+    # The four untried files were never read, posted or touched in any way.
+    assert list(stage.iterdir()) == []
 
 
 def test_stop_on_auth_failure_can_be_turned_off(tmp_path):
@@ -249,7 +268,6 @@ def test_a_2xx_whose_body_says_error_counts_as_failed(tmp_path):
     assert r["outcome"] == "failed"
     assert r["status"] == 200
     assert r["error_class"] == nlp.ERR_BODY
-    assert [p.name for p in (stage / "failed").iterdir()] == ["Style0.json"]
 
 
 def test_a_2xx_missing_the_required_marker_counts_as_failed(tmp_path):
@@ -300,7 +318,9 @@ def test_non_json_files_are_skipped_not_posted(tmp_path):
     assert [r["outcome"] for r in res["results"]] == ["posted", "skipped"]
 
 
-def test_two_selected_files_with_the_same_name_do_not_clobber_each_other(tmp_path):
+def test_two_selected_files_with_the_same_name_are_both_sent(tmp_path):
+    """Nothing is staged, so identically-named files from different folders can
+    no longer clobber each other — each is read and posted on its own."""
     a = tmp_path / "a"
     b = tmp_path / "b"
     stage = tmp_path / "stage"
@@ -312,8 +332,9 @@ def test_two_selected_files_with_the_same_name_do_not_clobber_each_other(tmp_pat
         res = _run([str(a / "Same.json"), str(b / "Same.json")],
                    _cfg(ep.url, stage))
     assert res["summary"]["posted"] == 2
-    assert sorted(p.name for p in (stage / "Processed").iterdir()) == [
-        "Same (1).json", "Same.json"]
+    assert len(ep.requests) == 2
+    bodies = sorted(json.loads(payload)["from"] for _hdrs, payload in ep.requests)
+    assert bodies == ["a", "b"], "both distinct payloads must reach the endpoint"
 
 
 # --------------------------------------------------------------------------- #
@@ -328,7 +349,7 @@ def test_summary_counts_and_failure_breakdown(tmp_path):
     assert (s["total"], s["posted"], s["failed"], s["skipped"]) == (3, 1, 2, 0)
     assert s["failures_by_cause"] == {nlp.ERR_SERVER: 1, nlp.ERR_CLIENT: 1}
     assert s["elapsed_seconds"] >= 0
-    assert s["processed_dir"].endswith("Processed")
+    assert s["files_per_second"] is None or s["files_per_second"] >= 0
 
 
 def test_progress_is_reported_as_it_goes(tmp_path):
@@ -345,7 +366,8 @@ def test_progress_is_reported_as_it_goes(tmp_path):
 def test_run_log_records_every_file(tmp_path):
     paths, stage = _files(tmp_path, 2)
     with _Endpoint(plan=[(200, "ok"), (500, "boom")]) as ep:
-        res = _run(paths, _cfg(ep.url, stage, write_log=True))
+        res = _run(paths, _cfg(ep.url, stage, write_log=True,
+                               log_folder=str(tmp_path / "logs")))
     log = res["summary"]["log"]
     assert log
     text = open(log, encoding="utf-8").read()
@@ -384,20 +406,22 @@ def test_unconfigured_endpoint_is_a_clear_error(tmp_path):
     with pytest.raises(nlp.PostError, match="not configured"):
         nlp.run([], {})
     with pytest.raises(nlp.PostError, match="endpoint_url"):
-        nlp.run([], {"endpoint_url": "CHANGE_ME", "json_folder": str(tmp_path)})
-    with pytest.raises(nlp.PostError, match="json_folder"):
-        nlp.run([], {"endpoint_url": "http://x/y", "json_folder": "CHANGE_ME"})
+        nlp.run([], {"endpoint_url": "CHANGE_ME"})
 
 
-def test_a_missing_staging_folder_fails_before_anything_is_sent(tmp_path):
+def test_no_folder_is_required_at_all(tmp_path):
+    """Regression for the removed staging folder: a run needs only an endpoint
+    and credentials, and must not demand any folder exist."""
     paths, _ = _files(tmp_path, 1)
-    with pytest.raises(nlp.PostError, match="not found or unreachable"):
-        _run(paths, _cfg("http://127.0.0.1:9/x", tmp_path / "nope"))
+    with _Endpoint() as ep:
+        res = _run(paths, {"endpoint_url": ep.url, "username": "u",
+                           "password": "p", "write_log": False, "retries": 0})
+    assert res["summary"]["posted"] == 1
 
 
 def test_endpoint_must_be_http(tmp_path):
     with pytest.raises(nlp.PostError, match="http"):
-        nlp.run([], {"endpoint_url": "ftp://host/x", "json_folder": str(tmp_path)})
+        nlp.run([], {"endpoint_url": "ftp://host/x"})
 
 
 def test_password_reads_an_environment_variable(tmp_path, monkeypatch):
@@ -438,7 +462,7 @@ def test_describe_reports_why_it_is_unconfigured(tmp_path):
 
 def test_config_loads_the_yaml_block(tmp_path):
     (tmp_path / "nicelabel_post.yaml").write_text(
-        "endpoint_url: http://x/y\njson_folder: /tmp/j\n", encoding="utf-8")
+        "endpoint_url: http://x/y\nlog_folder: /tmp/j\n", encoding="utf-8")
     cfg = Config.load(tmp_path)
     assert cfg.nicelabel_post()["endpoint_url"] == "http://x/y"
 
@@ -461,7 +485,7 @@ def test_a_double_quoted_windows_path_is_diagnosed_not_blamed_on_the_user(tmp_pa
     """
     (tmp_path / "nicelabel_post.yaml").write_text(
         'endpoint_url: "https://labels.example/api"\n'
-        'json_folder: "D:\\NiceLabel\\TJX GTA\\Automation\\JsonPost"\n'
+        'log_folder: "D:\\NiceLabel\\TJX GTA\\Automation\\Logs"\n'
         'username: "labeluser"\n'
         'password: "secret"\n', encoding="utf-8")
     cfg = Config.load(tmp_path)
@@ -484,12 +508,12 @@ def test_a_double_quoted_windows_path_is_diagnosed_not_blamed_on_the_user(tmp_pa
 def test_the_same_windows_path_in_single_quotes_loads_fine(tmp_path):
     (tmp_path / "nicelabel_post.yaml").write_text(
         "endpoint_url: 'https://labels.example/api'\n"
-        "json_folder: 'D:\\NiceLabel\\TJX GTA\\Automation\\JsonPost'\n"
+        "log_folder: 'D:\\NiceLabel\\TJX GTA\\Automation\\Logs'\n"
         "username: 'labeluser'\n"
         "password: 'secret'\n", encoding="utf-8")
     cfg = Config.load(tmp_path)
     assert cfg.nicelabel_post_error() == ""
-    assert cfg.nicelabel_post()["json_folder"] == "D:\\NiceLabel\\TJX GTA\\Automation\\JsonPost"
+    assert cfg.nicelabel_post()["log_folder"] == "D:\\NiceLabel\\TJX GTA\\Automation\\Logs"
     scope = service.send_scope([str(tmp_path / "a.json")], cfg)
     assert scope["configured"] is True
     assert scope["destination"] == "https://labels.example/api"
@@ -573,8 +597,8 @@ def test_start_send_job_fails_fast_on_bad_config(tmp_path):
     with pytest.raises(service.EditError, match="not configured"):
         service.start_send_job(paths, cfg)
 
-    cfg = _service_cfg("http://127.0.0.1:9/x", tmp_path / "missing")
-    with pytest.raises(service.EditError, match="not found or unreachable"):
+    cfg = Config({}, [], nicelabel_post={"endpoint_url": "CHANGE_ME"})
+    with pytest.raises(service.EditError, match="endpoint_url"):
         service.start_send_job(paths, cfg)
 
 
@@ -596,9 +620,100 @@ def test_send_job_runs_in_the_background_and_reports_its_result(tmp_path):
     assert status["done"] == 3
     assert status["posted"] == 2 and status["failed"] == 1
     assert status["result"]["summary"]["posted"] == 2
-    assert [p.name for p in (stage / "failed").iterdir()] == ["Style2.json"]
+    assert status["result"]["summary"]["failures_by_cause"] == {nlp.ERR_SERVER: 1}
+    assert list(stage.iterdir()) == []          # no staging, nothing written
 
 
 def test_an_unknown_job_id_is_an_error():
     with pytest.raises(service.EditError, match="unknown"):
         service.send_job_status("nope")
+
+
+# --------------------------------------------------------------------------- #
+# Connection reuse — the reason a big run is fast
+# --------------------------------------------------------------------------- #
+def test_the_whole_batch_goes_over_one_connection(tmp_path):
+    """The fix for the slow-run complaint. urllib opened (and closed) a fresh
+    connection per file, so an N-file run paid N TCP+TLS handshakes before the
+    server did any work. One kept-alive connection pays that once."""
+    paths, stage = _files(tmp_path, 8)
+    with _Endpoint() as ep:
+        res = _run(paths, _cfg(ep.url, stage))
+    assert res["summary"]["posted"] == 8
+    assert len(ep.requests) == 8
+    # Every request announced keep-alive, and the server saw them all.
+    assert all(h.get("Connection", "").lower() == "keep-alive"
+               for h, _payload in ep.requests)
+    assert ep.connections == 1, (
+        f"expected one connection for the batch, server accepted {ep.connections}")
+
+
+def test_a_dropped_keepalive_connection_is_retried_transparently(tmp_path):
+    """A server may close a kept-alive connection at any time. That is a
+    transport detail, not a failure worth reporting to the user."""
+    paths, stage = _files(tmp_path, 4)
+    with _Endpoint(close_after=2) as ep:
+        res = _run(paths, _cfg(ep.url, stage))
+    assert res["summary"]["posted"] == 4, res["summary"]
+    assert res["summary"]["failed"] == 0
+    assert ep.connections > 1, "the server should have forced a reconnect"
+
+
+# --------------------------------------------------------------------------- #
+# Reporting
+# --------------------------------------------------------------------------- #
+def test_report_summarises_and_groups_failures_by_cause(tmp_path):
+    paths, stage = _files(tmp_path, 4)
+    with _Endpoint(plan=[(200, "ok"), (500, "boom"), (500, "boom"), (400, "bad")]) as ep:
+        res = _run(paths, _cfg(ep.url, stage))
+    report = res["summary"]["report"]
+    assert "1 posted, 3 failed" in report
+    assert "FAILURES BY CAUSE" in report
+    assert f"{nlp.ERR_SERVER} (2)" in report
+    assert f"{nlp.ERR_CLIENT} (1)" in report
+    for name in ("Style0.json", "Style1.json", "Style2.json", "Style3.json"):
+        assert name in report                      # every file accounted for
+    assert "labeluser" in report                   # who it authenticated as
+    assert "s3cret" not in report                  # but never the password
+
+
+def test_report_never_leaks_the_password(tmp_path):
+    paths, stage = _files(tmp_path, 2)
+    with _Endpoint() as ep:
+        res = _run(paths, _cfg(ep.url, stage, password="hunter2"))
+    assert "hunter2" not in res["summary"]["report"]
+
+
+def test_log_is_written_next_to_okgen_by_default(tmp_path, monkeypatch):
+    """No staging folder any more, so the run log lives beside OkGen. The real
+    default is asserted separately; here it is redirected so the test suite
+    never writes into the repo."""
+    assert nlp.default_log_folder().name == "logs"
+    assert nlp.default_log_folder().parent == Path(nlp.__file__).resolve().parents[2]
+    monkeypatch.setattr(nlp, "default_log_folder", lambda: tmp_path / "logs")
+    paths, stage = _files(tmp_path, 2)
+    with _Endpoint() as ep:
+        res = _run(paths, _cfg(ep.url, stage, write_log=True))
+    log = res["summary"]["log"]
+    assert log and Path(log).is_file()
+    assert Path(log).parent == tmp_path / "logs"
+    assert Path(log).read_text(encoding="utf-8") == res["summary"]["report"]
+
+
+def test_log_folder_can_be_configured(tmp_path):
+    paths, stage = _files(tmp_path, 1)
+    dest = tmp_path / "elsewhere"
+    with _Endpoint() as ep:
+        res = _run(paths, _cfg(ep.url, stage, write_log=True, log_folder=str(dest)))
+    assert Path(res["summary"]["log"]).parent == dest
+
+
+def test_a_log_that_cannot_be_written_does_not_fail_the_run(tmp_path, monkeypatch):
+    blocked = tmp_path / "blocked"
+    blocked.write_text("i am a file, not a folder")     # mkdir will fail
+    paths, stage = _files(tmp_path, 1)
+    with _Endpoint() as ep:
+        res = _run(paths, _cfg(ep.url, stage, write_log=True, log_folder=str(blocked)))
+    assert res["summary"]["posted"] == 1
+    assert res["summary"]["log"] is None
+    assert res["summary"]["report"]                     # still available to the UI

@@ -486,3 +486,102 @@ def test_per_script_sheet_layout_override(tmp_path, registry, config):
     rows = _read_rows(wb, "REG_JSON_THERMAL_Compare")   # rows[0] == sheet row 2
     assert rows[2][0] == "Winners", "the row should land on sheet row 4, not row 2"
     assert rows[2][1] == "Style Header"
+
+
+# --------------------------------------------------------------------------- #
+# Releasing a workbook a stopped TOSCA run left open in Excel
+# --------------------------------------------------------------------------- #
+def test_a_locked_workbook_is_closed_in_excel_and_the_write_retried(
+        tmp_path, registry, config, monkeypatch):
+    """The reported problem: stopping a run mid-way leaves the workbook open in
+    Excel, and the lock outlives it. OkGen closes THAT workbook and tries again."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    calls = {"writes": 0, "closed": []}
+    real_write = tosca.write_data_sheet
+
+    def flaky(*a, **k):
+        calls["writes"] += 1
+        if calls["writes"] == 1:
+            raise PermissionError("[WinError 32] used by another process")
+        return real_write(*a, **k)
+
+    monkeypatch.setattr(tosca, "write_data_sheet", flaky)
+    monkeypatch.setattr(tosca, "close_open_workbook",
+                        lambda p, **k: calls["closed"].append(p) or tosca.CLOSE_OK)
+
+    res = tosca.run([str(FIXJ / "styleheader_fmtB.json")], "Thermal",
+                    registry, config, launch=False)
+    assert res["written"] == 1                       # the run succeeded
+    assert calls["writes"] == 2                      # first failed, retry worked
+    assert [Path(p).name for p in calls["closed"]] == [wb.name]
+
+
+def test_a_workbook_with_unsaved_changes_is_never_closed(
+        tmp_path, registry, config, monkeypatch):
+    """Option (a): refuse rather than discard. The likeliest unsaved change is
+    the PowerForms link someone just set by hand (D21)."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    monkeypatch.setattr(tosca, "write_data_sheet",
+                        lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked")))
+    monkeypatch.setattr(tosca, "close_open_workbook", lambda p, **k: tosca.CLOSE_UNSAVED)
+    with pytest.raises(tosca.ToscaError) as ei:
+        tosca.run([str(FIXJ / "styleheader_fmtB.json")], "Thermal",
+                  registry, config, launch=False)
+    msg = str(ei.value)
+    assert "UNSAVED CHANGES" in msg
+    assert "did not close it" in msg
+    assert "PowerForms" in msg                       # says what you might lose
+
+
+@pytest.mark.parametrize("outcome,expect", [
+    (tosca.CLOSE_NO_EXCEL, "stopped part-way"),
+    (tosca.CLOSE_NOT_OPEN, "stopped part-way"),
+    (tosca.CLOSE_OK, "still"),                       # closed, yet STILL locked
+    (tosca.CLOSE_ERROR, "Close it in"),
+])
+def test_each_close_outcome_explains_itself(tmp_path, registry, config, monkeypatch,
+                                            outcome, expect):
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    monkeypatch.setattr(tosca, "write_data_sheet",
+                        lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked")))
+    monkeypatch.setattr(tosca, "close_open_workbook", lambda p, **k: outcome)
+    with pytest.raises(tosca.ToscaError, match=expect):
+        tosca.run([str(FIXJ / "styleheader_fmtB.json")], "Thermal",
+                  registry, config, launch=False)
+
+
+def test_closing_can_be_switched_off(tmp_path, registry, config, monkeypatch):
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    config.tosca()["close_open_workbook"] = False
+    called = []
+    monkeypatch.setattr(tosca, "write_data_sheet",
+                        lambda *a, **k: (_ for _ in ()).throw(PermissionError("locked")))
+    monkeypatch.setattr(tosca, "close_open_workbook",
+                        lambda p, **k: called.append(p) or tosca.CLOSE_OK)
+    with pytest.raises(tosca.ToscaError, match="LOCKED"):
+        tosca.run([str(FIXJ / "styleheader_fmtB.json")], "Thermal",
+                  registry, config, launch=False)
+    assert called == [], "closing was disabled but OkGen tried anyway"
+
+
+def test_close_is_a_no_op_off_windows():
+    assert tosca.close_open_workbook(Path("x.xlsm")) == tosca.CLOSE_UNSUPPORTED
+
+
+def test_the_powershell_closes_one_workbook_and_never_kills_excel():
+    """Killing EXCEL.EXE would take down the user's other open workbooks."""
+    ps = tosca._CLOSE_PS.format(path=r"D:\TOSCA\FUN_LASER_TestData.xlsm")
+    assert "GetActiveObject('Excel.Application')" in ps
+    assert "$wb.Close($false)" in ps                  # close one workbook
+    assert "$wb.Saved" in ps                          # gated on having no edits
+    assert "Quit" not in ps and "Stop-Process" not in ps and "taskkill" not in ps
+    assert r"D:\TOSCA\FUN_LASER_TestData.xlsm" in ps  # path survives verbatim
+
+
+def test_a_path_with_a_quote_cannot_break_out_of_the_script():
+    ps = tosca._CLOSE_PS.format(path="D:\\it's\\book.xlsm".replace("'", "''"))
+    assert "$target = 'D:\\it''s\\book.xlsm'" in ps   # doubled, still one literal

@@ -18,3 +18,6 @@ node_modules/
 
 # Claude Code (personal, machine-local — the project skill IS tracked)
 .claude/settings.local.json
+
+# Run logs written beside the app (Send to NiceLabel JSON POST)
+logs/

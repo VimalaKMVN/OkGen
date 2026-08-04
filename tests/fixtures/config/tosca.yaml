@@ -19,6 +19,8 @@ scripts:
     workbook: "../tosca/thermal.xlsm"
     data_sheet: "REG_JSON_THERMAL_Compare"
 
+close_open_workbook: true
+
 run_warning: "Make sure the CORRECT PowerForms link is set in the input sheet before running TOSCA."
 
 first_data_row: 2

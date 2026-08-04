@@ -333,6 +333,81 @@ def write_data_sheet(workbook: Path, data_sheet: str, rows: List[dict],
             time.sleep(0.25)
 
 
+
+# --------------------------------------------------------------------------- #
+# Releasing a workbook left open by a stopped TOSCA run
+# --------------------------------------------------------------------------- #
+CLOSE_OK = "closed"             # we closed it; nothing was lost
+CLOSE_UNSAVED = "unsaved"       # it has unsaved edits — deliberately NOT closed
+CLOSE_NO_EXCEL = "no_excel"     # no Excel we can talk to in this session
+CLOSE_NOT_OPEN = "not_open"     # Excel is running but does not have this file
+CLOSE_UNSUPPORTED = "unsupported"   # not Windows
+CLOSE_ERROR = "error"
+
+# Ask Excel to close ONE workbook. Deliberately not "kill EXCEL.EXE": that would
+# take down every other workbook the user has open, unsaved work included.
+#
+# `Saved` is the safety gate. If the workbook has unsaved changes we refuse and
+# say so, because the likeliest unsaved change is the PowerForms link someone
+# just set by hand (D21) — discarding that would be worse than the lock.
+_CLOSE_PS = """
+$ErrorActionPreference = 'Stop'
+$target = '{path}'
+try {{ $xl = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application') }}
+catch {{ exit 2 }}
+foreach ($wb in $xl.Workbooks) {{
+  if ($wb.FullName -ieq $target) {{
+    if ($wb.Saved) {{ $wb.Close($false); exit 0 }} else {{ exit 3 }}
+  }}
+}}
+exit 4
+"""
+
+_CLOSE_EXITS = {0: CLOSE_OK, 2: CLOSE_NO_EXCEL, 3: CLOSE_UNSAVED, 4: CLOSE_NOT_OPEN}
+
+
+def close_open_workbook(path: Path, timeout: float = 20.0) -> str:
+    """Try to close ``path`` in a running Excel. Returns one of CLOSE_*.
+
+    Only reaches Excel in the SAME interactive session — a TOSCA run under a
+    different account, or an Excel that crashed hard enough to leave COM, is
+    beyond it. Those come back as CLOSE_NO_EXCEL/CLOSE_NOT_OPEN and the caller
+    explains rather than pretending.
+    """
+    if os.name != "nt":
+        return CLOSE_UNSUPPORTED
+    script = _CLOSE_PS.format(path=str(Path(path).resolve()).replace("'", "''"))
+    try:
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True, timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except (OSError, subprocess.SubprocessError):
+        return CLOSE_ERROR
+    return _CLOSE_EXITS.get(proc.returncode, CLOSE_ERROR)
+
+
+def _locked_message(workbook: Path, outcome: str) -> str:
+    """Say what is actually wrong, and what will fix it."""
+    name = workbook.name
+    if outcome == CLOSE_UNSAVED:
+        return (f"{name} is open in Excel WITH UNSAVED CHANGES, so OkGen did not "
+                f"close it — that could have discarded work (the PowerForms link, "
+                f"for instance). Save or discard it in Excel, then run again.")
+    if outcome == CLOSE_OK:
+        return (f"{name} was open in Excel; OkGen closed it, but the file is still "
+                f"locked. Something else is holding it — most likely a TOSCA run "
+                f"that is still going. Wait for it to finish, then run again.")
+    if outcome in (CLOSE_NO_EXCEL, CLOSE_NOT_OPEN):
+        return (f"could not update the workbook — it looks LOCKED: {name}. No Excel "
+                f"in this session has it open, so the holder is probably a TOSCA run "
+                f"that was stopped part-way. End that process (or sign out and back "
+                f"in), then run again.")
+    return (f"could not update the workbook — it looks LOCKED: {name}. Close it in "
+            f"Excel (and make sure no earlier TOSCA run still has it open), then "
+            f"run again.")
+
+
 # --------------------------------------------------------------------------- #
 # Launch the TOSCA .bat (fire-and-forget)
 # --------------------------------------------------------------------------- #
@@ -458,10 +533,22 @@ def run(paths, script_name, registry, config, launch=True) -> dict:
         try:
             write_data_sheet(workbook, data_sheet, rows, first_data_row, columns, max_clear_row)
         except PermissionError:
-            raise ToscaError(
-                f"could not update the workbook — it looks LOCKED: {workbook.name}. "
-                f"Close it in Excel (and make sure no earlier TOSCA run still has it "
-                f"open), then run again.")
+            # A TOSCA run stopped part-way leaves the workbook open in Excel, and
+            # the lock outlives it by however long that Excel sits there. Ask
+            # Excel to close THAT workbook (never kill Excel), then try once
+            # more. A workbook with unsaved changes is left alone — see
+            # close_open_workbook.
+            outcome = (close_open_workbook(workbook)
+                       if bool(t.get("close_open_workbook", True)) else "disabled")
+            if outcome != CLOSE_OK:
+                raise ToscaError(_locked_message(workbook, outcome))
+            try:
+                write_data_sheet(workbook, data_sheet, rows, first_data_row,
+                                 columns, max_clear_row)
+            except PermissionError:
+                raise ToscaError(_locked_message(workbook, CLOSE_OK))
+            except OSError as exc:
+                raise ToscaError(f"could not write the workbook {workbook}: {exc}")
         except OSError as exc:
             raise ToscaError(f"could not write the workbook {workbook}: {exc}")
 

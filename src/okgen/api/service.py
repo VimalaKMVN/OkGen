@@ -1481,9 +1481,9 @@ def _prune_jobs() -> None:
 def start_send_job(paths, config: Config) -> dict:
     """Validate the JSON send, start it on a worker thread, return a job handle.
 
-    Configuration problems (no endpoint, missing staging folder) are raised
-    HERE, synchronously, so the user is told immediately instead of having to
-    poll a job that was doomed before it started.
+    Configuration problems (an unset endpoint, bad credentials config) are
+    raised HERE, synchronously, so the user is told immediately instead of
+    having to poll a job that was doomed before it started.
     """
     from okgen import nicelabel_post as nlp
 
@@ -1497,9 +1497,6 @@ def start_send_job(paths, config: Config) -> dict:
         raise EditError(broken)
     try:
         settings = nlp.settings_from(config.nicelabel_post())
-        if not Path(settings.json_folder).is_dir():
-            raise nlp.PostError(
-                f"json_folder not found or unreachable: {settings.json_folder}")
     except nlp.PostError as exc:
         raise EditError(str(exc))
 
@@ -1528,8 +1525,7 @@ def start_send_job(paths, config: Config) -> dict:
     threading.Thread(target=worker, name=f"okgen-send-{job_id[:8]}",
                      daemon=True).start()
     return {"job": job_id, "mode": "post", "total": len(paths),
-            "endpoint": nlp.redact_url(settings.endpoint_url),
-            "folder": settings.json_folder}
+            "endpoint": nlp.redact_url(settings.endpoint_url)}
 
 
 def send_job_status(job_id: str) -> dict:

@@ -104,6 +104,16 @@ scripts:
     data_sheet: "REG_THERMAL_Compare"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_ExecutionScript.bat
 
+# A TOSCA run stopped part-way leaves the input workbook OPEN in Excel, and that
+# lock outlives the run — so the next attempt fails with "locked". With this on,
+# OkGen asks Excel to close THAT ONE workbook and tries again.
+#
+# It never kills Excel (that would take down your other open workbooks), and it
+# never closes a workbook with UNSAVED CHANGES — if you have just set the
+# PowerForms link by hand, OkGen tells you instead of discarding it.
+# Windows only; ignored elsewhere.
+close_open_workbook: true
+
 # After updating the input sheet, OkGen fires the selected script's .bat and
 # returns immediately (fire-and-forget; TOSCA does its own reporting). Shown in
 # the confirmation before it runs (edit freely):
