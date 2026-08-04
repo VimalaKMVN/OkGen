@@ -2929,6 +2929,10 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
             continue
         val = _spec_value(hf, f.size, hf["name"], dfmt,
                           chains=chain_choices if hf["name"] == "chain" else None)
+        # A random number is already zfilled by `_rand_padded`, but a value the
+        # user LISTED arrives exactly as typed — so `202` reached a JSON store
+        # unpadded. Pad here, like every other write path (D34).
+        val = _pad_zero_value(val, okf.layout.name, hf["name"], f.size, config)
         base = config is not None and config.is_literal(okf.layout.name, hf["name"])
         header.set(hf["name"], val,                              # blank/spaced -> spaces
                    literal=base or val != val.strip() or val == "")
@@ -2950,6 +2954,7 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
             if fm and _is_blank_row(r, hidden):
                 continue                          # leave filler rows untouched
             val = _spec_value(df, f.size, df["name"], dfmt)      # varies per ROW
+            val = _pad_zero_value(val, okf.layout.name, df["name"], f.size, config)
             r.set(df["name"], val,                               # blank/spaced -> spaces
                   literal=base or bool(dfmt) or val != val.strip() or val == "")
 

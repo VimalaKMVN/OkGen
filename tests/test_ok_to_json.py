@@ -474,6 +474,74 @@ def test_padding_is_digits_only(registry, config, json_file):
     assert _store(json_file) == "AB", "a non-numeric store must not become '00AB'"
 
 
+def _generated_stores(tmp_path, registry, config, values, count=3):
+    """Generate `count` files from the distlabel fixture, varying `store` from
+    a value list, and return every store number written."""
+    src = tmp_path / "dl.json"
+    shutil.copy2(FIXJ / "distlabel.json", src)
+    spec = {"count": count,
+            "detail_fields": [{"section": "Stores", "name": "store",
+                               "values": values}]}
+    res = service.generate_apply([str(src)], spec, registry, config)
+    out = []
+    for p in sorted(Path(res["folder"]).glob("*.json")):
+        doc = json.loads(p.read_text())
+        out += [s["store"] for s in doc["data"]["header"]["stores"]]
+    return out
+
+
+def test_generate_pads_a_three_digit_store_from_a_value_list(
+        registry, config, tmp_path):
+    """The last write path that bypassed the rule. A random number was already
+    zfilled by its own padder, but a value the user LISTED arrived as typed."""
+    stores = _generated_stores(tmp_path, registry, config, "202")
+    assert stores, "generation produced no store rows to check"
+    assert set(stores) == {"0202"}
+
+
+def test_generate_pads_every_listed_width(registry, config, tmp_path):
+    stores = set(_generated_stores(tmp_path, registry, config,
+                                   "7, 202, 1234", count=6))
+    assert stores <= {"0007", "0202", "1234"}
+    assert not any(len(s) != 4 for s in stores), f"unpadded store in {stores}"
+
+
+def test_generate_padding_is_digits_only(registry, config, tmp_path):
+    """Same guard as every other write path — free text must not become 00AB."""
+    stores = _generated_stores(tmp_path, registry, config, "AB")
+    assert set(stores) == {"AB"}
+
+
+def test_generate_does_not_pad_an_undeclared_field(registry, config, tmp_path):
+    """`units` is not in pad_zeros, so generation must leave it as typed."""
+    src = tmp_path / "dl.json"
+    shutil.copy2(FIXJ / "distlabel.json", src)
+    res = service.generate_apply(
+        [str(src)],
+        {"count": 2, "detail_fields": [{"section": "Stores", "name": "units",
+                                        "values": "5"}]},
+        registry, config)
+    for p in sorted(Path(res["folder"]).glob("*.json")):
+        doc = json.loads(p.read_text())
+        assert {s["units"] for s in doc["data"]["header"]["stores"]} == {"5"}
+
+
+def test_generate_leaves_ok_layouts_alone(registry, config, tmp_path):
+    """DistLabels.OK has a `store` field too, but pads by construction — the
+    JSON-only rule must not reach it."""
+    src = tmp_path / "DistLabels.OK"
+    shutil.copy2(DATA_DIR / "DistLabels.OK", src)
+    assert config.pad_zero_fields("DistLabels") == set()
+    res = service.generate_apply(
+        [str(src)],
+        {"count": 2, "detail_fields": [{"section": "Store", "name": "store",
+                                        "values": "202"}]},
+        registry, config)
+    for p in sorted(Path(res["folder"]).glob("*.OK")):
+        okf = parse_okfile(p, registry=registry)
+        assert okf.sections()["Store"][0].get("store") == "0202"   # engine
+
+
 def test_ok_layouts_are_not_touched_by_pad_zeros(registry, config, tmp_path):
     """.OK store padding was already correct via the fixed-width engine — the
     JSON-only rule must not change it."""
