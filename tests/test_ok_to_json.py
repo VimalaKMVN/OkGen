@@ -455,3 +455,153 @@ def test_ok_layouts_are_not_touched_by_pad_zeros(registry, config, tmp_path):
                           registry, config)
     okf = parse_okfile(p, registry=registry)
     assert okf.sections()["Store"][0].get("store") == "0202"   # engine, not us
+
+
+# --------------------------------------------------------------------------- #
+# CartonLabel -> cartonLabels
+# --------------------------------------------------------------------------- #
+def _convert_cl(registry, config):
+    spec = config.conversion_for("CartonLabel")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(DATA_DIR / "CartonLabel.OK", registry["CartonLabel"])
+    return okjson.convert(okf, registry["CartonLabel"], spec, template)
+
+
+@pytest.fixture
+def cl_sources(tmp_path):
+    out = []
+    for i in range(3):
+        p = tmp_path / f"CL_{i}.OK"
+        shutil.copy2(DATA_DIR / "CartonLabel.OK", p)
+        out.append(str(p))
+    return out
+
+
+def test_cartonlabel_converts_to_a_valid_calgary_cartonlabel(registry, config, cl_sources):
+    res = service.convert_apply(cl_sources, registry, config)
+    assert res["written"] == 3 and res["errors"] == []
+    for f in sorted(Path(res["folder"]).glob("*.json")):
+        assert detect.detect_layout(f).layout == "CalgaryCartonLabel"
+        okf = parse_okfile(f, registry=registry)
+        assert okf.to_bytes() == f.read_bytes()
+
+
+def test_cartonlabel_header_values(registry, config):
+    doc, _ = _convert_cl(registry, config)
+    h = doc["data"]["header"]
+    assert h["pickListPrefix"] == "C:" and h["pickListId"] == "00144"
+    assert h["pickListSequence"] == "0002"
+    assert h["transmitDate"] == "2019-05-21"      # ISO of the distro date
+    assert h["distroDate"] == "20190521"          # raw 8 digits
+    assert h["numberOfpacks"] == "38"                 # from the .OK header
+    assert h["numberOfStores"] == "91"                # COUNTED from the 91 rows
+    assert h["packSize"] == "1"
+    assert h["aisle"] == "AAA" and h["slot"] == "003" and h["tier"] == "06"
+
+
+def test_locator_and_lpn_are_the_same_value(registry, config):
+    """Every vendor sample carries them identically."""
+    doc, _ = _convert_cl(registry, config)
+    h = doc["data"]["header"]
+    assert h["locator"] == "0014345" and h["lpn"] == h["locator"]
+
+
+def test_cartonlabel_stores_carry_every_ok_row(registry, config):
+    doc, _ = _convert_cl(registry, config)
+    stores = doc["data"]["header"]["stores"]
+    assert len(stores) == 91                       # the .OK has 91 store rows
+    assert stores[0]["store"] == "0003" and stores[0]["cartonSequence"] == "00224"
+    assert stores[1]["cartonSequence"] == "00290"  # per-row .OK data
+    assert stores[0]["adDate"] == "0531" and stores[0]["suppress"] == "N"
+    # storeQuantity mirrors numberOfPacks in every sample
+    assert stores[0]["storeQuantity"] == stores[0]["numberOfPacks"] == "1"
+
+
+def test_cartonlabel_shape_matches_the_samples(registry, config):
+    doc, _ = _convert_cl(registry, config)
+    h = doc["data"]["header"]
+    assert h["lanes"] is None and h["sizes"] is None
+    assert doc["data"]["details"] == []
+
+
+def test_blank_ok_price_is_null_not_a_transformed_zero(registry, config):
+    """ret_price is blank in the .OK. Blankness is judged BEFORE the transform,
+    else implied_2dp would invent '0.00' where there is no price at all."""
+    doc, _ = _convert_cl(registry, config)
+    assert doc["data"]["header"]["retailPrice"] is None
+
+
+def test_cartonlabel_key_is_picklistid_not_keytrol(registry, config, cl_sources):
+    """A carton label is identified by pickListId — and by the same field for
+    SCAN and WMS alike (keys.yaml)."""
+    assert config.unique_field("CalgaryCartonLabel", "SCAN") == "pickListId"
+    res = service.convert_apply(cl_sources, registry, config)
+    docs = [json.loads(f.read_text()) for f in sorted(Path(res["folder"]).glob("*.json"))]
+    ids = [d["data"]["header"]["pickListId"] for d in docs]
+    assert ids == ["00144", "00145", "00146"]      # digit width preserved
+    assert len({d["data"]["header"]["keytrol"] for d in docs}) == 1   # keytrol untouched
+
+
+def test_all_three_layouts_are_convertible(registry, config):
+    for lay, target in (("StyleHeader", "CalgaryStyleHeader"),
+                        ("DistLabels", "CalgaryDistLabel"),
+                        ("CartonLabel", "CalgaryCartonLabel")):
+        sc = service.convert_scope([str(DATA_DIR / f"{lay}.OK")], registry, config)
+        assert sc["convertible"] == 1 and sc["target"] == target
+    for lay in ("Preticket", "EUPreticket", "EUStyleHeader", "EUCartonLabel"):
+        sc = service.convert_scope([str(DATA_DIR / f"{lay}.OK")], registry, config)
+        assert sc["convertible"] == 0, f"{lay} must have no JSON target"
+
+
+# --------------------------------------------------------------------------- #
+# Row counts — computed at conversion from the rows actually emitted
+# --------------------------------------------------------------------------- #
+def test_cartonlabel_store_count_corrects_a_stale_ok_header(registry, config):
+    """The .OK header declares 38 stores while the file carries 91 rows. The
+    emitted rows are the truth, which is the point of counting rather than
+    copying."""
+    doc, report = _convert_cl(registry, config)
+    h = doc["data"]["header"]
+    assert len(h["stores"]) == 91
+    assert h["numberOfStores"] == "91" and h["storeLines"] == "91"
+    assert any(r["provenance"] == "count" for r in report)
+
+
+def test_distlabels_store_counts_track_the_rows(registry, config):
+    doc, _ = _convert_dl(registry, config)
+    h = doc["data"]["header"]
+    assert len(h["stores"]) == 10
+    assert h["numberOfStores"] == "10" and h["storeLines"] == "10"
+
+
+def test_styleheader_counts_details_but_not_the_store_placeholder(registry, config):
+    """`stores` is a template placeholder here, not real rows — counting it
+    would claim a store that does not exist."""
+    doc, _ = _convert(registry, config)
+    h = doc["data"]["header"]
+    assert h["lineCount"] == "1"                      # one details row
+    assert h["numberOfStores"] == " " and h["storeLines"] == " "   # untouched
+
+
+def test_lane_and_size_counts_are_not_recalculated(registry, config):
+    """Excluded for now by the user's call — laneRecords still comes from the
+    .OK header, and no size count is written at all."""
+    doc, report = _convert(registry, config)
+    h = doc["data"]["header"]
+    assert len(h["lanes"]) == 10 and len(h["sizes"]) == 4
+    assert h["laneRecords"] == "10"                   # from .OK lane_rec, not counted
+    counted = {r["field"] for r in report if r["provenance"] == "count"}
+    assert "laneRecords" not in counted and not any("size" in c.lower() for c in counted)
+
+
+def test_counts_follow_the_rows_when_the_ok_changes(registry, config):
+    """Deleting .OK store rows must move the count with them."""
+    spec = config.conversion_for("DistLabels")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(DATA_DIR / "DistLabels.OK", registry["DistLabels"])
+    for rec in okf.sections()["Store"][6:]:            # blank out the last 4 rows
+        for f in registry["DistLabels"].sections[1].fields:
+            rec.set(f.name, " " * (f.size or 1))
+    doc, _ = okjson.convert(okf, registry["DistLabels"], spec, template)
+    assert len(doc["data"]["header"]["stores"]) == 6
+    assert doc["data"]["header"]["numberOfStores"] == "6"

@@ -119,11 +119,6 @@ def _is_blank(v) -> bool:
     return v is None or (isinstance(v, str) and v.strip() == "")
 
 
-def _nulled(value):
-    """A field declared ``null_when_blank`` shows up in the document but with a
-    JSON null when the .OK file has nothing for it — rather than silently
-    inheriting the template's value, which would look like real data."""
-    return (None, "null") if _is_blank(value) else (value, None)
 
 
 # --------------------------------------------------------------------------- #
@@ -178,14 +173,18 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
             else:
                 note(field, "template", header.get(field), f"no .OK field {src!r}")
             continue
+        # Blankness is judged on the .OK VALUE, before any transform — an empty
+        # price must read as null, not as the '0.00' a transform would invent.
+        if rule.get("null_when_blank") and _is_blank(H[src]):
+            header[field] = None
+            note(field, "null", None, f"{src} is blank in the .OK")
+            continue
         value, prov = _apply(rule, H[src])
-        if rule.get("null_when_blank"):
-            nulled, np = _nulled(value)
-            value, prov = nulled, (np or prov)
         header[field] = value
         note(field, prov, value, src)
 
     # --- nested arrays -----------------------------------------------------
+    populated_arrays = set()          # arrays whose rows really came from the .OK
     for arr_name, arr_spec in (spec.get("arrays") or {}).items():
         rows = _section_values(okf, layout, arr_spec.get("section", ""))
         # Fields that must show as JSON null rather than inherit the template's
@@ -230,6 +229,7 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
                     item[field] = None
             out.append(item)
         header[arr_name] = out
+        populated_arrays.add(arr_name)
         note(f"{arr_name}[]", "ok", f"{len(out)} row(s)", arr_spec.get("section"))
 
     # --- details[] ---------------------------------------------------------
@@ -250,17 +250,37 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
                         if not out:
                             note(f"details.{field}", "null", None, "no .OK source")
                     continue
+                if rule.get("null_when_blank") and _is_blank(row[src]):
+                    item[field] = None
+                    if not out:
+                        note(f"details.{field}", "null", None, f"{src} is blank")
+                    continue
                 item[field], prov = _apply(rule, row[src])
-                if rule.get("null_when_blank"):
-                    nulled, np = _nulled(item[field])
-                    item[field], prov = nulled, (np or prov)
                 if not out:
                     note(f"details.{field}", prov, item[field], src)
             out.append(item)
         data["details"] = out
 
+    # --- row counts --------------------------------------------------------
+    # Computed from what was ACTUALLY emitted, not copied from the .OK header,
+    # which can be stale (CartonLabel declares 38 stores and carries 91 rows).
+    # Only counted when the rows really came from the .OK: a template
+    # placeholder row is not a store, and counting it would claim data that
+    # isn't there. `lanes`/`sizes` are excluded by not being listed in config.
+    for field, source in (spec.get("counts") or {}).items():
+        if source == "details":
+            if not det_spec:
+                continue                              # details not built here
+            rows = data.get("details") or []
+        else:
+            if source not in populated_arrays:
+                continue                              # placeholder, not real rows
+            rows = header.get(source) or []
+        header[field] = str(len(rows))
+        note(field, "count", header[field], f"{len(rows)} {source} row(s)")
+
     # everything the mapping never touched keeps its template value
-    mapped = set(spec.get("header") or {})
+    mapped = set(spec.get("header") or {}) | set(spec.get("counts") or {})
     for field in header:
         if field not in mapped and not isinstance(header[field], list):
             note(field, "template", header[field], "unmapped — template value")

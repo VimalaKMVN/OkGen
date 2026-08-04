@@ -71,6 +71,14 @@ conversions:
         section: Store                    # not present on this layout
         null_when_blank: [puertoRicoFlag, cartonSequence, qtyToPrint]
 
+    # --- row counts --------------------------------------------------------
+    # Computed from the rows actually emitted, NOT copied from the .OK header,
+    # which can be stale. Only written when the rows really came from the .OK —
+    # `stores` here is a template placeholder, so its counts are left alone.
+    # `lanes`/`sizes` counts are deliberately NOT listed (user's call for now).
+    counts:
+      lineCount: details
+
     # --- data.details[] ----------------------------------------------------
     # The reshape: an .OK StyleHeader has NO detail rows, but the JSON needs
     # one — and its fields live on the .OK HEADER.
@@ -121,8 +129,11 @@ conversions:
       # retailPrice. (User-confirmed against the live system — the sample files
       # in hand still carry the older un-dotted '999999' form.)
       retailPrice:    { from: price, transform: implied_2dp }
-      # Counts (storeLines / numberOfStores / lineCount) are deliberately left at
-      # their template values — see PLAN §6; nothing recalculates them yet.
+
+    # Counted from the rows actually emitted (lanes/sizes excluded on purpose).
+    counts:
+      numberOfStores: stores
+      storeLines:     stores
 
     # --- nested arrays -----------------------------------------------------
     # distributionLabels carry `lanes`/`sizes` as null (not [{}]), so they are
@@ -150,6 +161,76 @@ conversions:
     # Unmapped on purpose: the .OK `seq` field (the spec says sequence is
     # "calculated on our end") and the whole TSticker section (no JSON target,
     # and no sample data exists for it — see PLAN §6).
+
+  CartonLabel:
+    target: CalgaryCartonLabel
+    template: templates/CalgaryCartonLabel.json
+    source: SCAN
+    # NB not keytrol: a carton label is identified by pickListId, and it is the
+    # SAME field for SCAN and WMS (see keys.yaml).
+    key: pickListId
+
+    # --- data.header -------------------------------------------------------
+    header:
+      chain:            { from: chain }
+      format:           { from: format }
+      keytrol:          { from: keytrol }
+      headerSuffix:     { from: suffix }
+      style:            { from: style }
+      department:       { from: dept }
+      # A CartonLabel .OK has no `date` field; the samples carry transmitDate as
+      # the ISO form of the distro date, and distroDate as its raw 8 digits.
+      transmitDate:     { from: distro_date, transform: iso_date }
+      distroDate:       { from: distro_date }
+      pickListPrefix:   { from: picklist_pre }
+      pickListId:       { from: picklist_id }
+      pickListSequence: { from: picklist_seq }
+      numberOfpacks:    { from: num_packs, transform: strip_zeros }   # lowercase p
+      aisle:            { from: aisle }
+      slot:             { from: slot }
+      tier:             { from: tier }
+      # locator and lpn are the SAME value in every sample.
+      locator:          { from: locator }
+      lpn:              { from: locator }
+      packSize:         { from: packsize, transform: strip_zeros }
+      markdown:         { from: markdown }
+      distroType:       { from: distro_type }
+      adDate:           { from: ad_date }
+      packType:         { from: pack_type }
+      nested:           { from: nested }
+      partial:          { from: partial }
+      suppress:         { from: suppress }
+      coordinateIndicator: { from: coord }
+      houseNumber:      { from: house }
+      retailPrice:      { from: ret_price, transform: implied_2dp, null_when_blank: true }
+      # purchaseOrderNumber has no .OK source -> template value.
+      # numberOfStores is NOT mapped from the .OK header: it declares 38 while
+      # the file carries 91 store rows. It is counted below instead.
+
+    counts:
+      numberOfStores: stores
+      storeLines:     stores
+
+    # --- nested arrays -----------------------------------------------------
+    # Same shape as distributionLabels: lanes/sizes are null and details[] is
+    # empty, so neither is declared.
+    arrays:
+      stores:
+        section: store                  # lower-case section name on this layout
+        null_when_blank: [puertoRicoFlag, cartonSequence, qtyToPrint]
+        fields:
+          store:          { from: store, transform: pad_left_4 }
+          puertoRicoFlag: { from: prflag }
+          numberOfPacks:  { from: dnum_packs, transform: strip_zeros }
+          # storeQuantity mirrors numberOfPacks in every sample.
+          storeQuantity:  { from: dnum_packs, transform: strip_zeros }
+          cartonSequence: { from: cart_seq }
+          adDate:         { from: dad_date }
+          suppress:       { from: dsuppress }
+          # units / distroType / date / puertoRicoStore* have no .OK source.
+
+    # Unmapped on purpose: the .OK `sequence` field — the vendor spec says
+    # Sequence is "calculated by GTA".
 
 # Available transforms (okgen/okjson.py):
 #   trim                    default — strip surrounding pad
