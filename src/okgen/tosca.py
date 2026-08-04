@@ -1,4 +1,4 @@
-"""Run TOSCA Script — populate a TOSCA input workbook from selected JSON files.
+"""Run TOSCA Script — populate a TOSCA input workbook from selected files.
 
 For the selected files, resolve each file's (Chain, Process, Format) into the
 exact strings the TOSCA workbook expects (chain/process via config name maps;
@@ -13,7 +13,14 @@ the data-sheet cells inside the .xlsm zip — macros, dropdowns, formatting and 
 ~180 helper columns are left byte-untouched (same philosophy as the fixed-width
 byte-span edits). Reading (the Key sheet) uses openpyxl; only writing is surgical.
 
-Config: ``config/tosca.yaml`` (see that file). JSON layouts only, for now.
+Works on BOTH engines: the Calgary JSON layouts and the line-based ``.OK`` ones.
+Only two values are read per file — Chain and ticket Format — so the difference
+is confined to ``_json_header`` vs ``_okfile_header``; everything downstream
+(dedupe, Key-sheet resolution, the workbook write, the .bat launch) is
+layout-agnostic. A ``.OK`` file and the JSON for the same combination therefore
+collapse to ONE row, which is the point of deduping by (Chain, Process, Format).
+
+Config: ``config/tosca.yaml`` (see that file).
 """
 
 from __future__ import annotations
@@ -77,6 +84,48 @@ def _json_header(path: Path) -> dict:
     return data.get("header", {}) or {}
 
 
+def _okfile_header(path: Path, layout, config) -> dict:
+    """``chain``/``format`` for a line-based (.OK) layout, read from its header
+    record — the same two values ``_json_header`` yields for a JSON file.
+
+    ``format`` is the file's TICKET format (the Key-sheet code). It is read from
+    a real header field when the layout has one, else from a DERIVED field of
+    that name (EUCartonLabel computes its format from distribution/pack type,
+    see D8). The EU GTA ``process`` field is deliberately NOT used as a fallback:
+    it is the layout discriminator (``D``->StyleHeader, ``H``->CartonLabel), not
+    a ticket format, and 'H' collides with a real format code in other columns.
+    """
+    from okgen.okfile import parse_okfile
+
+    okf = parse_okfile(path, layout)
+    header = (okf.layout.sections or [None])[0]
+    if header is None:
+        return {}
+    recs = okf.sections().get(header.name) or []
+    if not recs:
+        return {}
+    rec = recs[0]
+    values = {f.name: rec.get(f.name) for f in header.fields}
+
+    out = {"chain": values.get("chain")}
+    if "format" in values:
+        out["format"] = values["format"]
+    else:
+        for spec in config.derived_fields(okf.layout.name):
+            if spec.get("name") == "format":
+                out["format"] = _format_code(config.eval_derived(spec, values))
+                break
+    return out
+
+
+def _format_code(value) -> Optional[str]:
+    """The bare code from a value that may already be a ``"1 - Carton Label"``
+    display string (derived fields carry the full label)."""
+    if value in (None, ""):
+        return value
+    return str(value).split(" -", 1)[0].strip()
+
+
 def _format_string(key_ws, column: str, code: str) -> Optional[str]:
     """The exact ``"code - description"`` from a Key column whose value starts
     with ``code`` (e.g. Key!F for Winners Style Header, code 'B' -> 'B - Blue Gum')."""
@@ -116,11 +165,16 @@ def build_rows(paths, registry, config, key_ws) -> Tuple[List[dict], List[dict]]
             errors.append({"file": name, "error": f"could not read: {exc}"})
             continue
         reg_layout = registry.get(layout) if layout else None
-        if reg_layout is None or not getattr(reg_layout, "json_mode", False):
-            errors.append({"file": name, "error": "not a JSON layout (TOSCA is JSON-only for now)"})
+        if reg_layout is None:
+            errors.append({"file": name, "error": f"unknown layout {layout!r}"})
             continue
 
-        header = _json_header(p)
+        try:
+            header = (_json_header(p) if getattr(reg_layout, "json_mode", False)
+                      else _okfile_header(p, reg_layout, config))
+        except Exception as exc:                       # noqa: BLE001
+            errors.append({"file": name, "error": f"could not read header: {exc}"})
+            continue
         raw_chain = header.get("chain")
         info = config.chain(raw_chain)                 # resolves a code OR a name
         chain_code = info.code if info else None
@@ -140,7 +194,9 @@ def build_rows(paths, registry, config, key_ws) -> Tuple[List[dict], List[dict]]
                            "error": f"no Format column mapped for {chain_name} / {process_name}"})
             continue
         if fmt_code in (None, ""):
-            errors.append({"file": name, "error": "file has no 'format' value"})
+            errors.append({"file": name,
+                           "error": f"{layout} has no ticket 'format' value to map "
+                                    f"(no format field, and none derived)"})
             continue
         fmt_str = _format_string(key_ws, column, fmt_code)
         if fmt_str is None:
@@ -309,8 +365,49 @@ def _launch_bat(bat: Path) -> None:
 # --------------------------------------------------------------------------- #
 # Public API
 # --------------------------------------------------------------------------- #
+def _script_engines(script: dict) -> set:
+    """Engines a script accepts. Absent ``applies_to`` means BOTH, so a config
+    written before the .OK/JSON split keeps working unchanged."""
+    raw = script.get("applies_to") or ["ok", "json"]
+    if isinstance(raw, str):
+        raw = [raw]
+    return {str(e).strip().lower() for e in raw}
+
+
+def _engine_of(path: Path, registry) -> Optional[str]:
+    """``'json'`` / ``'ok'`` for a file, or None when it can't be detected (those
+    are left for build_rows to report as a normal per-file error)."""
+    try:
+        layout = detect_layout(path).layout
+    except Exception:                                   # noqa: BLE001
+        return None
+    reg_layout = registry.get(layout) if layout else None
+    if reg_layout is None:
+        return None
+    return "json" if getattr(reg_layout, "json_mode", False) else "ok"
+
+
 def list_scripts(config) -> List[dict]:
-    return [{"name": s.get("name")} for s in config.tosca_scripts()]
+    return [{"name": s.get("name"), "applies_to": sorted(_script_engines(s))}
+            for s in config.tosca_scripts()]
+
+
+def scripts_for(paths, registry, config) -> dict:
+    """The pickable scripts for a selection: each annotated with how many of the
+    selected files it would actually run. The client offers the applicable ones
+    so a user can't silently aim an .OK selection at a JSON workbook."""
+    counts = {"ok": 0, "json": 0, None: 0}
+    for p in paths or []:
+        counts[_engine_of(Path(p), registry)] += 1
+    out = []
+    for s in config.tosca_scripts():
+        engines = _script_engines(s)
+        out.append({"name": s.get("name"),
+                    "applies_to": sorted(engines),
+                    "matches": sum(counts.get(e, 0) for e in engines)})
+    return {"scripts": out, "counts": {"ok": counts.get("ok", 0),
+                                       "json": counts.get("json", 0),
+                                       "unknown": counts.get(None, 0)}}
 
 
 def run(paths, script_name, registry, config, launch=True) -> dict:
@@ -325,16 +422,32 @@ def run(paths, script_name, registry, config, launch=True) -> dict:
         raise ToscaError(f"no TOSCA script named {script_name!r} in config/tosca.yaml")
     workbook = _resolve_one(script.get("workbook", ""), _WORKBOOK_EXTS, "workbook")
     data_sheet = script["data_sheet"]
-    key_sheet = t.get("key_sheet", "Key")
-    first_data_row = int(t.get("first_data_row", 2))
-    columns = t.get("columns") or {}
+    key_sheet = script.get("key_sheet") or t.get("key_sheet", "Key")
+    # Sheet layout falls back to the global block, but a script whose data sheet
+    # is laid out differently can override it without touching code.
+    first_data_row = int(script.get("first_data_row", t.get("first_data_row", 2)))
+    columns = script.get("columns") or t.get("columns") or {}
+
+    # Engine routing: .OK and JSON have separate workbooks/.bats, so a run only
+    # takes the files its script accepts and REPORTS the rest as skipped rather
+    # than silently dropping them (or aiming them at the wrong workbook).
+    engines = _script_engines(script)
+    use_paths, skipped = [], []
+    for p in paths or []:
+        eng = _engine_of(Path(p), registry)
+        if eng is None or eng in engines:
+            use_paths.append(p)                         # undetectable -> normal error
+        else:
+            skipped.append({"file": Path(p).name, "engine": eng,
+                            "reason": f"{'JSON' if eng == 'json' else '.OK'} file — "
+                                      f"not applicable to this script"})
 
     wb = openpyxl.load_workbook(workbook, data_only=True, read_only=True)
     try:
         if key_sheet not in wb.sheetnames:
             raise ToscaError(f"Key sheet {key_sheet!r} not in workbook")
         key_ws = wb[key_sheet]
-        rows, errors = build_rows(paths, registry, config, key_ws)
+        rows, errors = build_rows(use_paths, registry, config, key_ws)
         data_ws = wb[data_sheet] if data_sheet in wb.sheetnames else None
         max_row = (data_ws.max_row if data_ws else 0) or 0
     finally:
@@ -378,6 +491,8 @@ def run(paths, script_name, registry, config, launch=True) -> dict:
         "written": len(rows),
         "rows": rows,
         "errors": errors,
+        "skipped": skipped,
+        "applies_to": sorted(engines),
         "launched": launched,
         "bat": str(bat_file) if bat_file else bat_cfg,
         "launch_error": launch_error,

@@ -2064,12 +2064,23 @@ function showToscaResult(res) {
       el("div", "tosca-row", `${r.chain} · ${r.process} · ${r.format}`)));
     card.appendChild(tbl);
   }
+  // Files this script doesn't apply to (.OK selected for a JSON script, or vice
+  // versa) — reported, never silently dropped.
+  const skipped = res.skipped || [];
+  if (skipped.length) {
+    const box = el("div", "modal-warn");
+    box.appendChild(el("span", "modal-warn-icon", "⏭"));
+    box.appendChild(el("span", "modal-warn-text",
+      `${skipped.length} file(s) not applicable to this script: `
+      + skipped.map((s) => s.file).join(", ")));
+    card.appendChild(box);
+  }
   const errs = res.errors || [];
   if (errs.length) {
     const box = el("div", "modal-warn");
     box.appendChild(el("span", "modal-warn-icon", "⚠"));
     box.appendChild(el("span", "modal-warn-text",
-      `${errs.length} file(s) skipped: ` + errs.map((e) => `${e.file} (${e.error})`).join("; ")));
+      `${errs.length} file(s) could not be used: ` + errs.map((e) => `${e.file} (${e.error})`).join("; ")));
     card.appendChild(box);
   }
   const acts = el("div", "modal-actions");
@@ -2085,18 +2096,25 @@ async function runTosca() {
   const paths = [...state.selection];
   if (!paths.length) return;
   let info;
-  try { info = await api("/api/tosca/scripts"); }
+  // POST so the server can filter the list to the selection's engine: .OK and
+  // JSON have separate workbooks, so only the applicable scripts are offered.
+  try { info = await postJSON("/api/tosca/scripts", { paths }); }
   catch (e) { setStatus("Could not load TOSCA scripts: " + e.message, "err"); return; }
-  const scripts = info.scripts || [];
-  if (!scripts.length) { setStatus("No TOSCA scripts configured (config/tosca.yaml)", "err"); return; }
+  const all = info.scripts || [];
+  if (!all.length) { setStatus("No TOSCA scripts configured (config/tosca.yaml)", "err"); return; }
+  const scripts = all.some(s => s.matches > 0) ? all.filter(s => s.matches > 0) : all;
   const script = await pickTosca(scripts, paths.length, info.warning);
   if (!script) return;
   if (!beginBusy("Running TOSCA…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
     const res = await postJSON("/api/tosca/run", { paths, script });
     const er = (res.errors || []).length;
+    const sk = (res.skipped || []).length;
     const launch = res.launched ? " — TOSCA started" : (res.launch_error ? " — not started" : "");
-    setStatus(`TOSCA '${script}': wrote ${res.written} row(s)` + (er ? `, ${er} skipped` : "") + launch,
+    setStatus(`TOSCA '${script}': wrote ${res.written} row(s)`
+              + (er ? `, ${er} error(s)` : "")
+              + (sk ? `, skipped ${sk} file(s) not applicable to this script` : "")
+              + launch,
               res.launch_error ? "dirty" : "ok");
     showToscaResult(res);
   } catch (e) {

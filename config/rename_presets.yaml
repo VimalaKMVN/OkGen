@@ -156,7 +156,7 @@ presets:
       - brand          # Europe
       - layout         # EUPreticket
       - FMT            # label "FMT"
-      - ticket_format         #   value A
+      - format                #   value A  (EUStyleHeader's ticket format)
       - KEY            # label "KEY"
       - keytrol             #   value 10021888
       - T              # label "T"

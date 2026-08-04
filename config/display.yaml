@@ -279,10 +279,33 @@ rules:
       H: "(H) Holdings/CartonLabels"
       
       
-  # Europe TJXE GTA — the `ticket_format` letter maps to the physical ticket
-  # type (editable dropdown; saving writes the underlying code).
+  # Europe TJXE GTA — the ticket-format letter maps to the physical ticket type
+  # (editable dropdown; saving writes the underlying code). The FIELD NAME
+  # differs by layout on purpose:
+  #   EUStyleHeader  -> `format`         (its only format; matches every other
+  #                                       layout, and what Run TOSCA resolves)
+  #   EUCartonLabel  -> `ticket_format`  (it ALSO has a derived `format` = the
+  #                                       carton/masterpack type, a different
+  #                                       thing — see derived_fields.yaml)
   - match:
-      layout: [EUStyleHeader, EUCartonLabel]
+      layout: [EUStyleHeader]
+      field: format
+    values:
+      A: "Standard White Swift"
+      B: "Single Gum"
+      C: "Beige Coordinate"
+      F: "High Adhesive"
+      J: "Small Merchandise Ticket"
+      L: "Water Soluble"
+      O: "Pre-Ticket Tag"
+      Q: "Small Merch UPP Ticket"
+      R: "Age Restriction"
+      U: "Standard UPP"
+      X: "Large Overgum"
+      Y: "Small Overgum"
+
+  - match:
+      layout: [EUCartonLabel]
       field: ticket_format
     values:
       A: "Standard White Swift"

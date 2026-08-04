@@ -1,27 +1,108 @@
-# Run TOSCA Script — populate a TOSCA input workbook from selected JSON files.
+# Run TOSCA Script — populate a TOSCA input workbook from selected files
+# (Calgary JSON layouts AND line-based .OK layouts).
 #
 # OkGen writes ONE row per UNIQUE (Chain, Process, Format) taken from the
 # selected files into the chosen workbook's data sheet, CONTIGUOUS from the top,
 # and clears everything below (TOSCA stops at the first blank row, so this makes
 # it process exactly the selected set). Macros, dropdowns and helper columns are
-# preserved (targeted cell write, no openpyxl round-trip). JSON layouts only.
+# preserved (targeted cell write, no openpyxl round-trip).
 #
-# NOTE: the mappings below (especially `format_columns`) are a best-guess from
-# the Key sheet's column names — edit this file to correct them; nothing here is
-# baked into code, and a reload picks up changes.
+# NOTE: `format_columns` below is CONFIRMED — the Key sheet is the same in all
+# ten workbooks (user-confirmed), so one matrix serves every script. Nothing
+# here is baked into code: if a workbook's Key sheet ever diverges, fix it in
+# this file (a script may override `key_sheet`/`format_columns`) and restart.
 
-# Each entry is a selectable "script". `workbook` and `bat` may be either a FULL
-# FILE PATH or a FOLDER that contains exactly one .xlsm / one .bat (OkGen finds
-# it). Paths may be absolute or relative to THIS config directory.
+# ===========================================================================
+#  QUOTING — the one thing that breaks this file
+#  ---------------------------------------------------------------------------
+#  Windows paths are written WITHOUT quotes. In YAML a plain (unquoted) scalar
+#  processes NO escape sequences, so every backslash stays literal:
+#
+#      workbook: D:\ToscaAutomation\FUN_LASER_TestData.xlsm       <-- CORRECT
+#      workbook: "D:\ToscaAutomation\FUN_LASER_TestData.xlsm"     <-- BREAKS
+#
+#  Double quotes make YAML read \T as an escape code; the WHOLE FILE then fails
+#  to parse and every TOSCA script disappears. Sheet NAMES are quoted (they are
+#  plain text, no backslashes). Single quotes are also safe for paths if needed.
+#
+#  Also: OkGen reads this file ONCE AT STARTUP — RESTART OkGen after editing.
+# ===========================================================================
+#
+# Each entry is a selectable "script".
+#   applies_to  which engine the script's workbook expects: [ok] or [json].
+#               .OK and JSON have SEPARATE workbooks and .bats, so this is what
+#               keeps an .OK selection from being aimed at a JSON workbook. The
+#               picker offers only the scripts that fit the current selection,
+#               and a run reports any non-matching file as skipped.
+#               Omit it entirely and the script accepts BOTH.
+#   workbook    full .xlsm path (preferred), or a folder holding exactly one.
+#   data_sheet  the exact sheet/tab name to populate.
+#   bat         full .bat path (preferred — a folder with several is ambiguous).
+# Optional per script, when a sheet is laid out differently from the defaults
+# further down: `first_data_row`, `columns`, `key_sheet`.
 scripts:
-  - name: "Laser Compare"
-    workbook: "CHANGE_ME/laser_input_folder"   # folder with one .xlsm (or a full .xlsm path)
+
+  # ---------------------------------------------------------------- JSON ----
+  - name: "JSON Functional Laser"
+    applies_to: [json]
+    workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineLaser_PP\FUN_JSON_LASER_TestData.xlsm
     data_sheet: "Laser-SH_PT_CL_DL_Formats"
-    bat: "CHANGE_ME/laser_run_folder"          # folder with one .bat (its folder = cwd)
-  - name: "Thermal"
-    workbook: "CHANGE_ME/thermal_input_folder"
+    bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineLaser_PP\FUN_LASER_ExecutionScript.bat
+
+  - name: "JSON Functional Thermal"
+    applies_to: [json]
+    workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineThermal_PP\FUN_JSON_THERMAL_TestData.xlsm
+    data_sheet: "Thermal-SH_PT_CL_DL_Formats"
+    bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_ExecutionScript.bat
+
+  - name: "JSON Functional Delete RP Laser"
+    applies_to: [json]
+    workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_DeleteOrders_RePrint_PP\FUN_JSON_SH_PT_CL_DL_DeleteOrders_RP_PP_TestData.xlsm
+    data_sheet: "SH_PT_CL_DL_DeleteReprints"
+    bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_DeleteOrders_RePrint_PP\RP_Delete_Automation_RunScript.bat
+
+  - name: "JSON Regression Laser"
+    applies_to: [json]
+    workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\REG_JSON_LASER_Compare_TestData.xlsm
+    data_sheet: "Laser-SH_PT_CL_DL_Formats"
+    bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\REG_JSON_LASER_ExecutionScript.bat
+
+  - name: "JSON Regression Thermal"
+    applies_to: [json]
+    workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\REG_JSON_THERMAL_TestData.xlsm
     data_sheet: "REG_JSON_THERMAL_Compare"
-    bat: "CHANGE_ME/thermal_run_folder"
+    bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\REG_JSON_THERMAL_ExecutionScript.bat
+
+  # ------------------------------------------------------------ .OK files ----
+  - name: "OK Functional Laser"
+    applies_to: [ok]
+    workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineLaser_PP\FUN_LASER_TestData.xlsm
+    data_sheet: "Laser-SH_PT_CL_DL_Formats"
+    bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineLaser_PP\FUN_LASER_ExecutionScript.bat
+
+  - name: "OK Functional Thermal"
+    applies_to: [ok]
+    workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_TestData.xlsm
+    data_sheet: "Thermal-SH_PT_CL_DL_Formats"
+    bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_ExecutionScript.bat
+
+  - name: "OK Delete RP Laser"
+    applies_to: [ok]
+    workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_DeleteOrders_RePrint_PP\FUN_SH_PT_CL_DL_DeleteOrders_RP_PP_TestData.xlsm
+    data_sheet: "SH_PT_CL_DL_DeleteReprints"
+    bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_DeleteOrders_RePrint_PP\RP_Delete_Automation_RunScript.bat
+
+  - name: "OK Regression Laser"
+    applies_to: [ok]
+    workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\REG_LASER_Compare_TestData.xlsm
+    data_sheet: "Laser-SH_PT_CL_DL_Formats"
+    bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\REG_LASER_ExecutionScript.bat
+
+  - name: "OK Regression Thermal"
+    applies_to: [ok]
+    workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_TestData.xlsm
+    data_sheet: "REG_THERMAL_Compare"
+    bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_ExecutionScript.bat
 
 # After updating the input sheet, OkGen fires the selected script's .bat and
 # returns immediately (fire-and-forget; TOSCA does its own reporting). Shown in
@@ -57,22 +138,44 @@ chain_names:
   "05": "TJX Europe"
   "06": "HomeSense"
 
-# OkGen JSON layout -> the exact TOSCA process name (Key!Process_Data spelling).
+# OkGen layout -> the exact TOSCA process name (Key!Process_Data spelling:
+# "Pre-Ticket" / "Style Header" / "Carton Label" / "Distribution Label").
+# BOTH engines map here. A .OK file and the JSON for the same Chain/Process/
+# Format deliberately resolve to the SAME row — rows are deduped by that triple,
+# so a mixed selection writes one row, not two.
 process_names:
+  # Calgary JSON layouts
   CalgaryStyleHeader: "Style Header"
   CalgaryCartonLabel: "Carton Label"
   CalgaryDistLabel: "Distribution Label"
+  # Line-based .OK layouts
+  StyleHeader: "Style Header"
+  Preticket: "Pre-Ticket"
+  CartonLabel: "Carton Label"
+  DistLabels: "Distribution Label"
+  EUPreticket: "Pre-Ticket"
+  EUStyleHeader: "Style Header"
+  EUCartonLabel: "Carton Label"
+  # NB the EU GTA `process` field (D/H) is the LAYOUT discriminator, NOT a ticket
+  # format, and is deliberately never used as one: 'H' is a real format code
+  # elsewhere ('H - Piggy Back Gum Label'), so a fallback could match a wrong row.
 
 # The Format "code - description" string comes from the workbook's own Key sheet
 # (so it always matches what the dropdown offers). For a given (chain, process),
 # pick the Key COLUMN below; the row in that column whose value starts with the
 # file's format code is the exact string written. Unmapped combos are reported
-# as an error rather than guessed.  <-- BEST GUESS, correct as needed.
+# as an error rather than guessed.
+# Key columns, by their own header names (identical across all ten workbooks):
+#   C TJMaxx_SH_PT_Format   D Marshalls_SH_PT_Format  E Homegoods_SH_PT_Format
+#   F Winners_HS_SH_PT_Fmt  G Europe_SH_Format        H Europe_PT_Format
+#   I TJ_MAR_CL_Fmt         J TJ_MAR_DL_Fmt           K HG_CL_Fmt
+#   L HG_WN_HS_DL_Fmt       M Winners_HS_CL_Fmt       N Europe_CL_Fmt
+# Note the *_SH_PT_* columns serve Style Header AND Pre-Ticket both.
 key_sheet: "Key"
 format_columns:
-  "T.J. Maxx":  { "Style Header": C, "Carton Label": I, "Distribution Label": J }
-  "Marshalls":  { "Style Header": D, "Carton Label": I, "Distribution Label": J }
-  "Homegoods":  { "Style Header": E, "Carton Label": K, "Distribution Label": L }
-  "Winners":    { "Style Header": F, "Distribution Label": L }
-  "HomeSense":  { "Style Header": F, "Distribution Label": L }
-  "TJX Europe": { "Style Header": G }
+  "T.J. Maxx":  { "Style Header": C, "Pre-Ticket": C, "Carton Label": I, "Distribution Label": J }
+  "Marshalls":  { "Style Header": D, "Pre-Ticket": D, "Carton Label": I, "Distribution Label": J }
+  "Homegoods":  { "Style Header": E, "Pre-Ticket": E, "Carton Label": K, "Distribution Label": L }
+  "Winners":    { "Style Header": F, "Pre-Ticket": F, "Carton Label": M, "Distribution Label": L }
+  "HomeSense":  { "Style Header": F, "Pre-Ticket": F, "Carton Label": M, "Distribution Label": L }
+  "TJX Europe": { "Style Header": G, "Pre-Ticket": H, "Carton Label": N }

@@ -1319,15 +1319,26 @@ def delete_file(path) -> dict:
     return {"deleted": str(p)}
 
 
-def tosca_scripts(config: Config) -> dict:
-    """The configured TOSCA scripts (names) + the run warning, for the picker."""
+def tosca_scripts(config: Config, paths=None, registry=None) -> dict:
+    """The configured TOSCA scripts + the run warning, for the picker.
+
+    With ``paths`` (and a registry) each script also carries ``applies_to`` and
+    ``matches`` — how many of the selected files it would actually run — so the
+    picker can offer only the scripts that fit. .OK and JSON have separate
+    workbooks, and aiming a selection at the wrong one is the mistake worth
+    making impossible rather than merely reporting.
+    """
     from okgen import tosca
-    return {"scripts": tosca.list_scripts(config),
-            "warning": (config.tosca() or {}).get("run_warning", "")}
+    warning = (config.tosca() or {}).get("run_warning", "")
+    if paths and registry is not None:
+        out = tosca.scripts_for(paths, registry, config)
+        out["warning"] = warning
+        return out
+    return {"scripts": tosca.list_scripts(config), "warning": warning}
 
 
 def run_tosca_script(paths, script, registry, config: Config) -> dict:
-    """Populate the chosen TOSCA workbook from the selected JSON files."""
+    """Populate the chosen TOSCA workbook from the selected files."""
     from okgen import tosca
     try:
         return tosca.run(paths, script, registry, config)

@@ -264,6 +264,12 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
     def tosca_scripts():
         return jsonify(service.tosca_scripts(config))
 
+    @app.post("/api/tosca/scripts")
+    def tosca_scripts_for():
+        # POST variant: scripts filtered to the current selection's engine.
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.tosca_scripts(config, body.get("paths", []), registry))
+
     @app.post("/api/tosca/run")
     def tosca_run():
         body = request.get_json(force=True, silent=True) or {}

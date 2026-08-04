@@ -5,6 +5,8 @@
   "delimited": true,
   "delimiter": "|",
   "record_terminator": "\\",
+  "json_mode": false,
+  "json_type": null,
   "issues": [],
   "sections": [
     {
@@ -15,6 +17,8 @@
       "marker": null,
       "sample_raw": null,
       "filler_raw": null,
+      "json_path": null,
+      "json_kind": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -27,7 +31,9 @@
           "declared_position": null,
           "sample_value": null,
           "field_id": "0",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "process",
@@ -38,10 +44,12 @@
           "declared_position": null,
           "sample_value": "D",
           "field_id": "1",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
-          "name": "ticket_format",
+          "name": "format",
           "field_name": "Ticket Format",
           "size": 1,
           "start": 2,
@@ -49,7 +57,9 @@
           "declared_position": null,
           "sample_value": "Q",
           "field_id": "2",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "chain",
@@ -60,7 +70,9 @@
           "declared_position": null,
           "sample_value": "05",
           "field_id": "3",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "preticket",
@@ -71,7 +83,9 @@
           "declared_position": null,
           "sample_value": "N",
           "field_id": "4",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "keytrol",
@@ -82,7 +96,9 @@
           "declared_position": null,
           "sample_value": "126539Q    ",
           "field_id": "5",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "upp_weight_uom",
@@ -93,7 +109,9 @@
           "declared_position": null,
           "sample_value": "M",
           "field_id": "6",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "date",
@@ -104,7 +122,9 @@
           "declared_position": null,
           "sample_value": "20241017",
           "field_id": "7",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "time",
@@ -115,7 +135,9 @@
           "declared_position": null,
           "sample_value": "1606",
           "field_id": "8",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "initial_change",
@@ -126,7 +148,9 @@
           "declared_position": null,
           "sample_value": "Initial ",
           "field_id": "9",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "dept",
@@ -137,7 +161,9 @@
           "declared_position": null,
           "sample_value": "42 ",
           "field_id": "10",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "category",
@@ -148,7 +174,9 @@
           "declared_position": null,
           "sample_value": "0121",
           "field_id": "11",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "style",
@@ -159,7 +187,9 @@
           "declared_position": null,
           "sample_value": "071368 ",
           "field_id": "12",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "type",
@@ -170,7 +200,9 @@
           "declared_position": null,
           "sample_value": "1",
           "field_id": "13",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "past_yn",
@@ -181,7 +213,9 @@
           "declared_position": null,
           "sample_value": " ",
           "field_id": "14",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "description",
@@ -192,7 +226,9 @@
           "declared_position": null,
           "sample_value": "QA1 Item2                ",
           "field_id": "15",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "num_lanes",
@@ -203,7 +239,9 @@
           "declared_position": null,
           "sample_value": "1 ",
           "field_id": "16",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "num_pack_size_detail",
@@ -214,7 +252,9 @@
           "declared_position": null,
           "sample_value": "0 ",
           "field_id": "17",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "area",
@@ -225,7 +265,9 @@
           "declared_position": null,
           "sample_value": "PBBML",
           "field_id": "18",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "distro_note",
@@ -236,7 +278,9 @@
           "declared_position": null,
           "sample_value": "            ",
           "field_id": "19",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "ticket_packet_id",
@@ -247,7 +291,9 @@
           "declared_position": null,
           "sample_value": "2111235    ",
           "field_id": "20",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "dist_pkt_selection_task_1",
@@ -258,7 +304,9 @@
           "declared_position": null,
           "sample_value": "2111235    ",
           "field_id": "21",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "dist_pkt_selection_task_2",
@@ -269,7 +317,9 @@
           "declared_position": null,
           "sample_value": "           ",
           "field_id": "22",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "distro_packet_d",
@@ -280,7 +330,9 @@
           "declared_position": null,
           "sample_value": "D:2147152",
           "field_id": "23",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "distro_packet2",
@@ -291,7 +343,9 @@
           "declared_position": null,
           "sample_value": "         ",
           "field_id": "24",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "driver_task",
@@ -302,7 +356,9 @@
           "declared_position": null,
           "sample_value": "         ",
           "field_id": "25",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "distro_date",
@@ -313,7 +369,9 @@
           "declared_position": null,
           "sample_value": "20241003",
           "field_id": "26",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "quantity",
@@ -324,7 +382,9 @@
           "declared_position": null,
           "sample_value": "10     ",
           "field_id": "27",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "packs_qty_1",
@@ -335,7 +395,9 @@
           "declared_position": null,
           "sample_value": "    ",
           "field_id": "28",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "pack_size_1",
@@ -346,7 +408,9 @@
           "declared_position": null,
           "sample_value": "  ",
           "field_id": "29",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "packs_qty_2",
@@ -357,7 +421,9 @@
           "declared_position": null,
           "sample_value": "    ",
           "field_id": "30",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "pack_size_2",
@@ -368,7 +434,9 @@
           "declared_position": null,
           "sample_value": "  ",
           "field_id": "31",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "packs_qty_3",
@@ -379,7 +447,9 @@
           "declared_position": null,
           "sample_value": "    ",
           "field_id": "32",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "pack_size_3",
@@ -390,7 +460,9 @@
           "declared_position": null,
           "sample_value": "  ",
           "field_id": "33",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "packs_qty_4",
@@ -401,7 +473,9 @@
           "declared_position": null,
           "sample_value": "    ",
           "field_id": "34",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "pack_size_4",
@@ -412,7 +486,9 @@
           "declared_position": null,
           "sample_value": "  ",
           "field_id": "35",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "packs_qty_5",
@@ -423,7 +499,9 @@
           "declared_position": null,
           "sample_value": "    ",
           "field_id": "36",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "pack_size_5",
@@ -434,7 +512,9 @@
           "declared_position": null,
           "sample_value": "  ",
           "field_id": "37",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "sort_flag",
@@ -445,7 +525,9 @@
           "declared_position": null,
           "sample_value": "N",
           "field_id": "38",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_1",
@@ -456,7 +538,9 @@
           "declared_position": null,
           "sample_value": "NS ",
           "field_id": "39",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_2",
@@ -467,7 +551,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "40",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_3",
@@ -478,7 +564,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "41",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_4",
@@ -489,7 +577,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "42",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_5",
@@ -500,7 +590,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "43",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_6",
@@ -511,7 +603,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "44",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_7",
@@ -522,7 +616,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "45",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_8",
@@ -533,7 +629,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "46",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_9",
@@ -544,7 +642,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "47",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_10",
@@ -555,7 +655,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "48",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "orig_currency",
@@ -566,7 +668,9 @@
           "declared_position": null,
           "sample_value": "GBP",
           "field_id": "49",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "base_orig_retail",
@@ -577,7 +681,9 @@
           "declared_position": null,
           "sample_value": "599       ",
           "field_id": "50",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "orig_ticket_type",
@@ -588,7 +694,9 @@
           "declared_position": null,
           "sample_value": "U",
           "field_id": "51",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "upp_weight",
@@ -599,7 +707,9 @@
           "declared_position": null,
           "sample_value": "1000      ",
           "field_id": "52",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "coordinate",
@@ -610,7 +720,9 @@
           "declared_position": null,
           "sample_value": " ",
           "field_id": "53",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "voice_flag",
@@ -621,7 +733,9 @@
           "declared_position": null,
           "sample_value": "N",
           "field_id": "54",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "nested",
@@ -632,7 +746,9 @@
           "declared_position": null,
           "sample_value": "N",
           "field_id": "55",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "complete_partial_pull",
@@ -643,7 +759,9 @@
           "declared_position": null,
           "sample_value": " ",
           "field_id": "56",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "location",
@@ -654,7 +772,9 @@
           "declared_position": null,
           "sample_value": "        ",
           "field_id": "57",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "distribution_type",
@@ -665,7 +785,9 @@
           "declared_position": null,
           "sample_value": "  ",
           "field_id": "58",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "pack_type",
@@ -676,7 +798,9 @@
           "declared_position": null,
           "sample_value": "  ",
           "field_id": "59",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "num_detail_store_records",
@@ -687,7 +811,9 @@
           "declared_position": null,
           "sample_value": "5   ",
           "field_id": "60",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "pack_size",
@@ -698,7 +824,9 @@
           "declared_position": null,
           "sample_value": "   ",
           "field_id": "61",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "num_packs",
@@ -709,7 +837,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "62",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "universal_item",
@@ -720,7 +850,9 @@
           "declared_position": null,
           "sample_value": "            ",
           "field_id": "63",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "wave",
@@ -731,7 +863,9 @@
           "declared_position": null,
           "sample_value": "            ",
           "field_id": "64",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "header_asn_id",
@@ -742,7 +876,9 @@
           "declared_position": null,
           "sample_value": "S502786688062384C   ",
           "field_id": "65",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "carton_count",
@@ -753,7 +889,9 @@
           "declared_position": null,
           "sample_value": "10   ",
           "field_id": "66",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "num_step2_ilpn",
@@ -764,7 +902,9 @@
           "declared_position": null,
           "sample_value": "1  ",
           "field_id": "67",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_1",
@@ -775,7 +915,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "68",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_2",
@@ -786,7 +928,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "69",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_3",
@@ -797,7 +941,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "70",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_4",
@@ -808,7 +954,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "71",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_5",
@@ -819,7 +967,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "72",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_6",
@@ -830,7 +980,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "73",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_7",
@@ -841,7 +993,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "74",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_8",
@@ -852,7 +1006,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "75",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_9",
@@ -863,7 +1019,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "76",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "phys_size_10",
@@ -874,7 +1032,9 @@
           "declared_position": null,
           "sample_value": "     ",
           "field_id": "77",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "carton_nbr",
@@ -885,7 +1045,9 @@
           "declared_position": null,
           "sample_value": "                    ",
           "field_id": "78",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "c_distro",
@@ -896,7 +1058,9 @@
           "declared_position": null,
           "sample_value": "           ",
           "field_id": "79",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         }
       ]
     },
@@ -908,6 +1072,8 @@
       "marker": "&",
       "sample_raw": "|&|STM 201    |\\  ",
       "filler_raw": null,
+      "json_path": null,
+      "json_kind": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -920,7 +1086,9 @@
           "declared_position": null,
           "sample_value": null,
           "field_id": "0",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "lane_marker",
@@ -931,7 +1099,9 @@
           "declared_position": null,
           "sample_value": "&",
           "field_id": "1",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "lane_location",
@@ -942,7 +1112,9 @@
           "declared_position": null,
           "sample_value": "STM 201    ",
           "field_id": "2",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         }
       ]
     },
@@ -954,6 +1126,8 @@
       "marker": "#",
       "sample_raw": "|#|3110601|NS |2    |0000|01|  |599       |          |\\  ",
       "filler_raw": null,
+      "json_path": null,
+      "json_kind": null,
       "ignored_fields": [],
       "issues": [],
       "fields": [
@@ -966,7 +1140,9 @@
           "declared_position": null,
           "sample_value": null,
           "field_id": "0",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "detail_marker",
@@ -977,7 +1153,9 @@
           "declared_position": null,
           "sample_value": "#",
           "field_id": "1",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "store",
@@ -988,7 +1166,9 @@
           "declared_position": null,
           "sample_value": "3110358",
           "field_id": "2",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "size_code",
@@ -999,7 +1179,9 @@
           "declared_position": null,
           "sample_value": "L  ",
           "field_id": "3",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "quantity",
@@ -1010,7 +1192,9 @@
           "declared_position": null,
           "sample_value": "1    ",
           "field_id": "4",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "ad_date",
@@ -1021,7 +1205,9 @@
           "declared_position": null,
           "sample_value": "0000",
           "field_id": "5",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "message_code_1",
@@ -1032,7 +1218,9 @@
           "declared_position": null,
           "sample_value": "01",
           "field_id": "6",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "message_code_2",
@@ -1043,7 +1231,9 @@
           "declared_position": null,
           "sample_value": "  ",
           "field_id": "7",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "zone_retail",
@@ -1054,7 +1244,9 @@
           "declared_position": null,
           "sample_value": "5999      ",
           "field_id": "8",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         },
         {
           "name": "zone_compare_at",
@@ -1065,7 +1257,9 @@
           "declared_position": null,
           "sample_value": "9300      ",
           "field_id": "9",
-          "issues": []
+          "issues": [],
+          "json_path": null,
+          "readonly": false
         }
       ]
     }

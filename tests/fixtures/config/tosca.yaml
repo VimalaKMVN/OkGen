@@ -1,10 +1,21 @@
 # Test fixture: workbooks point at the sample .xlsm copies (relative to this
 # config dir). Mirrors config/tosca.yaml.
 scripts:
+  # No `applies_to` -> accepts BOTH engines (the back-compat default), which is
+  # what most tests here use.
   - name: "Laser Compare"
     workbook: "../tosca/laser_compare.xlsm"
     data_sheet: "Laser-SH_PT_CL_DL_Formats"
   - name: "Thermal"
+    workbook: "../tosca/thermal.xlsm"
+    data_sheet: "REG_JSON_THERMAL_Compare"
+  # Engine-scoped scripts, mirroring the real config's .OK/JSON split.
+  - name: "JSON Only"
+    applies_to: [json]
+    workbook: "../tosca/thermal.xlsm"
+    data_sheet: "REG_JSON_THERMAL_Compare"
+  - name: "OK Only"
+    applies_to: [ok]
     workbook: "../tosca/thermal.xlsm"
     data_sheet: "REG_JSON_THERMAL_Compare"
 
@@ -39,12 +50,21 @@ process_names:
   CalgaryStyleHeader: "Style Header"
   CalgaryCartonLabel: "Carton Label"
   CalgaryDistLabel: "Distribution Label"
+  StyleHeader: "Style Header"
+  Preticket: "Pre-Ticket"
+  CartonLabel: "Carton Label"
+  DistLabels: "Distribution Label"
+  EUPreticket: "Pre-Ticket"
+  EUStyleHeader: "Style Header"
+  EUCartonLabel: "Carton Label"
 
 key_sheet: "Key"
 format_columns:
-  "T.J. Maxx":  { "Style Header": C, "Carton Label": I, "Distribution Label": J }
-  "Marshalls":  { "Style Header": D, "Carton Label": I, "Distribution Label": J }
-  "Homegoods":  { "Style Header": E, "Carton Label": K, "Distribution Label": L }
-  "Winners":    { "Style Header": F, "Distribution Label": L }
-  "HomeSense":  { "Style Header": F, "Distribution Label": L }
-  "TJX Europe": { "Style Header": G }
+  "T.J. Maxx":  { "Style Header": C, "Pre-Ticket": C, "Carton Label": I, "Distribution Label": J }
+  "Marshalls":  { "Style Header": D, "Pre-Ticket": D, "Carton Label": I, "Distribution Label": J }
+  "Homegoods":  { "Style Header": E, "Pre-Ticket": E, "Carton Label": K, "Distribution Label": L }
+  "Winners":    { "Style Header": F, "Pre-Ticket": F, "Carton Label": M, "Distribution Label": L }
+  "HomeSense":  { "Style Header": F, "Pre-Ticket": F, "Carton Label": M, "Distribution Label": L }
+  # Europe has no Distribution Label column in the Key sheet — left unmapped on
+  # purpose (an unmapped combo must be reported, never guessed).
+  "TJX Europe": { "Style Header": G, "Pre-Ticket": H, "Carton Label": N }

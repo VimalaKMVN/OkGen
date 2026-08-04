@@ -127,12 +127,23 @@ def test_resolution_dedup_and_errors(tmp_path, registry, config):
     combos = {(r["chain"], r["process"], r["format"]) for r in res["rows"]}
     assert ("Winners", "Style Header", "B - Blue Gum") in combos
     assert ("HomeSense", "Distribution Label", "7 - Distribution Label") in combos
-    assert res["written"] == len(res["rows"]) == 4       # 3 Winners SH + 1 dist, deduped
-    # Winners/Carton Label has no Key column mapped -> reported, not guessed
-    assert any("Carton Label" in e["error"] for e in res["errors"])
+    # Winners/Carton Label now maps to Key!M (Winners_HS_CL_Fmt) -> resolves
+    assert ("Winners", "Carton Label", "1 - Carton Label") in combos
+    assert res["written"] == len(res["rows"]) == 5       # 3 Winners SH deduped to 3 + dist + carton
+    assert res["errors"] == []
     # every row carries the constant Status/Source + a date
     for r in res["rows"]:
         assert r["status"] == "Work Pending" and r["source"] == "Online" and r["date"]
+
+
+def test_unmapped_combo_is_reported_not_guessed(tmp_path, registry, config):
+    """An unmapped (chain, process) must error per file, never pick a column."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    del config.tosca()["format_columns"]["Winners"]["Carton Label"]
+    res = tosca.run([str(FIXJ / "cartonlabel_minified.json")], "Thermal", registry, config)
+    assert res["rows"] == []
+    assert any("no Format column mapped" in e["error"] for e in res["errors"])
 
 
 def test_rows_written_contiguously_and_cleared_below(tmp_path, registry, config):
@@ -186,14 +197,25 @@ def test_non_europe_uses_month_first_date(tmp_path, registry, config):
     assert res["rows"][0]["date"] == datetime.date.today().strftime("%m/%d/%Y")
 
 
-def test_non_json_file_is_reported(tmp_path, registry, config):
+def test_ok_file_is_accepted_not_rejected(tmp_path, registry, config):
+    """Regression for the old JSON-only gate: a .OK file now resolves a row."""
     ok = tmp_path / "StyleHeader.OK"
     shutil.copy2(DATA_DIR / "StyleHeader.OK", ok)
     wb = _copy_wb(tmp_path)
     _point_at(config, "Thermal", wb)
     res = tosca.run([str(ok)], "Thermal", registry, config)
-    assert res["written"] == 0
-    assert any("JSON" in e["error"] for e in res["errors"])
+    assert res["written"] == 1 and res["errors"] == []
+    assert not any("JSON" in e["error"] for e in res["errors"])
+
+
+def test_undetectable_file_is_reported(tmp_path, registry, config):
+    """A file of no known layout is still reported per file, not crashed on."""
+    junk = tmp_path / "junk.OK"
+    junk.write_text("not an OK file at all\n", encoding="utf-8")
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    res = tosca.run([str(junk)], "Thermal", registry, config)
+    assert res["written"] == 0 and len(res["errors"]) == 1
 
 
 def _set_bat(config, script_name, bat):
@@ -229,8 +251,8 @@ def test_bat_not_run_when_zero_rows(tmp_path, registry, config):
     stub = tmp_path / "run.sh"
     stub.write_text(f"#!/bin/sh\ntouch '{marker}'\n")
     stub.chmod(0o755)
-    ok = tmp_path / "StyleHeader.OK"                    # non-JSON -> 0 rows
-    shutil.copy2(DATA_DIR / "StyleHeader.OK", ok)
+    ok = tmp_path / "junk.OK"                           # undetectable -> 0 rows
+    ok.write_text("not an OK file at all\n", encoding="utf-8")
     wb = _copy_wb(tmp_path)
     _point_at(config, "Thermal", wb)
     _set_bat(config, "Thermal", stub)
@@ -315,3 +337,152 @@ def test_launch_false_skips_bat(tmp_path, registry, config):
     _set_bat(config, "Thermal", stub)
     res = tosca.run([str(FIXJ / "styleheader_fmtB.json")], "Thermal", registry, config, launch=False)
     assert res["written"] == 1 and res["launched"] is False and res["launch_error"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Line-based .OK layouts (TOSCA is no longer JSON-only)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("okfile,process,fmt", [
+    ("StyleHeader.OK",   "Style Header",       "A - Regular Tag"),      # chain 03 Homegoods, format A
+    ("CartonLabel.OK",   "Carton Label",       "1 - Carton Label"),     # chain 01 T.J. Maxx, format 1
+    ("DistLabels.OK",    "Distribution Label", "7 - Distributio Label"),# chain 01, format 7 (sheet typo)
+    ("Preticket.OK",     "Pre-Ticket",         "A - Purple Tag"),       # chain 01, format A
+    ("EUPreticket.OK",   "Pre-Ticket",         "A - Standard White Swift"),  # chain 05 Europe, Key!H
+    # EUCartonLabel has no `format` FIELD — its format is DERIVED from
+    # distribution/pack type (D8) and resolves against Key!N (Europe_CL_Fmt).
+    ("EUCartonLabel.OK", "Carton Label",       "1 - Carton Label"),
+    # EUStyleHeader's ticket format is its `format` field (renamed from
+    # `ticket_format` so it matches every other layout) -> Key!G Europe_SH_Format.
+    ("EUStyleHeader.OK", "Style Header",       "Q - Small Merch UPP Ticket"),
+])
+def test_ok_file_resolves_a_row(tmp_path, registry, config, okfile, process, fmt):
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    res = tosca.run([str(DATA_DIR / okfile)], "Thermal", registry, config)
+    assert res["errors"] == [], res["errors"]
+    assert len(res["rows"]) == 1
+    row = res["rows"][0]
+    assert (row["process"], row["format"]) == (process, fmt)
+
+
+def test_ok_and_json_same_combo_dedupe_to_one_row(tmp_path, registry, config):
+    """A .OK file and the JSON for the same (Chain, Process, Format) write ONE
+    row — the same dedupe the JSON-only path already applied."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    # Build a JSON styleHeader that matches DistLabels.OK's chain 01 / format 7.
+    src = json.loads((FIXJ / "distlabel.json").read_text(encoding="utf-8"))
+    src["data"]["header"]["chain"] = "01"
+    src["data"]["header"]["format"] = "7"
+    twin = tmp_path / "twin.json"
+    twin.write_text(json.dumps(src), encoding="utf-8")
+
+    res = tosca.run([str(DATA_DIR / "DistLabels.OK"), str(twin)], "Thermal", registry, config)
+    assert res["errors"] == [], res["errors"]
+    assert res["written"] == len(res["rows"]) == 1
+    assert res["rows"][0]["process"] == "Distribution Label"
+
+
+def test_eu_gta_process_letter_is_never_used_as_a_format(tmp_path, registry, config):
+    """EU GTA `process` (D/H) is the LAYOUT discriminator, not a ticket format.
+    'H' is a real format code elsewhere ('H - Piggy Back Gum Label'), so falling
+    back to it could silently resolve a WRONG row. Each EU GTA layout must
+    resolve from its own format instead: EUStyleHeader from its `format` field,
+    EUCartonLabel from its DERIVED format."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    res = tosca.run([str(DATA_DIR / "EUStyleHeader.OK"), str(DATA_DIR / "EUCartonLabel.OK")],
+                    "Thermal", registry, config)
+    assert res["errors"] == [], res["errors"]
+    fmts = {r["format"] for r in res["rows"]}
+    assert fmts == {"Q - Small Merch UPP Ticket", "1 - Carton Label"}
+    assert not any(f.split(" -", 1)[0].strip() in {"D", "H"} for f in fmts)
+
+
+def test_eu_styleheader_format_field_is_named_format(registry):
+    """Pins the rename: EUStyleHeader's ticket format is `format` (not
+    `ticket_format`), which is what the editor renders and TOSCA resolves.
+    EUCartonLabel keeps `ticket_format` AND gains a derived `format` — the two
+    are different things there, so it is deliberately NOT renamed."""
+    sh = {f.name for f in registry["EUStyleHeader"].sections[0].fields}
+    cl = {f.name for f in registry["EUCartonLabel"].sections[0].fields}
+    assert "format" in sh and "ticket_format" not in sh
+    assert "ticket_format" in cl and "format" not in cl      # cl's `format` is derived
+
+
+def test_europe_dist_label_has_no_column_and_is_reported(tmp_path, registry, config):
+    """Europe/Distribution Label is genuinely absent from the Key sheet."""
+    assert "Distribution Label" not in config.tosca()["format_columns"]["TJX Europe"]
+
+
+# --------------------------------------------------------------------------- #
+# Engine routing — .OK and JSON have SEPARATE workbooks/.bats
+# --------------------------------------------------------------------------- #
+def test_script_without_applies_to_accepts_both(tmp_path, registry, config):
+    """Back-compat: a script predating the split runs everything."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    res = tosca.run([str(DATA_DIR / "DistLabels.OK"), str(FIXJ / "styleheader_fmtB.json")],
+                    "Thermal", registry, config)
+    assert res["skipped"] == [] and res["written"] == 2
+
+
+def test_json_script_skips_ok_files_and_reports_them(tmp_path, registry, config):
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "JSON Only", wb)
+    res = tosca.run([str(FIXJ / "styleheader_fmtB.json"),
+                     str(DATA_DIR / "DistLabels.OK"),
+                     str(DATA_DIR / "CartonLabel.OK")], "JSON Only", registry, config)
+    assert res["written"] == 1                          # only the JSON file
+    assert len(res["skipped"]) == 2
+    assert {s["file"] for s in res["skipped"]} == {"DistLabels.OK", "CartonLabel.OK"}
+    assert all(s["engine"] == "ok" for s in res["skipped"])
+    assert res["errors"] == []                          # skipped is NOT an error
+
+
+def test_ok_script_skips_json_files_and_reports_them(tmp_path, registry, config):
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "OK Only", wb)
+    res = tosca.run([str(DATA_DIR / "DistLabels.OK"), str(FIXJ / "styleheader_fmtB.json")],
+                    "OK Only", registry, config)
+    assert res["written"] == 1
+    assert [s["file"] for s in res["skipped"]] == ["styleheader_fmtB.json"]
+    assert res["skipped"][0]["engine"] == "json"
+
+
+def test_skipped_files_never_reach_the_workbook(tmp_path, registry, config):
+    """The whole point: a selection that is entirely non-applicable writes NOTHING
+    — the wrong workbook is not opened, cleared or touched at all."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "OK Only", wb)
+    before = wb.read_bytes()
+    res = tosca.run([str(FIXJ / "styleheader_fmtB.json")], "OK Only", registry, config)
+    assert res["written"] == 0 and len(res["skipped"]) == 1
+    assert wb.read_bytes() == before, "the workbook was modified by a skipped-only run"
+
+
+def test_picker_offers_only_applicable_scripts(registry, config):
+    """An .OK selection must not be offered a JSON workbook (and vice versa)."""
+    ok = tosca.scripts_for([str(DATA_DIR / "DistLabels.OK")], registry, config)
+    by = {s["name"]: s["matches"] for s in ok["scripts"]}
+    assert by["OK Only"] == 1 and by["JSON Only"] == 0 and by["Thermal"] == 1
+    assert ok["counts"] == {"ok": 1, "json": 0, "unknown": 0}
+
+    js = tosca.scripts_for([str(FIXJ / "styleheader_fmtB.json")], registry, config)
+    by = {s["name"]: s["matches"] for s in js["scripts"]}
+    assert by["JSON Only"] == 1 and by["OK Only"] == 0
+
+
+def test_per_script_sheet_layout_override(tmp_path, registry, config):
+    """A script whose sheet is laid out differently can override the globals
+    without a code change (the Delete/Reprint sheets may differ)."""
+    wb = _copy_wb(tmp_path)
+    _point_at(config, "Thermal", wb)
+    for s in config.tosca()["scripts"]:
+        if s["name"] == "Thermal":
+            s["first_data_row"] = 4                     # write lower down
+    res = tosca.run([str(FIXJ / "styleheader_fmtB.json")], "Thermal", registry, config)
+    assert res["written"] == 1
+    rows = _read_rows(wb, "REG_JSON_THERMAL_Compare")   # rows[0] == sheet row 2
+    assert rows[2][0] == "Winners", "the row should land on sheet row 4, not row 2"
+    assert rows[2][1] == "Style Header"
