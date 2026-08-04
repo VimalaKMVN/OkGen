@@ -152,19 +152,21 @@ conversions:
     arrays:
       stores:
         section: Store
-        # Present-but-empty rather than template-inherited. puertoRicoFlag and
-        # cartonSequence DO come from the .OK here; qtyToPrint has no source at
-        # all, so it reads as null.
+        # Present-but-empty rather than template-inherited. puertoRicoFlag,
+        # cartonSequence and qtyToPrint all DO come from the .OK here, so each
+        # reads as null only when its own .OK value is blank.
         null_when_blank: [puertoRicoFlag, cartonSequence, qtyToPrint]
         fields:
           store:          { from: store, transform: pad_left_4 }
           puertoRicoFlag: { from: prflag }
           units:          { from: units, transform: strip_zeros }
           distroType:     { from: distr_type }
+          # The .OK store quantity feeds BOTH storeQuantity and qtyToPrint.
           storeQuantity:  { from: store_qty, transform: strip_zeros }
+          qtyToPrint:     { from: store_qty, transform: strip_zeros }
           cartonSequence: { from: cartseq }
           adDate:         { from: ad }
-          # `date` and `qtyToPrint` have no .OK source -> template value.
+          # `date` has no .OK source -> template value.
 
     # No `details:` block — every distributionLabels sample carries an EMPTY
     # details[], unlike styleHeaders where it is built from the .OK header.
@@ -200,9 +202,11 @@ conversions:
       aisle:            { from: aisle }
       slot:             { from: slot }
       tier:             { from: tier }
-      # locator and lpn are the SAME value in every sample.
-      locator:          { from: locator }
-      lpn:              { from: locator }
+      # locator and lpn are the SAME value in every sample, and the .OK carries
+      # only `locator` — so when it is blank BOTH read as null rather than
+      # inheriting the template's locator (another order's bin/LPN).
+      locator:          { from: locator, null_when_blank: true }
+      lpn:              { from: locator, null_when_blank: true }
       packSize:         { from: packsize, transform: strip_zeros }
       markdown:         { from: markdown }
       distroType:       { from: distro_type }

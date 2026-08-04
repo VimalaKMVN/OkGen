@@ -321,14 +321,42 @@ def test_unsourced_store_fields_are_null_not_template_values(registry, config):
         assert store[fld] is None, f"{fld} should be null, got {store[fld]!r}"
 
 
-def test_distlabels_keeps_real_store_values_but_nulls_the_unsourced(registry, config):
-    """puertoRicoFlag and cartonSequence DO come from the .OK here, so they keep
-    their values; qtyToPrint has no source at all, so it is null."""
+def test_distlabels_keeps_real_store_values(registry, config):
+    """puertoRicoFlag, cartonSequence and qtyToPrint all come from the .OK here,
+    so they keep their values rather than reading as null."""
     doc, _ = _convert_dl(registry, config)
     store = doc["data"]["header"]["stores"][0]
     assert store["puertoRicoFlag"] == "N"
     assert store["cartonSequence"] == "76418"
-    assert "qtyToPrint" in store and store["qtyToPrint"] is None
+    assert store["qtyToPrint"] == store["storeQuantity"] != None
+
+
+def test_distlabels_qty_to_print_mirrors_store_quantity(registry, config):
+    """The .OK store quantity feeds BOTH storeQuantity and qtyToPrint, on every
+    row — qtyToPrint used to have no source and always read as null."""
+    doc, _ = _convert_dl(registry, config)
+    stores = doc["data"]["header"]["stores"]
+    assert stores, "the .OK carries store rows"
+    for s in stores:
+        assert s["qtyToPrint"] == s["storeQuantity"], s
+
+
+def test_distlabels_qty_to_print_follows_a_changed_store_qty(registry, config):
+    """It tracks the .OK value per row, and nulls with it when that row is
+    blank — it is a mapped field, not a copy of the template."""
+    spec = config.conversion_for("DistLabels")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(DATA_DIR / "DistLabels.OK", registry["DistLabels"])
+    rows = okf.sections()["Store"]
+    width = len(rows[0].get("store_qty"))
+    rows[0].set("store_qty", "7".rjust(width, "0"))
+    rows[1].set("store_qty", " " * width)
+    doc, _ = okjson.convert(okf, registry["DistLabels"], spec, template)
+    out = doc["data"]["header"]["stores"]
+    assert out[0]["qtyToPrint"] == out[0]["storeQuantity"] == "7"
+    # qtyToPrint is null_when_blank, so a blank .OK quantity reports no value
+    # rather than an invented one. (storeQuantity keeps its existing '0'.)
+    assert out[1]["qtyToPrint"] is None
 
 
 def test_blank_ok_value_becomes_null_per_row(registry, config):
@@ -506,6 +534,27 @@ def test_locator_and_lpn_are_the_same_value(registry, config):
     doc, _ = _convert_cl(registry, config)
     h = doc["data"]["header"]
     assert h["locator"] == "0014345" and h["lpn"] == h["locator"]
+
+
+def test_locator_and_lpn_are_null_when_the_ok_has_none(registry, config):
+    """The .OK carries only `locator`, and both JSON fields come from it — so a
+    blank one nulls BOTH rather than inheriting the template's bin/LPN, which
+    belongs to an unrelated order."""
+    spec = config.conversion_for("CartonLabel")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    tpl_locator = template["data"]["header"]["locator"]
+    assert tpl_locator, "the template must carry a locator for this to bite"
+
+    okf = parse_okfile(DATA_DIR / "CartonLabel.OK", registry["CartonLabel"])
+    hdr = okf.sections()["Header"][0]
+    hdr.set("locator", " " * len(hdr.get("locator")))
+    doc, report = okjson.convert(okf, registry["CartonLabel"], spec, template)
+    h = doc["data"]["header"]
+    for fld in ("locator", "lpn"):
+        assert fld in h, f"{fld} must still be PRESENT as a field"
+        assert h[fld] is None, f"{fld} should be null, got {h[fld]!r}"
+    assert {r["provenance"] for r in report
+            if r["field"] in ("locator", "lpn")} == {"null"}
 
 
 def test_cartonlabel_stores_carry_every_ok_row(registry, config):

@@ -215,8 +215,14 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
             if not any(_trim(v) for v in row.values()):
                 continue                              # skip blank filler rows
             item = json.loads(json.dumps(proto))      # keep the sample's shape
+            blank_in_ok = set()
             for field, rule in (arr_spec.get("fields") or {}).items():
                 src = rule.get("from")
+                if src not in row or _is_blank(row[src]):
+                    # Blankness is judged on the .OK VALUE, before any transform
+                    # — strip_zeros would otherwise turn an absent quantity into
+                    # a '0' that reads as real data (the header path's rule).
+                    blank_in_ok.add(field)
                 if src in row:
                     item[field], _ = _apply(rule, row[src])
             for field in nullable:
@@ -225,7 +231,7 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
                 # Unmapped: there is no .OK source for it at all, so the
                 # template's value is not this order's data — always null.
                 # Mapped: null only when the .OK itself is blank.
-                if field not in mapped_fields or _is_blank(item.get(field)):
+                if field not in mapped_fields or field in blank_in_ok:
                     item[field] = None
             out.append(item)
         header[arr_name] = out
