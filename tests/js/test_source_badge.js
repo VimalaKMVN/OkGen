@@ -33,9 +33,17 @@ const TREE = {
     { type: "file", name: "carton.json", path: "/d/Batch07/carton.json", json: true,
       layout: "CalgaryCartonLabel", chain: "04", chain_info: null,
       source: "SCAN", key_field: "pickListId", key_value: "10000", duplicate: false },
+    // .OK files carry a source too, but it comes from the LAYOUT (EU/EWMS = WMS,
+    // the NA layouts = SCAN) rather than from reading the file, so the tooltip
+    // has to explain itself differently.
     { type: "file", name: "Plain.OK", path: "/d/Batch07/Plain.OK", json: false,
       layout: "StyleHeader", chain: "03", chain_info: null,
-      source: null, key_field: "keytrol", key_value: "550000", duplicate: false },
+      source: "SCAN", source_reason: "the layout's own source",
+      key_field: "keytrol", key_value: "550000", duplicate: false },
+    { type: "file", name: "EUStyle.OK", path: "/d/Batch07/EUStyle.OK", json: false,
+      layout: "EUStyleHeader", chain: "05", chain_info: null,
+      source: "WMS", source_reason: "the layout's own source",
+      key_field: "keytrol", key_value: "126539Q", duplicate: false },
   ],
 };
 
@@ -59,17 +67,33 @@ const nodes = descendants(doc.querySelector("#tree"));
 const badges = nodes.filter((e) => (e.className || "").includes("src-badge"));
 const text = nodes.map((e) => e.textContent).join(" | ");
 
-check("a badge is drawn for each Calgary JSON file (and only those)", badges.length === 3);
+check("a badge is drawn for every file that has a source", badges.length === 5);
 check("the WMS file is badged WMS", badges.some((b) => b.textContent === "WMS"));
 check("the SCAN file is badged SCAN", badges.some((b) => b.textContent === "SCAN"));
-check("carton labels are badged too", badges.filter((b) => b.textContent === "SCAN").length === 2);
+check("carton labels are badged too",
+      badges.filter((b) => b.textContent === "SCAN").length === 3);
 check("the badge is styled per source",
       badges.some((b) => (b.className || "").includes("src-badge-wms"))
       && badges.some((b) => (b.className || "").includes("src-badge-scan")));
 check("the tooltip names the key field the source selects",
       badges.some((b) => /headerASNid/.test(b.title || ""))
       && badges.some((b) => /keytrol/.test(b.title || "")));
-check("an .OK file gets no source badge", !/Plain\.OK[^|]*src-badge/.test(text));
+// .OK files are badged from their layout: EU/EWMS = WMS, the NA layouts = SCAN.
+const okBadges = nodes.filter(
+  (e) => (e.className || "").includes("src-badge") && /comes from/.test(e.title || ""));
+// Assert the SET first: an `every()` over an empty list passes vacuously, which
+// would hide exactly the failure these checks exist to catch.
+check("both .OK files are badged", okBadges.length === 2);
+check("an NA .OK file is badged SCAN",
+      okBadges.some((b) => b.textContent === "SCAN"));
+check("an EU .OK file is badged WMS",
+      okBadges.some((b) => b.textContent === "WMS"));
+check("the .OK tooltip does NOT claim anything about headerASNid",
+      okBadges.every((b) => !/headerASNid/.test(b.title || "")));
+check("the .OK tooltip says the key is source-independent",
+      okBadges.every((b) => /not affected by the source/.test(b.title || "")));
+check("the JSON tooltip still explains itself from the payload",
+      badges.filter((b) => /headerASNid/.test(b.title || "")).length === 3);
 
 // The machinery that used to contradict the file is gone.
 check("no SCAN/WMS prompt is rendered", !/SCAN or WMS\?/.test(text));

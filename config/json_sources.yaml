@@ -19,3 +19,31 @@ sources:
 # constant placeholder ('0'), fabricating keys. The other way round only misses
 # a duplicate, which the tree's duplicate warning still flags.
 default: WMS
+
+# ---------------------------------------------------------------------------
+# `.OK` layouts: the source is a property of the LAYOUT, not of the file.
+#
+# A Calgary JSON file is asked which source it came from, because both sources
+# send the same structure and only the payload can tell them apart. An `.OK`
+# file needs no asking: each `.OK` format is emitted by exactly one system, so
+# the answer is fixed the moment the layout is detected.
+#
+#   EU / EWMS layouts   -> WMS
+#   the NA layouts      -> SCAN   (these formats have no ASN field at all)
+#
+# NOTE: EUStyleHeader and EUCartonLabel (the GTA pair) do carry a
+# `header_asn_id`; EUPreticket does not. It is still WMS — it is an EWMS
+# format, and the source is about which system SENT the file, not about which
+# fields that format happens to define.
+#
+# This is display only. An `.OK` layout's unique key is a single field in
+# keys.yaml and is NOT affected by its source (contrast the Calgary layouts,
+# whose key genuinely differs between SCAN and WMS).
+layout_sources:
+  EUPreticket:    WMS
+  EUStyleHeader:  WMS
+  EUCartonLabel:  WMS
+  CartonLabel:    SCAN
+  DistLabels:     SCAN
+  Preticket:      SCAN
+  StyleHeader:    SCAN

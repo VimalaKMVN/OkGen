@@ -296,15 +296,45 @@ def test_rekeyed_files_report_which_source_they_resolved_to(tmp_path, registry, 
         assert r["field"] == ("keytrol" if expected == "SCAN" else "headerASNid")
 
 
-def test_source_is_absent_for_ok_layouts(tmp_path, registry, config):
-    """No .OK layout has a source at all — the concept does not apply."""
+@pytest.mark.parametrize("filename,expected", [
+    # EU / EWMS formats come from WMS; the NA formats come from SCAN.
+    ("EUPreticket.OK", "WMS"),
+    ("EUStyleHeader.OK", "WMS"),
+    ("EUCartonLabel.OK", "WMS"),
+    ("StyleHeader.OK", "SCAN"),
+    ("CartonLabel.OK", "SCAN"),
+    ("DistLabels.OK", "SCAN"),
+    ("Preticket.OK", "SCAN"),
+])
+def test_ok_files_badge_the_source_declared_by_their_layout(
+        tmp_path, registry, config, filename, expected):
+    """An .OK format is emitted by exactly one system, so its badge comes from
+    the LAYOUT (config), not from reading the file."""
     d = tmp_path / "okfiles"
     d.mkdir()
-    (d / "StyleHeader.OK").write_bytes((DATA_DIR / "StyleHeader.OK").read_bytes())
+    (d / filename).write_bytes((DATA_DIR / filename).read_bytes())
     node = service.build_tree(d, config, registry)["children"][0]
-    assert node["source"] is None
-    assert node["key_field"] == "keytrol"     # its one key, source-independent
-    assert config.has_source("StyleHeader") is False
+    assert node["source"] == expected
+    assert node["source_reason"] == "the layout's own source"
+
+
+def test_an_ok_files_key_never_depends_on_its_source(tmp_path, registry, config):
+    """The badge is DISPLAY ONLY. `has_source` stays False for every .OK layout,
+    which is what keeps the key (and Make Unique) reading from keys.yaml alone —
+    only the Calgary layouts have a key that differs between sources."""
+    d = tmp_path / "okfiles"
+    d.mkdir()
+    for fn, key in (("StyleHeader.OK", "keytrol"), ("Preticket.OK", "po"),
+                    ("EUCartonLabel.OK", "keytrol")):
+        (d / fn).write_bytes((DATA_DIR / fn).read_bytes())
+    nodes = {n["name"]: n for n in service.build_tree(d, config, registry)["children"]}
+    for fn, key in (("StyleHeader.OK", "keytrol"), ("Preticket.OK", "po"),
+                    ("EUCartonLabel.OK", "keytrol")):
+        layout = nodes[fn]["layout"]
+        assert nodes[fn]["key_field"] == key
+        assert config.has_source(layout) is False
+        assert config.source_dependent(layout) is False
+        assert config.unique_field_candidates(layout) == [key]
 
 
 def test_duplicates_are_flagged_on_the_key_the_payload_selects(

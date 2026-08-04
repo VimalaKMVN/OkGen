@@ -145,6 +145,8 @@ class Config:
         ok_to_json: Optional[dict] = None,
         config_dir: Optional[str] = None,
         pad_zero_fields: Optional[Dict[str, set]] = None,
+        # Declared source per .OK layout (display only) — see layout_source().
+        layout_sources: Optional[Dict[str, str]] = None,
     ):
         # .OK -> Calgary JSON conversion mapping (ok_to_json.yaml). `config_dir`
         # is kept because the mapping names a TEMPLATE file relative to it.
@@ -164,6 +166,7 @@ class Config:
         # {source: [name tokens]} and the fallback source, for Calgary JSON.
         self._json_sources = json_sources or {}
         self._json_source_default = json_source_default or ""
+        self._layout_sources = layout_sources or {}
         self._tosca = tosca or {}
         self._chains = chains
         # Calgary JSON files carry the chain as a code ("04") OR a name
@@ -568,6 +571,23 @@ class Config:
         """
         return layout is not None and isinstance(self._unique_fields.get(layout), dict)
 
+    def layout_source(self, layout: Optional[str]) -> Optional[str]:
+        """The source a layout is ALWAYS from, or None if it isn't declared.
+
+        An ``.OK`` format is emitted by exactly one system, so its source is a
+        property of the layout and needs no reading: the EU/EWMS layouts are
+        WMS, the NA ones SCAN (``layout_sources`` in json_sources.yaml). A
+        Calgary JSON layout is deliberately absent here — both sources send the
+        same structure, so only its own payload can answer (see
+        :func:`okgen.jsonsource.source_from_header`).
+
+        Display only. It never selects a key: an ``.OK`` layout maps to a single
+        field in keys.yaml, which is why :meth:`source_dependent` stays False.
+        """
+        if layout is None:
+            return None
+        return self._layout_sources.get(layout)
+
     # ----- record limits -----
     def max_records(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:
         """Max records allowed for a section, or None for unlimited."""
@@ -645,12 +665,16 @@ class Config:
 
         json_sources: Dict[str, List[str]] = {}
         json_source_default = ""
+        layout_sources: Dict[str, str] = {}
         js_path = cdir / "json_sources.yaml"
         if js_path.is_file():
             data = yaml.safe_load(js_path.read_text(encoding="utf-8")) or {}
             json_sources = {str(k): [str(w) for w in (v or [])]
                             for k, v in (data.get("sources") or {}).items()}
             json_source_default = str(data.get("default", "") or "")
+            layout_sources = {str(k): str(v).strip().upper()
+                              for k, v in (data.get("layout_sources") or {}).items()
+                              if str(v or "").strip()}
 
         field_colors: Dict[str, str] = {}
         fc_path = cdir / "field_colors.yaml"
@@ -838,4 +862,5 @@ class Config:
                    trim_trailing, derived_fields, isolated_chain_groups, tosca,
                    json_sources, json_source_default, date_fields, nicelabel_post,
                    nicelabel_post_error, ok_to_json, str(cdir),
-                   pad_zero_fields=pad_zero_fields)
+                   pad_zero_fields=pad_zero_fields,
+                   layout_sources=layout_sources)

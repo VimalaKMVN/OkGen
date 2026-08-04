@@ -319,6 +319,13 @@ def _file_node(path: Path, config: Config, registry=None,
                 cv = header.get(cand)
                 key_values[cand] = None if cv is None else str(cv).strip()
         else:
+            # An .OK format is emitted by exactly one system, so its source is
+            # a property of the LAYOUT and costs no read (contrast the Calgary
+            # layouts above, where only the payload can answer). Display only —
+            # an .OK key is a single field and never depends on this.
+            json_source = config.layout_source(layout)
+            if json_source:
+                source_reason = "the layout's own source"
             header = read_header_line(path)
             delimited = bool(reg_layout is not None and getattr(reg_layout, "delimited", False))
             # Delimited (EU) headers carry the chain in a token, not a fixed slice.

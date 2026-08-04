@@ -1,5 +1,49 @@
-# SCAN/WMS source tokens for tests — mirrors production json_sources.yaml.
+# Which SOURCE a Calgary JSON file came from — SCAN or WMS.
+#
+# Both sources send structurally identical JSON; the ONLY difference is which
+# header field is that file's unique key (see keys.yaml). Nothing in the file
+# itself says which is which, so it is declared by NAME: a token below appearing
+# in the file name, or in any folder above it.
+#
+# Matching is on whole WORDS, not substrings — a name is split on anything that
+# isn't a letter or digit, so "Calgary_SCAN_2026" and "Calgary SCAN" match, but
+# "SCANNED" does NOT. Add extra words to a list here if a site names its folders
+# differently (e.g. EWMS); no code change is needed.
 sources:
   SCAN: ["SCAN"]
   WMS: ["WMS"]
+
+# Used when neither the file name nor any folder above it carries a token AND
+# the user hasn't answered for that folder yet. WMS is the safe fallback: a WMS
+# folder mistaken for SCAN would renumber `keytrol`, which WMS ships as a
+# constant placeholder ('0'), fabricating keys. The other way round only misses
+# a duplicate, which the tree's duplicate warning still flags.
 default: WMS
+
+# ---------------------------------------------------------------------------
+# `.OK` layouts: the source is a property of the LAYOUT, not of the file.
+#
+# A Calgary JSON file is asked which source it came from, because both sources
+# send the same structure and only the payload can tell them apart. An `.OK`
+# file needs no asking: each `.OK` format is emitted by exactly one system, so
+# the answer is fixed the moment the layout is detected.
+#
+#   EU / EWMS layouts   -> WMS
+#   the NA layouts      -> SCAN   (these formats have no ASN field at all)
+#
+# NOTE: EUStyleHeader and EUCartonLabel (the GTA pair) do carry a
+# `header_asn_id`; EUPreticket does not. It is still WMS — it is an EWMS
+# format, and the source is about which system SENT the file, not about which
+# fields that format happens to define.
+#
+# This is display only. An `.OK` layout's unique key is a single field in
+# keys.yaml and is NOT affected by its source (contrast the Calgary layouts,
+# whose key genuinely differs between SCAN and WMS).
+layout_sources:
+  EUPreticket:    WMS
+  EUStyleHeader:  WMS
+  EUCartonLabel:  WMS
+  CartonLabel:    SCAN
+  DistLabels:     SCAN
+  Preticket:      SCAN
+  StyleHeader:    SCAN

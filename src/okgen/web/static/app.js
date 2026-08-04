@@ -296,9 +296,17 @@ function renderFileNode(node) {
   // either way.
   if (node.source) {
     const stag = el("span", "src-badge src-badge-" + node.source.toLowerCase(), node.source);
-    stag.title = node.source === "WMS"
-      ? `WMS — this file has a headerASNid. Key: ${node.key_field || "?"}`
-      : `SCAN — this file has no headerASNid. Key: ${node.key_field || "?"}`;
+    // A JSON file's source is read from its own headerASNid; an .OK file's is
+    // fixed by its layout (EU/EWMS = WMS, the NA layouts = SCAN), so each kind
+    // has to explain itself differently.
+    if (node.json) {
+      stag.title = node.source === "WMS"
+        ? `WMS — this file has a headerASNid. Key: ${node.key_field || "?"}`
+        : `SCAN — this file has no headerASNid. Key: ${node.key_field || "?"}`;
+    } else {
+      stag.title = `${node.source} — every ${node.layout || ".OK"} file comes from `
+        + `${node.source}. Key: ${node.key_field || "?"} (not affected by the source)`;
+    }
     row.appendChild(stag);
   }
   row.appendChild(nameEl);
