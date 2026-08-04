@@ -1682,6 +1682,8 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Bulk Rename (${count})…` : "Bulk Rename…", () => enterRenameMode());
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   add(count > 1 ? `🧹  Clean up ${count} files` : "🧹  Clean up file", () => cleanUpSelection());
+  add(count > 1 ? `⇄  Convert ${count} files to JSON…` : "⇄  Convert to JSON…",
+      () => convertToJson());
   add(sendMenuLabel(count), () => sendToNiceLabel());
   add(count > 1 ? `▶  Run TOSCA Script (${count})` : "▶  Run TOSCA Script", () => runTosca());
   menu.appendChild(el("div", "ctx-sep"));
@@ -2461,6 +2463,8 @@ function showBulkMenu() {
   // Volume generation works from exactly ONE template file.
   add(n === 1 ? "Generate volume files…" : `Generate volume files… (${n} source files)`,
       () => enterGenerateMode());
+  add(n === 1 ? "⇄  Convert to JSON…" : `⇄  Convert ${n} files to JSON…`,
+      () => convertToJson());
   menu.appendChild(el("div", "ctx-sep"));
   add(sendMenuLabel(n), () => sendToNiceLabel());
   const r = $("#bulkBtn").getBoundingClientRect();
@@ -2908,4 +2912,115 @@ function renderGeneratePanel(panel, paths, scope) {
   genBtn.addEventListener("click", runGenerate);
 
   refresh();
+}
+
+// ---- Convert .OK -> Calgary JSON (test data) ----
+// The first action that CREATES data rather than preserving it, so it is gated
+// behind an explicit acknowledgement (like Send to NiceLabel) and shows exactly
+// how much of the output comes from the .OK file vs the vendor template.
+async function convertToJson() {
+  const paths = [...state.selection];
+  if (!paths.length) return;
+  let pv;
+  try { pv = await postJSON("/api/convert/preview", { paths }); }
+  catch (e) { setStatus("Convert failed: " + e.message, "err"); return; }
+
+  const scope = pv.scope || {};
+  if (!scope.convertible) {
+    const why = (scope.blocked || []).map((b) => b.error)[0] || "no convertible files";
+    setStatus("Nothing to convert — " + why, "err");
+    return;
+  }
+  const ok = await confirmConvert(pv);
+  if (!ok) return;
+
+  if (!beginBusy("Converting…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
+  try {
+    const res = await postJSON("/api/convert/apply", { paths });
+    const er = (res.errors || []).length;
+    setStatus(`Converted ${res.written} file(s) to ${res.target} in ${res.folder.split(/[\\/]/).pop()}`
+              + (er ? `, ${er} skipped` : ""), er ? "dirty" : "ok");
+    showConvertResult(res);
+    if (state.rootDir) openFolder(state.rootDir);   // the new folder appears in the tree
+  } catch (e) {
+    setStatus("Convert failed: " + e.message, "err");
+  } finally {
+    state.busy = false;
+  }
+}
+
+function confirmConvert(pv) {
+  return new Promise((resolve) => {
+    const scope = pv.scope || {};
+    const s0 = (pv.samples || [])[0];
+    const cov = (s0 && s0.coverage) || {};
+    const ov = el("div", "modal-overlay");
+    const card = el("div", "modal-card");
+    card.appendChild(el("h3", "modal-title",
+      `Convert ${scope.convertible} file(s) to ${scope.target}`));
+
+    const box = el("div", "modal-warn");
+    box.appendChild(el("span", "modal-warn-icon", "⚠"));
+    box.appendChild(el("span", "modal-warn-text",
+      "This CREATES new test-data files. Fields the .OK file cannot supply are "
+      + "taken from a real vendor sample, so the output is realistic but not a "
+      + "faithful record. Source .OK files are never modified."));
+    card.appendChild(box);
+
+    if (s0) {
+      const tbl = el("div", "tosca-rows");
+      tbl.appendChild(el("div", "tosca-row",
+        `From the .OK file: ${cov.ok || 0} fields · derived: ${cov.derived || 0} `
+        + `· from the template: ${cov.template || 0}`));
+      tbl.appendChild(el("div", "tosca-row",
+        `Output is treated as ${scope.source} (folder name declares it)`));
+      card.appendChild(tbl);
+    }
+    (pv.errors || []).slice(0, 5).forEach((e) =>
+      card.appendChild(el("div", "tosca-row", `skipped ${e.file}: ${e.error}`)));
+
+    const check = el("label", "modal-check");
+    const cb = el("input");
+    cb.type = "checkbox";
+    check.appendChild(cb);
+    check.appendChild(el("span", null,
+      "I understand these are generated test files, not a faithful record."));
+    card.appendChild(check);
+
+    const acts = el("div", "modal-actions");
+    const cancel = el("button", "btn", "Cancel");
+    const go = el("button", "btn btn-primary", "Convert");
+    go.disabled = true;
+    cb.addEventListener("change", () => { go.disabled = !cb.checked; });
+    acts.appendChild(cancel); acts.appendChild(go); card.appendChild(acts);
+    ov.appendChild(card); document.body.appendChild(ov);
+    const done = (v) => { ov.remove(); resolve(v); };
+    cancel.addEventListener("click", () => done(false));
+    go.addEventListener("click", () => done(true));
+    ov.addEventListener("click", (e) => { if (e.target === ov) done(false); });
+  });
+}
+
+function showConvertResult(res) {
+  const ov = el("div", "modal-overlay");
+  const card = el("div", "modal-card");
+  card.appendChild(el("h3", "modal-title", `Converted ${res.written} file(s)`));
+  card.appendChild(el("div", "modal-dest", res.folder));
+  const tbl = el("div", "tosca-rows");
+  (res.files || []).forEach((f) =>
+    tbl.appendChild(el("div", "tosca-row", `${f.source}  →  ${f.name}`)));
+  card.appendChild(tbl);
+  (res.errors || []).forEach((e) => {
+    const box = el("div", "modal-warn");
+    box.appendChild(el("span", "modal-warn-icon", "⚠"));
+    box.appendChild(el("span", "modal-warn-text", `${e.file}: ${e.error}`));
+    card.appendChild(box);
+  });
+  const acts = el("div", "modal-actions");
+  const ok = el("button", "btn btn-primary", "Close");
+  acts.appendChild(ok); card.appendChild(acts);
+  ov.appendChild(card); document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ok.addEventListener("click", close);
+  ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
 }

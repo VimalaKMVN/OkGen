@@ -1,0 +1,103 @@
+# Convert an .OK file into a Calgary JSON file (TEST DATA generation).
+#
+# The two formats carry the same orders from DIFFERENT source systems (legacy
+# .OK vs the new system's JSON), so this is not a lossless re-encoding: the JSON
+# has fields the .OK never had. Conversion therefore starts from a REAL vendor
+# sample as a TEMPLATE and overwrites only what the .OK can actually supply.
+# Anything not listed below keeps its template value, so an incomplete mapping
+# degrades to "looks like a real vendor file", never to a blank where data
+# should be.
+#
+# Output lands in a NEW folder whose name carries the `source` token below, so
+# the existing SCAN/WMS resolution (json_sources.yaml) picks it up with no extra
+# mechanism — which is what makes `keytrol` the unique key for these files.
+#
+# Paths are relative to THIS config directory. Restart OkGen after editing.
+#
+# Per-field rules:
+#   from:       the .OK field name to read
+#   transform:  see the list at the bottom (default: trim trailing/leading pad)
+#   raw:        true = take the .OK value verbatim, padding and all
+
+conversions:
+
+  StyleHeader:
+    target: CalgaryStyleHeader
+    template: templates/CalgaryStyleHeader.json
+    source: SCAN                 # names the output folder -> key is `keytrol`
+    key: keytrol                 # kept unique across the batch
+
+    # --- data.header -------------------------------------------------------
+    header:
+      chain:          { from: chain }
+      format:         { from: format }
+      keytrol:        { from: keytrol }
+      headerSuffix:   { from: suffix }
+      sequenceCode:   { from: seq_code }
+      packId:         { from: pack_id }
+      style:          { from: style }
+      laneRecords:    { from: lane_rec }
+      department:     { from: dept }
+      transmitDate:   { from: date, transform: iso_date }
+      version:        { from: version }
+      price:          { from: comp_price, transform: implied_2dp }
+      area:           { from: area }
+      instructions:   { from: instructions }
+      vendorStyle:    { from: ven_style }
+      description:    { from: desc }
+      category:       { from: category }          # 3 OR 4 digits — never padded
+      totalQuantity:  { from: tot_qty, transform: strip_zeros }
+      retailPrice:    { from: ret_price, transform: implied_2dp }
+      # Not listed -> template value. Notably purchaseOrderNumber (no .OK
+      # source) and headerASNid (SCAN files carry one, but `keytrol` is the key).
+
+    # --- nested arrays on the header --------------------------------------
+    # An .OK section with no real rows leaves the template's single blank
+    # placeholder row alone — every vendor sample has exactly one, never [].
+    arrays:
+      lanes:
+        section: Lane
+        fields:
+          lane:     { from: lane1 }
+      sizes:
+        section: Size
+        fields:
+          size:     { from: size, transform: blank_to_null }
+          quantity: { from: qty, transform: strip_zeros }
+      # `stores` has no .OK counterpart on this layout -> template placeholder.
+
+    # --- data.details[] ----------------------------------------------------
+    # The reshape: an .OK StyleHeader has NO detail rows, but the JSON needs
+    # one — and its fields live on the .OK HEADER.
+    details:
+      from_section: Header
+      fields:
+        style:               { from: style }
+        type:                { from: type }
+        pastSeasonIndicator: { from: psi, raw: true }
+        messageCode1:        { from: message1 }
+        messageCode2:        { from: message2 }
+        compareAtPrice:      { from: comp_price, transform: pad9 }
+        compareAtUp:         { from: comp_up, transform: yn_to_bool }
+        retailPrice:         { from: ret_price, transform: pad9 }
+        quantity:            { from: tot_qty, raw: true }
+        pieces:              { from: pieces, raw: true }
+        ladderPlanMMYY:      { from: ladder_mmdd }
+        ladderPlan:          { from: ladder_mmdd, transform: mmyy_to_first_of_month }
+        category:            { from: category }
+        item:                { from: item }
+        fact1:               { from: fact1 }
+        fact2:               { from: fact2 }
+        fact3:               { from: fact3 }
+
+# Available transforms (okgen/okjson.py):
+#   trim                    default — strip surrounding pad
+#   raw                     verbatim, padding kept (use `raw: true`)
+#   strip_zeros             '0000022' -> '22'   ('000' -> '0')
+#   implied_2dp             '002099'  -> '20.99'
+#   pad9                    '002099'  -> '000002099'
+#   pad_left_4              '208'     -> '0208'   (store numbers)
+#   iso_date                '20170717'-> '2017-07-17'
+#   mmyy_to_first_of_month  '0817'    -> '20170801'
+#   yn_to_bool              'Y'/'N'   -> 'true'/'false'
+#   blank_to_null           ''        -> null

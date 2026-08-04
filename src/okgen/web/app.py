@@ -176,6 +176,30 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except FileNotFoundError:
             return _err(f"not found: {body.get('path')}", 404)
 
+    @app.post("/api/convert/scope")
+    def convert_scope():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.convert_scope(body.get("paths") or [], registry, config))
+
+    @app.post("/api/convert/preview")
+    def convert_preview():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.convert_preview(
+                body.get("paths") or [], registry, config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
+    @app.post("/api/convert/apply")
+    def convert_apply():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.convert_apply(
+                body.get("paths") or [], registry, config,
+                dest=body.get("dest") or None))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     @app.post("/api/generate/apply")
     def generate_apply():
         body = request.get_json(force=True, silent=True) or {}

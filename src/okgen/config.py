@@ -142,7 +142,13 @@ class Config:
         date_fields: Optional[Dict[str, Dict[str, str]]] = None,
         nicelabel_post: Optional[dict] = None,
         nicelabel_post_error: Optional[str] = None,
+        ok_to_json: Optional[dict] = None,
+        config_dir: Optional[str] = None,
     ):
+        # .OK -> Calgary JSON conversion mapping (ok_to_json.yaml). `config_dir`
+        # is kept because the mapping names a TEMPLATE file relative to it.
+        self._ok_to_json = ok_to_json or {}
+        self._config_dir = config_dir or ""
         # The JSON hand-off (HTTP POST) block — see nicelabel_post.yaml. The
         # .OK hand-off (hot-folder copy) stays in nicelabel_path above.
         self._nicelabel_post = nicelabel_post or {}
@@ -192,6 +198,20 @@ class Config:
         self._isolated_chain_groups = [set(g) for g in (isolated_chain_groups or [])]
 
     # ----- chains -----
+    # ----- .OK -> Calgary JSON conversion -----
+    def conversions(self) -> dict:
+        """{source .OK layout: conversion spec} from ok_to_json.yaml."""
+        return dict(self._ok_to_json.get("conversions") or {})
+
+    def conversion_for(self, layout: Optional[str]) -> Optional[dict]:
+        """The conversion spec for an .OK layout, or None if it has no target."""
+        return self.conversions().get(layout) if layout else None
+
+    @property
+    def config_dir(self) -> str:
+        """Where the YAML was loaded from — conversion templates resolve here."""
+        return self._config_dir
+
     def tosca(self) -> dict:
         """The full TOSCA config block (scripts + column/mapping settings)."""
         return self._tosca
@@ -756,10 +776,23 @@ class Config:
                         alt = cdir / val
                         scr[key] = str(alt.resolve()) if alt.exists() else val
 
+        # .OK -> Calgary JSON conversion mapping. Like tosca.yaml, a malformed
+        # file disables ONLY conversion and says so — it must not stop startup.
+        ok_to_json: dict = {}
+        o2j_path = cdir / "ok_to_json.yaml"
+        if o2j_path.is_file():
+            try:
+                ok_to_json = yaml.safe_load(o2j_path.read_text(encoding="utf-8")) or {}
+            except yaml.YAMLError as exc:
+                import sys
+                print(f"WARNING: could not parse {o2j_path} — .OK->JSON conversion "
+                      f"disabled. ({exc})", file=sys.stderr)
+                ok_to_json = {}
+
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
                    nicelabel_warning, send_quips, send_done_quips, regions,
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
                    trim_trailing, derived_fields, isolated_chain_groups, tosca,
                    json_sources, json_source_default, date_fields, nicelabel_post,
-                   nicelabel_post_error)
+                   nicelabel_post_error, ok_to_json, str(cdir))

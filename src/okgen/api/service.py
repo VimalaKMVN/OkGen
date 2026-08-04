@@ -3009,3 +3009,175 @@ def generate_apply(paths, spec, registry: LayoutRegistry, config: Config,
         "errors": errors,
         "templates": [p.name for p in tpaths],
     }
+
+
+# --------------------------------------------------------------------------- #
+# .OK -> Calgary JSON conversion (test data generation) — see okgen/okjson.py
+# --------------------------------------------------------------------------- #
+def _conversion_for(path: Path, registry, config: Config):
+    """(layout name, spec) for a file, or (layout, None) when it has no target."""
+    try:
+        layout = detect_layout(path).layout
+    except Exception:                                   # noqa: BLE001
+        return None, None
+    return layout, config.conversion_for(layout)
+
+
+def convert_scope(paths, registry, config: Config) -> dict:
+    """Which of the selected files can be converted, and to what.
+
+    Gating lives HERE as well as in the client: a client-only check is what let
+    Bulk Edit reach detection-signature fields (D12), so the server decides.
+    """
+    files, blocked, targets = [], [], set()
+    for p in _as_paths(paths):
+        layout, spec = _conversion_for(p, registry, config)
+        if spec is None:
+            blocked.append({"file": p.name, "layout": layout,
+                            "error": f"{layout or 'unknown layout'} has no JSON target"})
+            continue
+        files.append({"path": str(p), "name": p.name, "layout": layout,
+                      "target": spec.get("target")})
+        targets.add(spec.get("target"))
+    return {
+        "files": files,
+        "blocked": blocked,
+        "convertible": len(files),
+        "target": sorted(targets)[0] if len(targets) == 1 else None,
+        "mixed": len(targets) > 1,
+        "source": (config.conversion_for(files[0]["layout"]) or {}).get("source") if files else None,
+    }
+
+
+def _convert_one(path: Path, registry, config: Config, used_keys: set):
+    """Convert one file in memory. Returns (name, document, report)."""
+    from okgen import okjson
+    layout_name, spec = _conversion_for(path, registry, config)
+    if spec is None:
+        raise EditError(f"{layout_name or 'unknown layout'} has no JSON target")
+    layout = registry.get(layout_name)
+    if layout is None:
+        raise EditError(f"unknown layout {layout_name!r}")
+    template = okjson.load_template(spec, Path(config.config_dir))
+    okf = parse_okfile(path, layout)
+    doc, report = okjson.convert(okf, layout, spec, template)
+
+    # Keys stay unique across the batch. These files are SCAN (the output folder
+    # name declares it, D27), so the key is `keytrol` — real .OK data, not a
+    # fabricated one. A collision only bumps the digit run, keeping any literal
+    # prefix/suffix intact (D14).
+    key_field = spec.get("key")
+    if key_field:
+        header = doc["data"]["header"]
+        raw = header.get(key_field)
+        parts = _split_key(raw)
+        if parts.value is not None:
+            # JSON values are trimmed strings, so render directly rather than
+            # via _format_key (which pads into a FIXED-width .OK field). The
+            # digit run keeps its original width, so any literal prefix/suffix
+            # stays at the same offset (D14).
+            def _render(n: int) -> str:
+                return f"{parts.prefix}{str(n).zfill(parts.width)}{parts.suffix}"
+            n = parts.value
+            while _render(n) in used_keys:
+                n += 1
+            value = _render(n)
+            if value != str(raw):
+                header[key_field] = value
+                report.append({"field": key_field, "provenance": "unique",
+                               "value": value, "source": f"re-keyed from {raw!r}"})
+            used_keys.add(value)
+        elif raw is not None:
+            used_keys.add(str(raw))
+    return doc, report
+
+
+def convert_preview(paths, registry, config: Config, limit: int = 5) -> dict:
+    """Build the first ``limit`` files IN MEMORY and write nothing.
+
+    The preview and the apply share :func:`_convert_one`, so what you see is
+    what gets written (the D13 rule that keeps a sample honest).
+    """
+    from okgen import okjson
+    scope = convert_scope(paths, registry, config)
+    sel = [Path(f["path"]) for f in scope["files"]]
+    used: set = set()
+    samples, errors = [], list(scope["blocked"])
+    for p in sel[:limit]:
+        try:
+            doc, report = _convert_one(p, registry, config, used)
+        except (EditError, Exception) as exc:           # noqa: BLE001
+            errors.append({"file": p.name, "error": str(exc)})
+            continue
+        counts: Dict[str, int] = {}
+        for r in report:
+            counts[r["provenance"]] = counts.get(r["provenance"], 0) + 1
+        samples.append({
+            "source": p.name,
+            "name": p.with_suffix(".json").name,
+            "coverage": counts,
+            "report": report,
+            "preview": okjson.dumps(doc).decode("utf-8"),
+        })
+    return {"scope": scope, "samples": samples, "errors": errors,
+            "total": len(sel)}
+
+
+def convert_apply(paths, registry, config: Config, dest=None) -> dict:
+    """Convert every selected file into a NEW folder.
+
+    The source files are never written. Output goes to a new auto-named folder
+    whose name carries the SCAN token, so the existing source resolution (D27)
+    classifies the batch without a new mechanism.
+    """
+    from okgen import okjson
+    scope = convert_scope(paths, registry, config)
+    if scope["mixed"]:
+        raise EditError("selection mixes layouts with different JSON targets — "
+                        "convert one layout at a time")
+    sel = [Path(f["path"]) for f in scope["files"]]
+    if not sel:
+        raise EditError("nothing to convert — no selected file has a JSON target")
+
+    layout_name = scope["files"][0]["layout"]
+    spec = config.conversion_for(layout_name) or {}
+    out_dir = Path(dest) if dest else sel[0].parent / okjson.output_folder_name(
+        spec.get("target") or layout_name, spec.get("source"), len(sel))
+    if not dest:
+        base, n = out_dir, 2
+        while out_dir.exists():
+            out_dir = base.with_name(f"{base.name}_{n}")
+            n += 1
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    used: set = set()
+    written, errors = [], list(scope["blocked"])
+    for p in sel:
+        try:
+            doc, report = _convert_one(p, registry, config, used)
+            target = _unique_path(out_dir, p.with_suffix(".json").name)
+            _atomic_write_bytes(target, okjson.dumps(doc))
+            written.append({"source": p.name, "name": target.name})
+        except Exception as exc:                        # noqa: BLE001
+            errors.append({"file": p.name, "error": str(exc)})
+    return {"folder": str(out_dir), "written": len(written),
+            "files": written[:50], "errors": errors,
+            "source": spec.get("source"), "target": spec.get("target")}
+
+
+def _atomic_write_bytes(out: Path, data: bytes) -> None:
+    """Write bytes via a sibling .tmp + os.replace (D25), so a locked or
+    read-only target fails cleanly and never leaves a half-written file."""
+    tmp = out.with_suffix(out.suffix + ".tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, out)
+    except PermissionError:
+        tmp.unlink(missing_ok=True)
+        raise EditError(f"could not write {out.name} — the file is open in "
+                        f"another program, or the folder is read-only.")
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise EditError(f"could not write {out.name}: {exc}")
+
+
