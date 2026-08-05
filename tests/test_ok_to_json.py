@@ -131,17 +131,27 @@ def test_every_field_is_reported_with_provenance(registry, config):
         assert r["field"] and r["provenance"]
 
 
-def test_empty_ok_section_keeps_the_template_placeholder(tmp_path, registry, config):
-    """Real samples always carry ONE blank row, never []. An .OK file whose Lane
-    rows are all blank must not produce ten blank lanes."""
+def test_empty_ok_section_emits_one_empty_row(tmp_path, registry, config):
+    """A section with no real rows produces exactly ONE row, carrying the
+    section's tags and no values — never ten blank lanes, and never ``[]``.
+
+    Was `..._keeps_the_template_placeholder`: the template's row used to be kept
+    verbatim. That is safe only for CalgaryStyleHeader, whose row really is
+    blank; CalgaryDistLabel and CalgaryCartonLabel ship 10 and 5 REAL stores,
+    so keeping them emitted another order's data (see the module docstring).
+    """
     spec = config.conversion_for("StyleHeader")
     template = okjson.load_template(spec, Path(config.config_dir))
     okf = parse_okfile(DATA_DIR / "StyleHeader.OK", registry["StyleHeader"])
     for rec in okf.sections()["Lane"]:
         rec.set("lane1", " " * 8)                # blank every lane row
     doc, _ = okjson.convert(okf, registry["StyleHeader"], spec, template)
-    assert doc["data"]["header"]["lanes"] == template["data"]["header"]["lanes"]
-    assert len(doc["data"]["header"]["lanes"]) == 1
+
+    lanes = doc["data"]["header"]["lanes"]
+    assert len(lanes) == 1
+    assert set(lanes[0]) == set(template["data"]["header"]["lanes"][0]), \
+        "the kept row must carry the same field tags a real row has"
+    assert all(v in (None, "") for v in lanes[0].values())
 
 
 # --------------------------------------------------------------------------- #

@@ -16,8 +16,12 @@ two rules hold throughout:
 
 Shape notes that come from the real samples, not from guesses:
 
-* an .OK section with no real rows leaves the template's SINGLE placeholder row
-  alone — every vendor sample carries exactly one, never ``[]``; and
+* an .OK section with **no rows** emits ONE row carrying the section's tags and
+  no values. The template's rows are NOT placeholders on two of the three
+  layouts (CalgaryDistLabel ships 10 real stores, CalgaryCartonLabel 5), so
+  keeping them handed another order's store numbers and quantities to a file
+  that has none — with the row count agreeing, which made it look legitimate.
+  Only CalgaryStyleHeader carries a genuinely blank single row; and
 * a StyleHeader's ``details[0]`` is built from the .OK **header**, because the
   .OK layout has no detail rows at all.
 
@@ -139,7 +143,24 @@ def _has_real_rows(rows: List[dict]) -> bool:
     return any(any(_trim(v) for v in row.values()) for row in rows)
 
 
-def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
+def _empty_row(placeholder: list, mapped_fields, nullable, empty_rows, arr_name):
+    """One row carrying a section's TAGS and no values.
+
+    Keys come from the template's own row when it has one, so the shape matches
+    what a real row of this section looks like; otherwise from the fields the
+    mapping knows about. Values default to JSON null, overridden per field by
+    ``json_empty_rows.yaml`` (so a field declared as "" writes "") — the same
+    source the JSON engine uses when a bulk op empties a section, which is what
+    keeps the two paths from drifting.
+    """
+    keys = list(placeholder[0]) if placeholder and isinstance(placeholder[0], dict) \
+        else list(dict.fromkeys(list(mapped_fields) + list(nullable)))
+    declared = (empty_rows or {}).get(arr_name) or {}
+    return {k: declared.get(k) for k in keys}
+
+
+def convert(okf, layout, spec: dict, template: dict,
+            empty_rows: Optional[Dict[str, dict]] = None) -> Tuple[dict, List[dict]]:
     """Build the JSON document for one parsed .OK file.
 
     Returns ``(document, report)`` where report rows are
@@ -185,6 +206,7 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
 
     # --- nested arrays -----------------------------------------------------
     populated_arrays = set()          # arrays whose rows really came from the .OK
+    emptied_arrays = set()            # arrays the .OK has, but with no rows
     for arr_name, arr_spec in (spec.get("arrays") or {}).items():
         rows = _section_values(okf, layout, arr_spec.get("section", ""))
         # Fields that must show as JSON null rather than inherit the template's
@@ -197,16 +219,32 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
         mapped_fields = set(arr_spec.get("fields") or {})
 
         if not _has_real_rows(rows):
-            # No .OK rows at all, so nothing here can have come from the file.
+            # No .OK rows at all, so NOTHING here can have come from the file.
+            #
+            # The template's rows are not placeholders on two of the three
+            # layouts — CalgaryDistLabel ships 10 real stores and
+            # CalgaryCartonLabel 5, straight from the vendor sample order.
+            # Keeping them emitted another order's store numbers, units and
+            # quantities as if they were this file's, with `numberOfStores`
+            # agreeing, so the document looked entirely legitimate. That is
+            # D34's borrowed-data failure reaching through the array path.
+            # (D33 assumed "every vendor sample carries exactly one placeholder
+            # row"; that is true only of CalgaryStyleHeader, which is where the
+            # rule was worked through.)
+            #
+            # So emit ONE row carrying the section's tags and no values — the
+            # same shape the JSON engine writes when a bulk op empties a
+            # section, so the two paths agree.
             placeholder = header.get(arr_name)
-            if isinstance(placeholder, list) and nullable:
-                for item in placeholder:
-                    for field in nullable:
-                        if field in item:
-                            item[field] = None
-            note(f"{arr_name}[]", "template",
-                 f"{len(placeholder or [])} placeholder row(s)",
-                 "no real rows in .OK")
+            if isinstance(placeholder, list):
+                header[arr_name] = [_empty_row(placeholder, mapped_fields,
+                                               nullable, empty_rows, arr_name)]
+                emptied_arrays.add(arr_name)
+                note(f"{arr_name}[]", "empty", "1 empty row",
+                     "no rows in .OK — template rows are another order's data")
+            else:
+                # null / absent in the template: not an array at all, leave it.
+                note(f"{arr_name}[]", "template", placeholder, "not an array")
             continue
 
         proto = (header.get(arr_name) or [{}])[0]
@@ -279,6 +317,12 @@ def convert(okf, layout, spec: dict, template: dict) -> Tuple[dict, List[dict]]:
                 continue                              # details not built here
             rows = data.get("details") or []
         else:
+            if source in emptied_arrays:
+                # The kept row carries tags, not data — the count is 0, not 1,
+                # or the header would claim a store that does not exist.
+                header[field] = "0"
+                note(field, "count", "0", f"no {source} rows in .OK")
+                continue
             if source not in populated_arrays:
                 continue                              # placeholder, not real rows
             rows = header.get(source) or []

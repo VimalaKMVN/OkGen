@@ -3238,6 +3238,33 @@ def _convert_used_keys(sources: List[Path], out_dir: Optional[Path],
     return used
 
 
+def _json_empty_rows_by_array(target_layout, registry, config: Config) -> Dict[str, dict]:
+    """``json_empty_rows.yaml`` re-keyed by JSON ARRAY NAME for the converter.
+
+    The config is written per Calgary layout SECTION (``Sizes``), while
+    conversion works in the template's own terms (``sizes``). The target
+    layout's sections carry the JSON path, so the two are matched through it
+    rather than by lowercasing a name — that would break the moment a section
+    and its JSON key stop looking alike.
+
+    Sharing this with :func:`_apply_json_empty_rows` is the point: an emptied
+    section must look the same whether it was emptied by a bulk op or arrived
+    empty through conversion.
+    """
+    layout = registry.get(target_layout) if (registry and target_layout) else None
+    if layout is None or config is None:
+        return {}
+    out: Dict[str, dict] = {}
+    for sec in layout.sections:
+        jp = tuple(sec.json_path or ())
+        if getattr(sec, "json_kind", None) != "array" or not jp:
+            continue
+        declared = config.json_empty_row(layout.name, sec.name,
+                                         [f.name for f in sec.fields])
+        out[jp[-1]] = declared
+    return out
+
+
 def _convert_one(path: Path, registry, config: Config, used_keys: Dict[tuple, set]):
     """Convert one file in memory. Returns (name, document, report)."""
     from okgen import okjson
@@ -3249,7 +3276,9 @@ def _convert_one(path: Path, registry, config: Config, used_keys: Dict[tuple, se
         raise EditError(f"unknown layout {layout_name!r}")
     template = okjson.load_template(spec, Path(config.config_dir))
     okf = parse_okfile(path, layout)
-    doc, report = okjson.convert(okf, layout, spec, template)
+    doc, report = okjson.convert(okf, layout, spec, template,
+                                 empty_rows=_json_empty_rows_by_array(
+                                     spec.get("target"), registry, config))
 
     # Keys stay unique across the batch. These files are SCAN (the output folder
     # name declares it, D27), so the key is `keytrol` — real .OK data, not a
