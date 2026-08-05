@@ -151,7 +151,7 @@
         },
         {
           "name": "price",
-          "size": 6,
+          "size": 9,
           "json_path": [
             "header",
             "price"
@@ -408,7 +408,7 @@
         },
         {
           "name": "retailPrice",
-          "size": 6,
+          "size": 9,
           "json_path": [
             "header",
             "retailPrice"
@@ -540,15 +540,15 @@
         },
         {
           "name": "compareAtPrice",
-          "size": 6
+          "size": 9
         },
         {
           "name": "compareAtUp",
-          "size": 1
+          "size": 5
         },
         {
           "name": "retailPrice",
-          "size": 6
+          "size": 9
         },
         {
           "name": "quantity",
