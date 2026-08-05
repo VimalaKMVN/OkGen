@@ -1450,7 +1450,8 @@ function renderForm(sec) {
       if (js) {
         const tag = el("span", "src-tag", js.source);
         tag.title = `source: ${js.source} (${js.reason})` +
-          (js.resolved ? "" : " — no SCAN/WMS found in the folder or file name");
+          (js.resolved ? "" : " — could not read this file's headerASNid, so "
+                            + "the configured default was assumed");
         if (!js.resolved) tag.classList.add("src-tag-assumed");
         label.appendChild(tag);
       }
@@ -3024,8 +3025,12 @@ function confirmConvert(pv) {
       tbl.appendChild(el("div", "tosca-row",
         `From the .OK file: ${cov.ok || 0} fields · derived: ${cov.derived || 0} `
         + `· from the template: ${cov.template || 0}`));
+      // The converted file is SCAN because it carries no headerASNid — its own
+      // content says so (D38). The output folder's name is only a label; the
+      // batch resolves the same after the folder is renamed.
       tbl.appendChild(el("div", "tosca-row",
-        `Output is treated as ${scope.source} (folder name declares it)`));
+        `Output will be ${scope.source} — the converted file carries no `
+        + `headerASNid, which is what decides it`));
       card.appendChild(tbl);
     }
     (pv.errors || []).slice(0, 5).forEach((e) =>

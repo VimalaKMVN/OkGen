@@ -354,3 +354,49 @@ def test_has_source_and_source_dependent_are_different_questions(config):
     for layout in SOURCE_INDEPENDENT:
         if not layout.startswith("Calgary"):
             assert config.has_source(layout) is False
+
+
+# --------------------------------------------------------------------------- #
+# The output folder's SCAN token is a LABEL, not a mechanism
+#
+# Under D27 the folder name decided a file's source, and the convert modal said
+# so ("folder name declares it"). D38 replaced that with reading the file's own
+# headerASNid — conversion emits it as null, so the batch is SCAN by content.
+# The wording was stale; these pin the behaviour it now describes.
+# --------------------------------------------------------------------------- #
+def test_a_converted_file_is_scan_by_its_own_content(tmp_path, registry, config):
+    import shutil
+    src = tmp_path / "StyleHeader.OK"
+    shutil.copy2(Path(__file__).resolve().parents[1] / "data" / "OkFileDefinitions"
+                 / "StyleHeader.OK", src)
+    res = service.convert_apply([str(src)], registry, config)
+    out = sorted(Path(res["folder"]).glob("*.json"))[0]
+
+    doc = json.loads(out.read_text(encoding="utf-8"))
+    assert doc["data"]["header"]["headerASNid"] is None, "no ASN => SCAN"
+
+    info = service.json_source_for(out, config)
+    assert info["source"] == "SCAN"
+    assert info["matched_on"] == "headerASNid", info
+    assert "folder" not in info["reason"] and "name" not in info["reason"], info
+
+
+def test_renaming_the_output_folder_does_not_change_the_source(
+        tmp_path, registry, config):
+    """The sharpest form: strip SCAN out of the folder name entirely."""
+    import shutil
+    src = tmp_path / "StyleHeader.OK"
+    shutil.copy2(Path(__file__).resolve().parents[1] / "data" / "OkFileDefinitions"
+                 / "StyleHeader.OK", src)
+    res = service.convert_apply([str(src)], registry, config)
+    folder = Path(res["folder"])
+    out = sorted(folder.glob("*.json"))[0]
+    before = service.json_source_for(out, config)
+
+    renamed = folder.parent / "no_source_token_at_all"
+    folder.rename(renamed)
+    after = service.json_source_for(renamed / out.name, config)
+
+    assert "SCAN" in folder.name, "fixture must start with the token"
+    assert before["source"] == after["source"] == "SCAN"
+    assert before["reason"] == after["reason"]

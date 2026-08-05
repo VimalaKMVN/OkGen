@@ -3385,10 +3385,11 @@ def _convert_one(path: Path, registry, config: Config, used_keys: Dict[tuple, se
                                  empty_rows=_json_empty_rows_by_array(
                                      spec.get("target"), registry, config))
 
-    # Keys stay unique across the batch. These files are SCAN (the output folder
-    # name declares it, D27), so the key is `keytrol` — real .OK data, not a
-    # fabricated one. A collision only bumps the digit run, keeping any literal
-    # prefix/suffix intact (D14).
+    # Keys stay unique across the batch. These files are SCAN because the
+    # conversion emits `headerASNid: null` — the file's OWN content decides it
+    # (D38, which superseded D27's folder/file-name matching). So the key is
+    # `keytrol`, real .OK data rather than a fabricated ASN. A collision only
+    # bumps the digit run, keeping any literal prefix/suffix intact (D14).
     key_field = spec.get("key")
     if key_field:
         header = doc["data"]["header"]
@@ -3448,9 +3449,12 @@ def convert_preview(paths, registry, config: Config, limit: int = 5) -> dict:
 def convert_apply(paths, registry, config: Config, dest=None) -> dict:
     """Convert every selected file into a NEW folder.
 
-    The source files are never written. Output goes to a new auto-named folder
-    whose name carries the SCAN token, so the existing source resolution (D27)
-    classifies the batch without a new mechanism.
+    The source files are never written. Output goes to a new auto-named folder.
+
+    That folder's name carries a SCAN token, but it is only a LABEL: since D38
+    a Calgary JSON file's source is read from its own payload, and conversion
+    emits ``headerASNid: null``, so the batch resolves as SCAN whatever the
+    folder is called. (Under D27 the name was load-bearing; it no longer is.)
     """
     from okgen import okjson
     scope = convert_scope(paths, registry, config)

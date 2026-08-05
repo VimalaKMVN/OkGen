@@ -358,9 +358,13 @@ def load_template(spec: dict, config_dir: Path) -> dict:
 
 
 def output_folder_name(layout_name: str, source: Optional[str], count: int) -> str:
-    """Folder for a batch. The `source` token is what makes the existing
-    SCAN/WMS resolution (D27) classify these files without a new mechanism —
-    matching is on whole words, so 'SCAN' must stand alone."""
+    """Folder for a batch, e.g. ``converted_CalgaryStyleHeader_SCAN_3``.
+
+    The source token is a LABEL for the human reading the folder list. It used
+    to be load-bearing — D27 resolved a file's source by matching SCAN/WMS in
+    the folder or file name — but D38 replaced that with reading the file's own
+    ``headerASNid``, and conversion emits it as null. Renaming this folder does
+    not change what the files are."""
     parts = ["converted", layout_name]
     if source:
         parts.append(str(source).upper())
