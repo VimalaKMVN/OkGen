@@ -67,9 +67,10 @@ def test_view_has_header_and_records(fname, registry, config):
     assert names[0] == "Header"
     hdr = view["sections"][0]
     assert hdr["records"] and hdr["fields"]
-    # the type discriminator + timestamp are shown but read-only
+    # `type` is editable now (all three document words); an out-of-set value
+    # is refused by _assert_layout_stable rather than by a spec flag
     tfield = next(f for f in hdr["fields"] if f["name"] == "type")
-    assert tfield["editable"] is False
+    assert tfield["editable"] is True
     # header carries a real value read from data.header
     assert any(v for v in hdr["records"][0]["values"].values())
 

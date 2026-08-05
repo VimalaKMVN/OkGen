@@ -1350,6 +1350,11 @@ function refreshDerived(si, ri) {
   });
 }
 
+function optionLabel(label, code) {
+  if (code === "") return label;            // the explicit blank choice
+  return label === code ? code : `${label} (${code})`;
+}
+
 function makeControl(sec, rec, field) {
   const value = (rec.values[field.name] != null) ? rec.values[field.name] : "";
   // Read-only field: show a static label (coded values use their friendly
@@ -1374,7 +1379,10 @@ function makeControl(sec, rec, field) {
     if (!codes.includes(value)) {
       ctrl.appendChild(new Option(value + " (current)", value));
     }
-    codes.forEach((code) => ctrl.appendChild(new Option(`${field.options[code]} (${code})`, code)));
+    // "TJMAXX (01)" for a coded value, but just "Winners" when the label IS
+    // the stored value (Calgary chains and `type` map each value to itself) —
+    // "Winners (Winners)" reads like two different things.
+    codes.forEach((code) => ctrl.appendChild(new Option(optionLabel(field.options[code], code), code)));
     ctrl.value = value;
   } else {
     ctrl = el("input", "cell fval");

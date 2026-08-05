@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
 from okgen.config import Config
+from okgen import detect
 from okgen.detect import detect_from_header, detect_layout, read_chain, read_header_line
 from okgen.jsonsource import resolve_source, source_from_header
 from okgen.layout.registry import LayoutRegistry
@@ -958,10 +959,27 @@ def _assert_layout_stable(okf: OkFile) -> None:
     this is the backstop that holds if that list ever drifts (a new layout, a
     renamed field), and it covers every write path rather than every UI.
     """
-    # JSON layouts detect on the ``data.type`` discriminator (a readonly field),
-    # not a positional header signature — the header-line check doesn't apply.
+    # JSON layouts detect on the ``data.type`` discriminator rather than a
+    # positional header signature, so the header-line check below cannot see
+    # them. This branch used to `return` outright, on the assumption that
+    # `type` was unreachable because the spec marks it readonly — but readonly
+    # is a UI hint that `apply_edits` does not enforce, so a write straight to
+    # `type` sailed through and left the file detecting as NO layout, i.e.
+    # unopenable in OkGen. That is exactly the D12 failure this function exists
+    # to prevent, in the one engine it skipped.
+    #
+    # Any of the three type words is allowed (in any casing — detection is
+    # case-insensitive); anything else is refused.
     if getattr(okf.layout, "json_mode", False):
-        return
+        header = okf.records[0] if okf.records else None
+        value = header.get("type") if header is not None else None
+        if value is None or detect.json_type_is_known(value):
+            return
+        raise EditError(
+            f"'{value}' is not a Calgary document type — the file would no "
+            f"longer be openable. Use one of: "
+            f"{', '.join(detect.canonical_json_types())} (any capitalisation)."
+        )
     head = okf.to_bytes().split(b"\n", 1)[0].decode(ENCODING).rstrip("\r\n")
     det = detect_from_header(head)
     if det.layout == okf.layout.name:

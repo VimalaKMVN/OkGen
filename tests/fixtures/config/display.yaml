@@ -18,12 +18,49 @@ rules:
   # Calgary JSON has TWO `type` fields — the document kind on the Header, and
   # a coded 1-9 type on each detail row. Scoped by section so each gets its
   # own labels. Mirrors production display.yaml.
-  - match: {layout: CalgaryStyleHeader, section: Header, field: type}
-    values: {styleHeaders: "styleHeaders"}
-  - match: {layout: CalgaryCartonLabel, section: Header, field: type}
-    values: {cartonLabels: "cartonLabels"}
-  - match: {layout: CalgaryDistLabel, section: Header, field: type}
-    values: {distributionLabels: "distributionLabels"}
+  # All three document words are offered on every Calgary layout — `type` is
+  # editable and any capitalisation is accepted (detection lower-cases), with
+  # `_assert_layout_stable` refusing anything that is not one of them.
+  - match:
+      layout: [CalgaryStyleHeader, CalgaryCartonLabel, CalgaryDistLabel]
+      section: Header
+      field: type
+    values:
+      styleHeaders: "styleHeaders"
+      cartonLabels: "cartonLabels"
+      distributionLabels: "distributionLabels"
+
+  # Calgary chain by CODE or by NAME (D41 — the samples carry both). Scoped to
+  # the Calgary layouts so the .OK layouts keep the code-only chain registry.
+  - match:
+      layout: [CalgaryStyleHeader, CalgaryCartonLabel, CalgaryDistLabel]
+      section: Header
+      field: chain
+    values:
+      "01": "TJMAXX"
+      "02": "Marshalls"
+      "03": "Homegoods"
+      "04": "Winners"
+      "05": "Europe"
+      "06": "HomeSense"
+      "TJMAXX": "TJMAXX"
+      "Marshalls": "Marshalls"
+      "Homegoods": "Homegoods"
+      "Winners": "Winners"
+      "Europe": "Europe"
+      "HomeSense": "HomeSense"
+
+  # Keys QUOTED deliberately: YAML 1.1 reads bare true/false/Yes/No/Y/N as
+  # booleans. Blank is a real allowed value, not the same thing as "false".
+  - match: {layout: CalgaryStyleHeader, section: Details, field: compareAtUp}
+    values:
+      "": "(blank)"
+      "true": "true"
+      "false": "false"
+      "Yes": "Yes"
+      "No": "No"
+      "Y": "Y"
+      "N": "N"
   # ...and the DETAIL row's coded type, which must resolve independently of the
   # header rule above. In production this comes from the generic `field: type`
   # rule; pinned explicitly here so section scoping is proven in both directions.

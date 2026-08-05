@@ -15,8 +15,7 @@
           "size": 20,
           "json_path": [
             "type"
-          ],
-          "readonly": true
+          ]
         },
         {
           "name": "timestamp",

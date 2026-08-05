@@ -458,18 +458,23 @@ def test_clean_up_skips_json_instead_of_pretending(tmp_path, registry, config):
 ])
 def test_document_type_shows_the_vendor_value_verbatim(tmp_path, registry, config,
                                                        fixture, layout, label):
-    """Shown exactly as the vendor sends it.
+    """Shown exactly as the vendor sends it, and the file's own value is offered.
 
     The mapping is an identity one: it exists to claim the field from the
     generic `field: type` rule (which would otherwise offer a nonsense
-    "Type 1..9" list), NOT to rename anything. The label is display-only and
-    the field is read-only, so nothing here can reach the file.
+    "Type 1..9" list), NOT to rename anything.
+
+    `type` used to be read-only. It is now editable, offering all three document
+    words in any capitalisation — the protection moved from a spec flag (which
+    `apply_edits` never enforced, so a write bricked the file) to
+    `_assert_layout_stable`, which refuses a value that is not one of them.
     """
     p = _copy(tmp_path, fixture)
     header = service.parse_file_view(p, registry, config)["sections"][0]
     field = next(f for f in header["fields"] if f["name"] == "type")
-    assert list(field["options"].values()) == [label]
-    assert field["editable"] is False       # it is the detection signature
+    assert label in field["options"], field["options"]
+    assert all(k == v for k, v in field["options"].items()), "identity mapping"
+    assert field["editable"] is True
 
 
 def test_the_two_different_type_fields_get_their_own_labels(tmp_path, registry, config):
@@ -484,7 +489,9 @@ def test_the_two_different_type_fields_get_their_own_labels(tmp_path, registry, 
     sections = {s["name"]: s for s in service.parse_file_view(p, registry, config)["sections"]}
 
     header = next(f for f in sections["Header"]["fields"] if f["name"] == "type")
-    assert header["options"] == {"styleHeaders": "styleHeaders"}
+    assert header["options"] == {"styleHeaders": "styleHeaders",
+                                 "cartonLabels": "cartonLabels",
+                                 "distributionLabels": "distributionLabels"}
     assert sections["Header"]["records"][0]["values"]["type"] == "styleHeaders"
 
     detail = next(f for f in sections["Details"]["fields"] if f["name"] == "type")
@@ -497,7 +504,8 @@ def test_the_two_different_type_fields_get_their_own_labels(tmp_path, registry, 
 def test_a_section_scoped_rule_beats_a_layout_scoped_one(config):
     """The specificity ordering the fix relies on."""
     assert config.options("type", layout="CalgaryStyleHeader", section="Header") == \
-        {"styleHeaders": "styleHeaders"}
+        {"styleHeaders": "styleHeaders", "cartonLabels": "cartonLabels",
+         "distributionLabels": "distributionLabels"}
     detail = config.options("type", layout="CalgaryStyleHeader", section="Details")
     assert detail and "styleHeaders" not in detail
 
@@ -551,24 +559,50 @@ def test_timestamp_is_editable(tmp_path, registry, config):
     assert header["records"][0]["values"]["timestamp"]
 
 
-def test_the_document_type_stays_locked_everywhere(tmp_path, registry, config):
-    """Unlocking `timestamp` must not unlock the detection signature beside it.
+def test_the_document_type_cannot_become_an_unknown_value(tmp_path, registry, config):
+    """`type` is editable now, so the D12 protection has to be REAL.
 
-    `type` is read-only in the layout SPEC rather than in config, and bulk /
-    generate previously only honoured the config list — so it was offered for
-    mass editing despite being the field that decides the layout (D12).
+    It used to rely on the layout spec's `readonly: true` — but that is a UI
+    hint `apply_edits` never enforced, so a write straight to `type` sailed
+    through and left the file detecting as no layout at all, i.e. unopenable.
+    Hiding the field from bulk/generate was the other half of that defence.
+
+    Now the field is offered everywhere and `_assert_layout_stable` enforces the
+    value: any of the three document words in any capitalisation, nothing else.
+    That is strictly stronger — it holds on every write path rather than on the
+    ones that remembered to consult a list.
     """
     p = _copy(tmp_path, "styleheader_fmtB.json")
-    paths = [str(p)]
     header = service.parse_file_view(p, registry, config)["sections"][0]
-    assert next(f for f in header["fields"]
-                if f["name"] == "type")["editable"] is False
+    field = next(f for f in header["fields"] if f["name"] == "type")
+    assert field["editable"] is True
+    assert set(field["options"]) == {"styleHeaders", "cartonLabels",
+                                     "distributionLabels"}
 
-    scope = service.bulk_scope(paths, registry, config)
-    assert "type" not in [f["name"] for f in
-                          scope["header_fields"]["CalgaryStyleHeader"]]
-    gen = service.generate_scope(paths, registry, config)
-    assert "type" not in [f["name"] for f in gen["header_fields"]]
+    ri = header["records"][0]["index"]
+    original = p.read_bytes()
+
+    # a re-casing of its own type is fine and still detects
+    service.apply_edits(p, [{"record_index": ri, "field": "type",
+                             "value": "STYLEHEADERS"}],
+                        registry, config=config, backup=False)
+    assert json.loads(p.read_text(encoding="utf-8"))["data"]["type"] == "STYLEHEADERS"
+    from okgen import detect
+    assert detect.detect_layout(p).layout == "CalgaryStyleHeader"
+
+    # anything else is refused, on the single-edit path...
+    p.write_bytes(original)
+    with pytest.raises(Exception):
+        service.apply_edits(p, [{"record_index": ri, "field": "type",
+                                 "value": "nonsense"}],
+                            registry, config=config, backup=False)
+    assert p.read_bytes() == original, "a refused write must leave the file alone"
+
+    # ...and on the bulk path, which is where D12 said it matters most
+    res = service.bulk_apply([str(p)], "CalgaryStyleHeader", "type", "nonsense",
+                             registry, config, backup=False)
+    assert res["results"][0]["status"] == "error"
+    assert p.read_bytes() == original
 
 
 # --------------------------------------------------------------------------- #

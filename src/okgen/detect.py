@@ -102,6 +102,22 @@ _JSON_TYPE_TO_LAYOUT = {
     "distributionLabels": "CalgaryDistLabel",
 }
 
+# Matched CASE-INSENSITIVELY. The discriminator is a word, not a positional
+# byte, and the field is editable — so `StyleHeaders` or `STYLEHEADERS` is the
+# same document type as `styleHeaders`. Matching exactly made any re-cased value
+# detect as NOTHING, which left the file unopenable in OkGen.
+_JSON_TYPE_LOWER = {k.lower(): v for k, v in _JSON_TYPE_TO_LAYOUT.items()}
+
+
+def json_type_is_known(value) -> bool:
+    """Whether ``value`` names a Calgary document type, in any casing."""
+    return isinstance(value, str) and value.strip().lower() in _JSON_TYPE_LOWER
+
+
+def canonical_json_types() -> list:
+    """The three type words in their canonical casing (for the editor list)."""
+    return list(_JSON_TYPE_TO_LAYOUT)
+
 
 def _detect_json(path: Path) -> Optional[DetectionResult]:
     """Detect a Calgary JSON layout by its ``data.type``, or None if not JSON.
@@ -121,7 +137,8 @@ def _detect_json(path: Path) -> Optional[DetectionResult]:
         jtype = json.loads(text).get("data", {}).get("type")
     except (ValueError, OSError):
         return None
-    name = _JSON_TYPE_TO_LAYOUT.get(jtype)
+    name = (_JSON_TYPE_LOWER.get(jtype.strip().lower())
+            if isinstance(jtype, str) else None)
     if name is None:
         return None
     return DetectionResult(name, f"JSON data.type == {jtype!r}", "{", text[:80])
