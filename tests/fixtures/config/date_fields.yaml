@@ -23,6 +23,21 @@ date_fields:
     # The Calgary JSON document stamp. Same shape in all three JSON layouts.
     timestamp: rfc3339_nano
 
+  # The per-store stamp on the Calgary JSON layouts — same shape as `timestamp`
+  # (2026-02-10T14:47:45.394277988Z in the real DistLabel sample), so no new
+  # format is being guessed here.
+  #
+  # Declared PER LAYOUT, never under "*", and this matters: six .OK layouts also
+  # have a header field called `date`, and theirs is an 8-character fixed-width
+  # value. A "*" entry would start normalizing those into RFC 3339 stamps that
+  # cannot fit the field — a rule aimed at JSON silently rewriting .OK files.
+  CalgaryStyleHeader:
+    date: rfc3339_nano
+  CalgaryDistLabel:
+    date: rfc3339_nano
+  CalgaryCartonLabel:
+    date: rfc3339_nano
+
   # ---- add more as you need them ----
   # The other Calgary date fields are left as plain text for now, since their
   # exact formats need confirming against the consumer before OkGen starts

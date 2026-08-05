@@ -134,6 +134,7 @@ class Config:
         literal_fields: Optional[Dict[str, set]] = None,
         detail_fill: Optional[Dict[str, dict]] = None,
         json_empty_rows: Optional[Dict[str, dict]] = None,
+        json_seed_rows: Optional[Dict[str, dict]] = None,
         trim_trailing: Optional[List[str]] = None,
         derived_fields: Optional[Dict[str, list]] = None,
         isolated_chain_groups: Optional[List[set]] = None,
@@ -197,6 +198,9 @@ class Config:
         # {layout: {section: {field: empty value}}} — what one kept row holds
         # when an operation empties a JSON array section.
         self._json_empty_rows = json_empty_rows or {}
+        # {layout: {section: {field: seed value}}} — the first row added to
+        # an empty JSON section (the JSON answer to `sample_raw`).
+        self._json_seed_rows = json_seed_rows or {}
         # Layouts whose detail lines get trailing pad (after the record
         # terminator) trimmed on write.
         self._trim_trailing = {str(l) for l in (trim_trailing or [])}
@@ -471,6 +475,16 @@ class Config:
         """Whether any layout declares one. Only used to keep the feature out
         of a config set that predates it."""
         return bool(self._json_empty_rows)
+
+    def json_seed_row(self, layout: Optional[str],
+                      section: Optional[str]) -> Dict[str, object]:
+        """Declared seed values for the first row of an empty JSON section.
+
+        Only what config states; the caller fills the rest (a temporal field
+        with `now`, a pad_zeros field zero-padded, everything else blank), so a
+        section with no entry here still yields a usable row.
+        """
+        return dict(self._json_seed_rows.get(layout or "", {}).get(section or "", {}))
 
     # ----- trailing zero-fill (Preticket-style filler rows) -----
     def zero_fill(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:
@@ -817,6 +831,16 @@ class Config:
                 for l, secs in (data.get("empty_rows") or {}).items()
             }
 
+        json_seed_rows: Dict[str, dict] = {}
+        jsr_path = cdir / "json_seed_rows.yaml"
+        if jsr_path.is_file():
+            data = yaml.safe_load(jsr_path.read_text(encoding="utf-8")) or {}
+            json_seed_rows = {
+                str(l): {str(sec): dict(fields or {})
+                         for sec, fields in (secs or {}).items()}
+                for l, secs in (data.get("seed_rows") or {}).items()
+            }
+
         derived_fields: Dict[str, list] = {}
         df2_path = cdir / "derived_fields.yaml"
         if df2_path.is_file():
@@ -893,7 +917,7 @@ class Config:
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
                    nicelabel_warning, send_quips, send_done_quips, regions,
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
-                   json_empty_rows, trim_trailing, derived_fields, isolated_chain_groups, tosca,
+                   json_empty_rows, json_seed_rows, trim_trailing, derived_fields, isolated_chain_groups, tosca,
                    json_sources, json_source_default, date_fields, nicelabel_post,
                    nicelabel_post_error, ok_to_json, str(cdir),
                    pad_zero_fields=pad_zero_fields,

@@ -1,0 +1,78 @@
+# The FIRST row added to an empty JSON array section.
+#
+# A `.OK` layout gets this for free: the compiler lifts a real record line out
+# of the reference `.OK` and bakes it into the layout as `sample_raw`, so adding
+# a row to an empty `.OK` section produces a realistic, valid row. JSON layouts
+# are hand-authored specs with no reference file to learn from, so adding a row
+# produced one with every field blank — including fields that cannot legally be
+# empty. This file is the JSON equivalent of `sample_raw`.
+#
+# Values here are deliberately OBVIOUS PLACEHOLDERS (0001, 1, RCD001) rather
+# than values lifted from a real vendor order. That is D46's lesson: conversion
+# used to inherit the template's rows and handed users another order's store
+# numbers. A seed's job is a valid starting shape, not a real order.
+#
+# A field NOT listed here still gets a usable value, resolved in this order:
+#   1. a temporal field (config/date_fields.yaml) -> the current UTC time in
+#      that field's exact format, because a blank timestamp is not valid;
+#   2. a `pad_zeros` field (config/field_display.yaml) -> its declared value
+#      zero-padded to the field size (D34), digits only;
+#   3. anything else -> "" (free text is the user's to fill in).
+#
+# So a new layout, or a newly added field, is never INVALID with no config at
+# all — config carries the exceptions, not the rule. Same shape as
+# `json_empty_rows.yaml`, which says what an EMPTIED section holds.
+#
+# JSON layouts only. `.OK` seeding goes through `sample_raw` and is untouched.
+#
+#   layout -> { section -> { field -> seed value } }
+seed_rows:
+  CalgaryStyleHeader:
+    Lanes:
+      lane: "RCD001"
+    Sizes:
+      # `size` is left blank deliberately (user's call) — the row is there to be
+      # typed into, and a size code is order-specific.
+      size: ""
+      quantity: "1"
+    Stores:
+      # Least evidenced of the six: a StyleHeader `.OK` has no store section at
+      # all, so the vendor sample's row is itself a blank placeholder.
+      store: "0001"
+      puertoRicoFlag: "N"
+      units: "1"
+      storeQuantity: "1"
+      numberOfPacks: "1"
+      suppress: "N"
+      qtyToPrint: "1"
+    Details:
+      pageNumber: "001"
+      lineNumber: "001"
+      style: "000001"
+      type: "1"
+      quantity: "0000001"
+      pieces: "00"
+      ladderPlanMMYY: "0126"
+      ladderPlan: "20260101"
+      category: "6204"
+      # messageCode1/2, item, fact1-3, the nouns and descriptions are free text
+      # and stay "" — there is no neutral placeholder for a message.
+      # retailPrice / compareAtPrice / compareAtUp are left blank rather than
+      # seeded with a price: a wrong price reads as real data.
+
+  CalgaryDistLabel:
+    Stores:
+      store: "0001"
+      units: "1"
+      storeQuantity: "1"
+      qtyToPrint: "1"
+      # `date` is an RFC 3339 nanosecond stamp (see date_fields.yaml) and is
+      # filled with the current time by rule 1 above.
+
+  CalgaryCartonLabel:
+    Stores:
+      store: "0001"
+      puertoRicoFlag: "N"
+      storeQuantity: "1"
+      numberOfPacks: "1"
+      suppress: "N"

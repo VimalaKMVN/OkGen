@@ -879,8 +879,14 @@ def _op_add(okf: OkFile, config: Config, section_index=None, after_index=None) -
     # whether it was the chosen anchor or the section's last row, the fill pass
     # re-absorbs an all-zero clone on save, so nothing is actually added. Redirect
     # to the last REAL row (or seed a fresh one when the section holds only filler).
+    # Same redirect for a JSON section holding nothing but blank rows. D45
+    # leaves ONE all-null row when a section is emptied, and clone_record reads
+    # values through _display, which maps null -> "" — so adding after an empty
+    # produced another blank row, the very complaint this seeding fixes, just
+    # reached by cloning instead of seeding.
     if not seeded and config is not None and sec is not None \
-            and config.zero_fill(okf.layout.name, sec.name):
+            and (config.zero_fill(okf.layout.name, sec.name)
+                 or getattr(okf.layout, "json_mode", False)):
         hidden = config.hidden_fields(okf.layout.name)
         if _is_blank_row(template, hidden):
             real = [r for r in okf.records if r.section is sec and not _is_blank_row(r, hidden)]
@@ -1269,6 +1275,47 @@ def _clone_record(okf, template):
     )
 
 
+def _json_seed_values(layout, sec, config: Config = None) -> Dict[str, str]:
+    """The values a newly seeded JSON row starts with.
+
+    A `.OK` section gets this from ``sample_raw`` — a real record line the
+    compiler lifted out of the reference file. JSON layouts are hand-authored
+    and have no reference file, so every seeded row used to be blank, including
+    fields that cannot legally be empty (a Calgary store's ``date`` is an RFC
+    3339 stamp).
+
+    Resolution, most specific first:
+
+    1. ``json_seed_rows.yaml`` — an obvious placeholder chosen for the field,
+       never a value lifted from a real vendor order (D46);
+    2. a temporal field (``date_fields.yaml``) — the current UTC time in that
+       field's exact format, since a blank stamp is not a valid value;
+    3. a ``pad_zeros`` field — the declared value zero-padded to the field size
+       (D34, digits only);
+    4. anything else — blank, because free text is the user's to fill in.
+
+    So a section with no config still yields a VALID row; config exists for the
+    values worth choosing. JSON only — `.OK` never reaches here.
+    """
+    from okgen import datetimes
+
+    declared = config.json_seed_row(layout.name, sec.name) if config else {}
+    out: Dict[str, str] = {}
+    for f in sec.fields:
+        value = declared.get(f.name)
+        value = "" if value is None else str(value)
+        if not value and config is not None:
+            fmt = config.date_format(layout.name, f.name)
+            if fmt:
+                # "now" through the same path a typed date takes, so a seeded
+                # stamp is byte-identical in shape to an edited one (D29).
+                value = datetimes.normalize("now", fmt)
+        if value and config is not None:
+            value = _pad_zero_value(value, layout.name, f.name, f.size, config)
+        out[f.name] = value
+    return out
+
+
 def _seed_record(okf, sec, config: Config = None):
     """Build the first row for an EMPTY section from the section's ``sample_raw``.
 
@@ -1288,10 +1335,12 @@ def _seed_record(okf, sec, config: Config = None):
     Returns None when no seed structure is known for the section.
     """
     if getattr(okf.layout, "json_mode", False):
-        # JSON layouts carry no reference line — a first row is rendered from
-        # the section's field list, every value blank.
+        # JSON layouts carry no reference line, so the row is built from config
+        # (see _json_seed_values) rather than learned at compile time.
         from okgen import jsonengine
-        return jsonengine.seed_record(okf.json_state, sec, _json_array_path(sec))
+        rec = jsonengine.seed_record(okf.json_state, sec, _json_array_path(sec))
+        rec.pending = _json_seed_values(okf.layout, sec, config)
+        return rec
     seed = getattr(sec, "sample_raw", None)
     if not seed:
         return None
@@ -2285,8 +2334,12 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
             # row that `_apply_detail_fill` re-absorbs, adding nothing real. Clone
             # the last REAL row instead, and count/limit against real rows; the
             # fill pass re-establishes the filler block (real + N filler) after.
+            # A JSON section is treated the same way, for D45's skeleton: the
+            # one all-null row an emptied section keeps is not a real row, and
+            # cloning it hands back the blank row this seeding exists to avoid.
             fill_managed = config is not None and config.zero_fill(layout_name, section_name)
-            if fill_managed:
+            json_mode = getattr(okf.layout, "json_mode", False)
+            if fill_managed or (json_mode and config is not None):
                 hidden = config.hidden_fields(layout_name)
                 real = [r for r in recs if not _is_blank_row(r, hidden)]
             else:
@@ -2929,8 +2982,24 @@ def _set_row_count(okf: OkFile, config: Config, section_name: str, target: int) 
     while len(rows) > target:                     # shrink from the end
         okf.records.remove(rows.pop())
     if len(rows) < target:
-        if rows:
+        # Growing a JSON section whose rows are ALL blank would clone a blank
+        # row. Seed the new rows instead — but leave the existing ones alone:
+        # a blank row may be D45's emptied-section skeleton OR a real row the
+        # file ships (styleheader_fmtB carries exactly one blank store), and
+        # nothing here can tell them apart. Deleting the user's row to tidy up
+        # is not this function's call.
+        blank_only = (rows and config is not None
+                      and getattr(okf.layout, "json_mode", False)
+                      and all(_is_blank_row(r, config.hidden_fields(okf.layout.name))
+                              for r in rows))
+        if rows and not blank_only:
             template, at = rows[-1], okf.records.index(rows[-1]) + 1
+        elif blank_only:
+            template = _seed_record(okf, sec, config)
+            if template is None:
+                return
+            at = _insert_in_section_order(okf, template, sec) + 1
+            rows.append(template)
         else:
             template = _seed_record(okf, sec, config)
             if template is None:

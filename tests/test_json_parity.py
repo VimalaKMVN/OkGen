@@ -226,7 +226,10 @@ def test_adding_rows_to_an_array_the_file_lacks_fails_loudly(tmp_path, registry,
     assert p.read_bytes() == original, "a refused save must leave the file alone"
 
 
-def test_the_first_row_of_an_empty_section_is_seeded_blank(tmp_path, registry, config):
+def test_the_first_row_of_an_empty_section_is_seeded(tmp_path, registry, config):
+    """Was `..._is_seeded_blank`: a seeded JSON row used to be blank in every
+    field, which is what a user hit when a section had no rows. It now comes
+    from `json_seed_rows.yaml` — `size` stays "" by choice, `quantity` seeds."""
     doc = json.loads((FIX / "styleheader_fmtB.json").read_text(encoding="utf-8"))
     doc["data"]["header"]["sizes"] = []
     p = tmp_path / "empty_sizes.json"
@@ -237,7 +240,7 @@ def test_the_first_row_of_an_empty_section_is_seeded_blank(tmp_path, registry, c
 
     sizes = _rows(p, ("header", "sizes"))
     assert len(sizes) == 1
-    assert set(sizes[0].values()) == {""}, "a seeded row starts blank"
+    assert sizes[0] == {"size": "", "quantity": "1"}
 
 
 def test_a_nested_row_array_cannot_be_overwritten_as_a_value(tmp_path, registry, config):
