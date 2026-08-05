@@ -2938,8 +2938,14 @@ def _set_row_count(okf: OkFile, config: Config, section_name: str, target: int) 
             at = _insert_in_section_order(okf, template, sec) + 1
             rows.append(template)
         while len(rows) < target:
-            clone = new_record(template.raw.rstrip("\r"), sec, okf.layout,
-                               offset=template.offset, index=template.index)
+            # Clone through the engine that owns the record. This used to build
+            # a fixed-width Record from ``template.raw``, which is '' on a
+            # JsonRecord — so the clone carried no array_path and the JSON
+            # serializer ignored it. Volume Generate could therefore not add a
+            # row to ANY JSON section, populated or empty, while reporting
+            # success: asking for 15 stores on a 10-store file wrote 10. Only
+            # the SHRINK direction worked, which is why it went unnoticed.
+            clone = _clone_record(okf, template)
             okf.records.insert(at, clone)
             rows.append(clone)
             at += 1
