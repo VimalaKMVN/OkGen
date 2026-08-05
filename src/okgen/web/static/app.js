@@ -3062,6 +3062,20 @@ function showConvertResult(res) {
     box.appendChild(el("span", "modal-warn-text", `${e.file}: ${e.error}`));
     body.appendChild(box);
   });
+  // Written, but past Windows' path limit — OkGen can reopen these, other
+  // programs may not. A warning, not an error: the files are on disk.
+  const long = res.long_paths || [];
+  if (long.length) {
+    const box = el("div", "modal-warn");
+    box.appendChild(el("span", "modal-warn-icon", "⚠"));
+    const names = long.map((f) => `${f.name} (${f.length})`).join(", ");
+    box.appendChild(el("span", "modal-warn-text",
+      `${long.length} file(s) were written to a path longer than Windows' ` +
+      `${res.max_path || 260}-character limit, so Explorer or the program that ` +
+      `consumes them may not be able to open them. Convert into a folder closer ` +
+      `to the drive root, or shorten the file names: ${names}`));
+    body.appendChild(box);
+  }
   const acts = el("div", "modal-actions");
   const ok = el("button", "btn btn-primary", "Close");
   acts.appendChild(ok); card.appendChild(acts);

@@ -23,6 +23,7 @@ from dataclasses import dataclass, field as dfield
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from okgen import paths as fs
 from okgen.detect import detect_layout
 from okgen.layout.models import Field, Layout, Section
 
@@ -215,7 +216,7 @@ class OkFile:
         target = Path(path) if path is not None else self.path
         if target is None:
             raise ValueError("no path to save to")
-        target.write_bytes(self.to_bytes())
+        fs.write_bytes(target, self.to_bytes())
 
     def sections(self) -> Dict[str, List[Record]]:
         """Group records by section, in the layout's canonical section order.
@@ -398,7 +399,7 @@ def _assign_records(raws: List[str], layout: Layout) -> List[Record]:
 def parse_okfile(path, layout: Optional[Layout] = None, registry=None) -> OkFile:
     """Parse an OK file, detecting its layout if not supplied."""
     path = Path(path)
-    data = path.read_bytes()
+    data = fs.read_bytes(path)
 
     if layout is None:
         det = detect_layout(path)

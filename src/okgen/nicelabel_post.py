@@ -40,6 +40,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
+from okgen import paths as fs
+
 
 class PostError(Exception):
     """A configuration/environment failure that stops the whole run.
@@ -464,9 +466,9 @@ def _write_log(s: Settings, report: str, stamp: str) -> Optional[str]:
     run — the report is still returned to the UI either way."""
     folder = Path(s.log_folder) if s.log_folder else default_log_folder()
     try:
-        folder.mkdir(parents=True, exist_ok=True)
+        fs.mkdir(folder, parents=True, exist_ok=True)
         path = folder / f"okgen_send_{stamp}.log"
-        path.write_text(report, encoding="utf-8")
+        fs.write_text(path, report, encoding="utf-8")
         return str(path)
     except OSError:
         return None
@@ -531,7 +533,7 @@ def run(paths, raw_config: Optional[dict],
             continue
 
         try:
-            payload = src.read_bytes()
+            payload = fs.read_bytes(src)
         except OSError as exc:
             failed_n += 1
             results.append({**base, "outcome": "failed", "error_class": ERR_LOCAL,

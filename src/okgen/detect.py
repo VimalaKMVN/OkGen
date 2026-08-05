@@ -20,6 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from okgen import paths as fs
+
 # Known record markers (informational; detection does not depend on which one).
 RECORD_MARKERS = {"|", "#", "&"}
 
@@ -43,7 +45,7 @@ class DetectionResult:
 
 def read_header_line(path: Path, encoding: str = "latin-1") -> str:
     """Return the first line of an OK file with line terminators stripped."""
-    with open(path, "rb") as fh:
+    with open(fs.long_path(path), "rb") as fh:
         raw = fh.readline()
     return raw.decode(encoding, errors="replace").rstrip("\r\n")
 
@@ -107,7 +109,7 @@ def _detect_json(path: Path) -> Optional[DetectionResult]:
     JSON is multi-line (a pretty-printed doc's first line is just ``{``), so this
     reads the whole (small) file rather than the header line."""
     try:
-        with open(path, "rb") as fh:
+        with open(fs.long_path(path), "rb") as fh:
             head = fh.read(64)
     except OSError:
         return None
@@ -115,7 +117,7 @@ def _detect_json(path: Path) -> Optional[DetectionResult]:
         return None                        # not a JSON document
     try:
         import json
-        text = Path(path).read_text(encoding="utf-8")
+        text = fs.read_text(path, "utf-8")
         jtype = json.loads(text).get("data", {}).get("type")
     except (ValueError, OSError):
         return None

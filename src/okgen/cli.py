@@ -12,6 +12,7 @@ import os
 import sys
 from pathlib import Path
 
+from okgen import paths as fs
 from okgen.detect import detect_layout
 from okgen.layout.compiler import compile_dir
 from okgen.layout.registry import LayoutRegistry
@@ -45,7 +46,7 @@ def _cmd_compile(args: argparse.Namespace) -> int:
     print(f"Compiling layouts from {data_dir}\n")
     for layout in layouts:
         out_path = out_dir / f"{layout.name}.json"
-        out_path.write_text(json.dumps(layout.to_dict(), indent=2), encoding="utf-8")
+        fs.write_text(out_path, json.dumps(layout.to_dict(), indent=2))
 
         report = validate_layout(layout)
         total_mismatch += report.mismatch
@@ -108,7 +109,7 @@ def _cmd_parse(args: argparse.Namespace) -> int:
     print(f"{path.name}: layout={okf.layout.name}  records={len(okf.records)}")
 
     # Byte-exact round-trip check.
-    roundtrip_ok = okf.to_bytes() == path.read_bytes()
+    roundtrip_ok = okf.to_bytes() == fs.read_bytes(path)
     print(f"round-trip: {'IDENTICAL' if roundtrip_ok else 'DIFFERS'}")
 
     print("sections:")

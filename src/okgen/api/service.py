@@ -21,6 +21,7 @@ from okgen.detect import detect_from_header, detect_layout, read_chain, read_hea
 from okgen.jsonsource import resolve_source, source_from_header
 from okgen.layout.registry import LayoutRegistry
 from okgen.okfile import ENCODING, OkFile, Record, new_record, parse_okfile
+from okgen import paths as fs
 
 OK_SUFFIX = ".ok"  # compared case-insensitively
 
@@ -206,7 +207,7 @@ def _delim_header_value(header: str, layout, field_name) -> Optional[str]:
 def _json_header(path: Path) -> dict:
     """The flat ``data.header`` object of a Calgary JSON file (cheap, no parse)."""
     import json
-    data = json.loads(Path(path).read_text(encoding="utf-8")).get("data", {})
+    data = json.loads(fs.read_text(path, "utf-8")).get("data", {})
     return data.get("header", {}) or {}
 
 
@@ -366,7 +367,7 @@ def parse_file_view(path, registry: LayoutRegistry, config: Config,
     """The editor view of a file **as it is on disk**."""
     path = Path(path)
     okf = parse_okfile(path, registry=registry)
-    return _build_file_view(okf, path, config, disk_bytes=path.read_bytes(),
+    return _build_file_view(okf, path, config, disk_bytes=fs.read_bytes(path),
                             source=source)
 
 
@@ -572,7 +573,7 @@ def apply_edits(
         "written": True,
         "edits_applied": len(edits),
         "ops_applied": len(ops or []),
-        "roundtrip_ok": okf.to_bytes() == out.read_bytes(),
+        "roundtrip_ok": okf.to_bytes() == fs.read_bytes(out),
     }
 
 
@@ -974,6 +975,13 @@ def _write_failed_message(out: Path, exc: OSError) -> str:
     if busy:
         return (f"Couldn't save '{out.name}' — it looks like it's open in another "
                 f"program (e.g. Excel) or is read-only. Close it there and try again.")
+    # Windows reports a too-long path as "path not found", which reads as a
+    # missing folder. Say what it actually is, and by how much.
+    if fs.is_too_long_error(exc) or fs.is_long(out):
+        return (f"Couldn't save '{out.name}' — the full path is "
+                f"{len(str(out))} characters, over Windows' {fs.MAX_PATH}-character "
+                f"limit. Use a shorter folder or file name, or a folder closer "
+                f"to the drive root.")
     return f"Couldn't save '{out.name}': {getattr(exc, 'strerror', None) or exc}"
 
 
@@ -990,7 +998,7 @@ def _atomic_write_okf(okf, out: Path, backup: bool) -> None:
     """
     out = Path(out)
     tmp = out.with_suffix(out.suffix + ".tmp")
-    prev = out.read_bytes() if (backup and out.exists()) else None
+    prev = fs.read_bytes(out) if (backup and fs.exists(out)) else None
     try:
         try:
             data = okf.to_bytes()
@@ -999,17 +1007,17 @@ def _atomic_write_okf(okf, out: Path, backup: bool) -> None:
             # array the file doesn't contain). Refuse LOUDLY — writing what we
             # could and dropping the rest is how edits vanish silently.
             raise EditError(str(exc)) from exc
-        tmp.write_bytes(data)
-        os.replace(tmp, out)                 # atomic; fails cleanly if out is locked
+        fs.write_bytes(tmp, data)
+        fs.replace(tmp, out)                 # atomic; fails cleanly if out is locked
     except OSError as exc:
         try:
-            tmp.unlink()                     # no stray temp file left behind
+            fs.unlink(tmp)                   # no stray temp file left behind
         except OSError:
             pass
         raise EditError(_write_failed_message(out, exc)) from exc
     if prev is not None:
         try:
-            out.with_suffix(out.suffix + ".bak").write_bytes(prev)
+            fs.write_bytes(out.with_suffix(out.suffix + ".bak"), prev)
         except OSError:
             pass                             # best-effort; the save already succeeded
 
@@ -1402,7 +1410,7 @@ def delete_file(path) -> dict:
     p = Path(path)
     if not _editable_file(p):
         raise EditError(f"not an editable file: {p}")
-    p.unlink()
+    fs.unlink(p)
     return {"deleted": str(p)}
 
 
@@ -1501,7 +1509,7 @@ def send_to_nicelabel(paths, config: Config) -> dict:
             errors.append({"path": str(path), "error": "not an .OK file"})
             continue
         try:
-            shutil.copy2(sp, dd / sp.name)   # overwrite any same-name file
+            fs.copy2(sp, dd / sp.name)       # overwrite any same-name file
             sent.append(sp.name)
         except OSError as exc:
             errors.append({"path": str(path), "error": str(exc)})
@@ -1603,7 +1611,7 @@ def delete_files(paths) -> dict:
             errors.append({"path": str(path), "error": "not an editable file"})
             continue
         try:
-            p.unlink()
+            fs.unlink(p)
             deleted.append(str(p))
         except OSError as exc:
             errors.append({"path": str(path), "error": str(exc)})
@@ -1614,10 +1622,10 @@ def copy_file(src, dst) -> dict:
     s, d = Path(src), Path(dst)
     if not _editable_file(s):
         raise EditError(f"not an editable file: {s}")
-    if d.exists():
+    if fs.exists(d):
         raise EditError(f"destination exists: {d}")
-    d.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(s, d)
+    fs.mkdir(d.parent, parents=True, exist_ok=True)
+    fs.copy2(s, d)
     return {"copied": str(s), "to": str(d)}
 
 
@@ -1631,7 +1639,7 @@ def _unique_path(dst_dir: Path, name: str) -> Path:
     stem, suffix = p.stem, p.suffix
     candidate = dst_dir / name
     i = 1
-    while candidate.exists():
+    while fs.exists(candidate):
         candidate = dst_dir / f"{stem} ({i}){suffix}"
         i += 1
     return candidate
@@ -1662,14 +1670,14 @@ def copy_files(srcs, dst_dir, registry=None, config=None,
             errors.append({"src": str(src), "error": "cannot paste a folder into itself"})
             continue
         target = dd / sp.name
-        if target.exists():
+        if fs.exists(target):
             target = _unique_path(dd, sp.name)
             renamed.append({"from": sp.name, "to": target.name})
         try:
             if is_dir:
-                shutil.copytree(sp, target)
+                fs.copytree(sp, target)
             else:
-                shutil.copy2(sp, target)
+                fs.copy2(sp, target)
                 new_ok_files.append(target)
             copied.append(str(target))
         except OSError as exc:
@@ -1926,7 +1934,7 @@ def clean_files(paths, registry) -> dict:
                             "detail": "JSON files have no blank lines to clean"})
             continue
         try:
-            original = p.read_bytes()
+            original = fs.read_bytes(p)
             okf = parse_okfile(p, registry=registry)      # strips trailing blanks
             new_bytes = okf.to_bytes()
             if new_bytes != original:
@@ -2592,13 +2600,13 @@ def bulk_rename_apply(paths, parts, separator, registry, config) -> dict:
             src = Path(r["path"])
             tmp = folder / f".okgentmp_{idx}_{r['new']}"
             try:
-                src.rename(tmp)
+                fs.rename(src, tmp)
                 staged.append((tmp, folder / r["new"], r))
             except OSError as exc:
                 results.append({**r, "status": "error", "error": str(exc)})
         for tmp, final, r in staged:
             try:
-                tmp.rename(final)
+                fs.rename(tmp, final)
                 results.append({**r, "status": "renamed"})
             except OSError as exc:
                 results.append({**r, "status": "error", "error": str(exc)})
@@ -2619,9 +2627,9 @@ def create_folder(parent, name) -> dict:
     if not name or any(c in _BAD_NAME_CHARS for c in name):
         raise EditError("invalid folder name")
     target = pp / name
-    if target.exists():
+    if fs.exists(target):
         raise EditError(f"already exists: {target}")
-    target.mkdir()
+    fs.mkdir(target)
     return {"created": str(target)}
 
 
@@ -2629,9 +2637,9 @@ def rename_folder(src, dst) -> dict:
     s, d = Path(src), Path(dst)
     if not s.is_dir():
         raise EditError(f"not a folder: {s}")
-    if d.exists():
+    if fs.exists(d):
         raise EditError(f"destination exists: {d}")
-    s.rename(d)
+    fs.rename(s, d)
     return {"renamed": str(s), "to": str(d)}
 
 
@@ -2647,10 +2655,10 @@ def rename_file(src, dst) -> dict:
     s, d = Path(src), Path(dst)
     if not _editable_file(s):
         raise EditError(f"not an editable file: {s}")
-    if d.exists():
+    if fs.exists(d):
         raise EditError(f"destination exists: {d}")
-    d.parent.mkdir(parents=True, exist_ok=True)
-    s.rename(d)
+    fs.mkdir(d.parent, parents=True, exist_ok=True)
+    fs.rename(s, d)
     return {"renamed": str(s), "to": str(d)}
 
 
@@ -2774,7 +2782,7 @@ def _generate_folder(templates, count: int, layout_name: str, dest=None, dry=Fal
     if dry:
         return base
     out, n = base, 2
-    while out.exists():
+    while fs.exists(out):
         out = base.with_name(f"{base.name}_{n}")
         n += 1
     return out
@@ -3087,7 +3095,7 @@ def generate_apply(paths, spec, registry: LayoutRegistry, config: Config,
                          source=source))                                   # validate
 
     folder = _generate_folder(tpaths, count, layout_name, spec.get("dest"))
-    folder.mkdir(parents=True, exist_ok=True)
+    fs.mkdir(folder, parents=True, exist_ok=True)
 
     written, errors = [], []
     for name, _okf, note in _generate_batch(tpaths, spec, registry, config, count,
@@ -3278,25 +3286,33 @@ def convert_apply(paths, registry, config: Config, dest=None) -> dict:
         spec.get("target") or layout_name, spec.get("source"), len(sel))
     if not dest:
         base, n = out_dir, 2
-        while out_dir.exists():
+        while fs.exists(out_dir):
             out_dir = base.with_name(f"{base.name}_{n}")
             n += 1
-    out_dir.mkdir(parents=True, exist_ok=True)
+    fs.mkdir(out_dir, parents=True, exist_ok=True)
 
     # Start above every key already used nearby, so a second batch of the same
     # sources cannot reproduce the first batch's keys.
     used = _convert_used_keys(sel, out_dir, registry, config)
-    written, errors = [], list(scope["blocked"])
+    written, errors, long_paths = [], list(scope["blocked"]), []
     for p in sel:
         try:
             doc, report = _convert_one(p, registry, config, used)
             target = _unique_path(out_dir, p.with_suffix(".json").name)
             _atomic_write_bytes(target, okjson.dumps(doc))
             written.append({"source": p.name, "name": target.name})
+            # Conversion LENGTHENS the path (the .OK's name plus a new
+            # converted_… folder), so a source that opens fine can land beyond
+            # Windows' 260-char limit. OkGen writes it either way, but Explorer
+            # and whatever consumes the file may not be able to open it — say
+            # so rather than let it fail somewhere with no explanation.
+            if fs.is_long(target):
+                long_paths.append({"name": target.name, "length": len(str(target))})
         except Exception as exc:                        # noqa: BLE001
             errors.append({"file": p.name, "error": str(exc)})
     return {"folder": str(out_dir), "written": len(written),
-            "files": written[:50], "errors": errors,
+            "files": written[:50], "errors": errors, "long_paths": long_paths[:50],
+            "max_path": fs.MAX_PATH,
             "source": spec.get("source"), "target": spec.get("target")}
 
 
@@ -3305,14 +3321,14 @@ def _atomic_write_bytes(out: Path, data: bytes) -> None:
     read-only target fails cleanly and never leaves a half-written file."""
     tmp = out.with_suffix(out.suffix + ".tmp")
     try:
-        tmp.write_bytes(data)
-        os.replace(tmp, out)
+        fs.write_bytes(tmp, data)
+        fs.replace(tmp, out)
     except PermissionError:
-        tmp.unlink(missing_ok=True)
+        fs.unlink(tmp, missing_ok=True)
         raise EditError(f"could not write {out.name} — the file is open in "
                         f"another program, or the folder is read-only.")
     except OSError as exc:
-        tmp.unlink(missing_ok=True)
-        raise EditError(f"could not write {out.name}: {exc}")
+        fs.unlink(tmp, missing_ok=True)
+        raise EditError(_write_failed_message(out, exc))
 
 

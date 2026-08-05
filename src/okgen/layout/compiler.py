@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 
 from openpyxl import load_workbook
 
+from okgen import paths as fs
 from okgen.layout.models import Field, Layout, Section
 
 # Spreadsheet sentinels that mean "no usable value".
@@ -271,7 +272,7 @@ def _derive_section_markers(layout: Layout, data_dir: Path) -> None:
 
     ref = data_dir / f"{layout.name}.OK"
     try:
-        lines = ref.read_bytes().decode("latin-1").splitlines()
+        lines = fs.read_bytes(ref).decode("latin-1").splitlines()
     except OSError:
         return
 

@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 from xml.sax.saxutils import escape
 
+from okgen import paths as fs
 from okgen.detect import detect_layout
 
 
@@ -80,7 +81,7 @@ def _resolve_one(raw: str, exts, kind: str) -> Path:
 # --------------------------------------------------------------------------- #
 def _json_header(path: Path) -> dict:
     import json
-    data = json.loads(Path(path).read_text(encoding="utf-8")).get("data", {})
+    data = json.loads(fs.read_text(path, "utf-8")).get("data", {})
     return data.get("header", {}) or {}
 
 
@@ -295,7 +296,7 @@ def write_data_sheet(workbook: Path, data_sheet: str, rows: List[dict],
     clear the field columns of every row below, editing only the sheet XML inside
     the .xlsm zip (all other parts — macros, validations, styles — preserved)."""
     workbook = Path(workbook)
-    with zipfile.ZipFile(workbook) as zf:
+    with zipfile.ZipFile(fs.long_path(workbook)) as zf:
         names = zf.namelist()
         data = {n: zf.read(n) for n in names}
     wb_xml = data["xl/workbook.xml"].decode("utf-8")
@@ -313,7 +314,7 @@ def write_data_sheet(workbook: Path, data_sheet: str, rows: List[dict],
 
     data[sheet_path] = xml.encode("utf-8")
     tmp = workbook.with_name(workbook.name + ".okgen.tmp")
-    with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(fs.long_path(tmp), "w", zipfile.ZIP_DEFLATED) as zf:
         for n in names:                                 # preserve entry order
             zf.writestr(n, data[n])
     # Atomically swap in the new workbook. On Windows this fails if the file is
@@ -321,12 +322,12 @@ def write_data_sheet(workbook: Path, data_sheet: str, rows: List[dict],
     # handle, then give up cleanly (caller turns it into a friendly message).
     for attempt in range(5):
         try:
-            tmp.replace(workbook)
+            fs.replace(tmp, workbook)
             return
         except PermissionError:
             if attempt == 4:
                 try:
-                    tmp.unlink()
+                    fs.unlink(tmp)
                 except OSError:
                     pass
                 raise
