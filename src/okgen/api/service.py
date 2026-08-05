@@ -899,7 +899,20 @@ def _op_add(okf: OkFile, config: Config, section_index=None, after_index=None) -
                     raise EditError(f"section '{sec.name}' has no template to seed a row")
                 seeded = True
 
-    sec_count = sum(1 for r in okf.records if r.section is sec)
+    # A JSON section holding NOTHING but blank rows has no data in it, so the
+    # row being added is its first real one and the blanks are replaced rather
+    # than kept. Without this, adding to a section emptied earlier left D45's
+    # marker row sitting above the new row, and every later add stacked on top
+    # of it. Dropped only when EVERY row is blank — a blank row among real ones
+    # is left alone, since that is the user's own row and not a placeholder.
+    #
+    # Note this cannot be decided by looking at the row: an emptied `lanes`
+    # marker is `{"lane": ""}`, byte-identical to the one the vendor ships. So
+    # the rule is about blankness, not about recognising a marker — which does
+    # mean a genuinely blank vendor row is replaced by the first row added.
+    blanks = _json_blank_rows_to_replace(okf, sec, config)
+
+    sec_count = sum(1 for r in okf.records if r.section is sec) - len(blanks)
     limit = config.max_records(okf.layout.name, sec.name) if config else None
     if limit is not None and sec_count >= limit:
         raise EditError(f"section '{sec.name}' is at its limit of {limit} records")
@@ -912,6 +925,8 @@ def _op_add(okf: OkFile, config: Config, section_index=None, after_index=None) -
         _insert_in_section_order(okf, clone, sec)
     else:
         okf.records.insert(okf.records.index(template) + 1, clone)
+    for r in blanks:                       # after the insert, so indexes hold
+        okf.records.remove(r)
     return sec.name
 
 
@@ -1099,6 +1114,26 @@ def _is_blank_row(rec, hidden: set) -> bool:
         if v is not None and v.strip("0 ") != "":
             return False
     return True
+
+
+def _json_blank_rows_to_replace(okf, sec, config: Config = None) -> list:
+    """The rows a JSON section should shed when its first real row is added.
+
+    Empty list unless this is a JSON layout whose ``sec`` holds rows and EVERY
+    one of them is blank — the state a section is in after D45 wrote its
+    tag-carrying marker, or after a vendor shipped a placeholder row. Either
+    way the section has no data, so the row about to be added is its first.
+
+    Deliberately all-or-nothing: a blank row sitting among real rows is the
+    user's own and is never touched.
+    """
+    if config is None or sec is None or not getattr(okf.layout, "json_mode", False):
+        return []
+    rows = [r for r in okf.records if r.section is sec]
+    if not rows:
+        return []
+    hidden = config.hidden_fields(okf.layout.name)
+    return rows if all(_is_blank_row(r, hidden) for r in rows) else []
 
 
 def _apply_json_empty_rows(okf: OkFile, config: Config) -> None:
@@ -2374,6 +2409,9 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
                 real = [r for r in recs if not _is_blank_row(r, hidden)]
             else:
                 real = recs
+            # An all-blank JSON section is replaced by the rows being added, so
+            # `add 3` yields 3 real rows rather than a leftover marker plus 3.
+            drop_blanks = _json_blank_rows_to_replace(okf, sec, config)
             base = len(real)
             limit = config.max_records(layout_name, section_name)
             room = max(0, (limit - base)) if limit is not None else n
@@ -2394,6 +2432,10 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
                             "error": f"section '{section_name}' has no template to seed a row"}
                 insert_at = _insert_in_section_order(okf, template, sec) + 1
                 seeded = 1
+            for r in drop_blanks:
+                okf.records.remove(r)
+                if okf.records.index(template) + 1 < insert_at:
+                    insert_at -= 1
             for i in range(to_add - seeded):
                 okf.records.insert(insert_at + i, _clone_record(okf, template))
             _normalize_eols(okf)
@@ -3009,27 +3051,21 @@ def _set_row_count(okf: OkFile, config: Config, section_name: str, target: int) 
         target = min(target, limit)
     rows = [r for r in okf.records if r.section is sec]
 
+    # An all-blank JSON section holds no data, so a requested count is a count
+    # of REAL rows: drop the blanks and build the whole section fresh. This has
+    # to happen BEFORE the grow/shrink comparison, not inside the grow branch —
+    # a section of one blank row asked for one row is neither growing nor
+    # shrinking, so it would keep its blank and satisfy the target with it.
+    if target > 0:
+        for r in _json_blank_rows_to_replace(okf, sec, config):
+            okf.records.remove(r)
+            rows.remove(r)
+
     while len(rows) > target:                     # shrink from the end
         okf.records.remove(rows.pop())
     if len(rows) < target:
-        # Growing a JSON section whose rows are ALL blank would clone a blank
-        # row. Seed the new rows instead — but leave the existing ones alone:
-        # a blank row may be D45's emptied-section skeleton OR a real row the
-        # file ships (styleheader_fmtB carries exactly one blank store), and
-        # nothing here can tell them apart. Deleting the user's row to tidy up
-        # is not this function's call.
-        blank_only = (rows and config is not None
-                      and getattr(okf.layout, "json_mode", False)
-                      and all(_is_blank_row(r, config.hidden_fields(okf.layout.name))
-                              for r in rows))
-        if rows and not blank_only:
+        if rows:
             template, at = rows[-1], okf.records.index(rows[-1]) + 1
-        elif blank_only:
-            template = _seed_record(okf, sec, config)
-            if template is None:
-                return
-            at = _insert_in_section_order(okf, template, sec) + 1
-            rows.append(template)
         else:
             template = _seed_record(okf, sec, config)
             if template is None:

@@ -59,6 +59,16 @@ def _rows(path, jpath):
     return cur
 
 
+def _real_rows(path, jpath):
+    """Rows carrying any value. An all-blank JSON section holds no data, and
+    adding to one REPLACES it rather than growing it, so a raw count is the
+    wrong measure of "a row was added"."""
+    def blank(r):
+        return all(v in (None, "") or (isinstance(v, str) and not v.strip())
+                   for v in r.values())
+    return [r for r in _rows(path, jpath) if isinstance(r, dict) and not blank(r)]
+
+
 def _copy(tmp_path, fixture, name="f.json"):
     p = tmp_path / name
     p.write_bytes((FIX / fixture).read_bytes())
@@ -93,12 +103,14 @@ def _ensure_two_rows(path, registry, config, section, jpath):
 def test_adding_a_row_is_actually_saved(tmp_path, registry, config,
                                         fixture, layout, section, jpath):
     p = _copy(tmp_path, fixture)
-    before = len(_rows(p, jpath))
+    before = len(_real_rows(p, jpath))
     si = _section_index(service.parse_file_view(p, registry, config), section)
 
     service.add_record(p, si, [], registry, config, preview=False, backup=False)
 
-    assert len(_rows(p, jpath)) == before + 1
+    # counted in REAL rows: styleheader_fmtB ships one blank store row, and
+    # adding to a section with no data replaces it instead of stacking on it
+    assert len(_real_rows(p, jpath)) == before + 1
     json.loads(p.read_text(encoding="utf-8"))          # still valid JSON
 
 
@@ -112,7 +124,11 @@ def test_preview_writes_nothing(tmp_path, registry, config,
 
     pv = service.add_record(p, si, [], registry, config, preview=True)
 
-    assert len(pv["sections"][si]["records"]) == len(view["sections"][si]["records"]) + 1
+    def real(v):
+        return [r for r in v["sections"][si]["records"]
+                if any(str(x).strip() for x in (r.get("values") or {}).values())]
+
+    assert len(real(pv)) == len(real(view)) + 1
     assert p.read_bytes() == original, "a preview must not touch the file"
 
 
@@ -362,8 +378,9 @@ def test_seeding_the_array_after_emptying_it_works(tmp_path, registry, config):
 
     si = _section_index(service.parse_file_view(p, registry, config), "Stores")
     service.add_record(p, si, [], registry, config, preview=False, backup=False)
-    # the skeleton row plus the newly added one
-    assert len(_rows(p, ("header", "stores"))) == 2
+    # the marker row is REPLACED by the added row, not stacked under it
+    rows = _rows(p, ("header", "stores"))
+    assert len(rows) == 1 and _real_rows(p, ("header", "stores")) == rows
 
 
 def test_a_file_whose_array_is_already_empty_is_left_byte_exact(
