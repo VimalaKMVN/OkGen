@@ -1349,32 +1349,38 @@ def _json_seed_values(layout, sec, config: Config = None) -> Dict[str, str]:
     fields that cannot legally be empty (a Calgary store's ``date`` is an RFC
     3339 stamp).
 
-    Resolution, most specific first:
+    Resolution:
 
-    1. ``json_seed_rows.yaml`` — an obvious placeholder chosen for the field,
-       never a value lifted from a real vendor order (D46);
-    2. a temporal field (``date_fields.yaml``) — the current UTC time in that
-       field's exact format, since a blank stamp is not a valid value;
-    3. a ``pad_zeros`` field — the declared value zero-padded to the field size
-       (D34, digits only);
-    4. anything else — blank, because free text is the user's to fill in.
+    1. ``json_seed_rows.yaml`` — the value the vendor sample carries for that
+       field, so an added row looks like the rows a real file holds. A declared
+       ``null`` is written as a real JSON null, NOT as an empty string: the
+       samples use both and they mean different things (D34/D39);
+    2. anything the config does not name — blank.
 
-    So a section with no config still yields a VALID row; config exists for the
-    values worth choosing. JSON only — `.OK` never reaches here.
+    A `pad_zeros` field is still padded (D34), so a seed written as ``1`` cannot
+    reach the file as an unpadded store.
+
+    There is deliberately NO automatic timestamp. An earlier cut filled any
+    temporal field with the current time, which was wrong on two of the three
+    layouts — CalgaryCartonLabel's sample carries ``date: null`` and
+    CalgaryStyleHeader's ``" "`` — so it invented a stamp those files never
+    have. ``date`` is an ordinary seed value now; it stays declared in
+    ``date_fields.yaml``, so editing it, its validation and Bulk/Generate's
+    random-date range are unaffected.
+
+    JSON only — `.OK` never reaches here.
     """
-    from okgen import datetimes
-
     declared = config.json_seed_row(layout.name, sec.name) if config else {}
-    out: Dict[str, str] = {}
+    out: Dict[str, object] = {}
     for f in sec.fields:
-        value = declared.get(f.name)
-        value = "" if value is None else str(value)
-        if not value and config is not None:
-            fmt = config.date_format(layout.name, f.name)
-            if fmt:
-                # "now" through the same path a typed date takes, so a seeded
-                # stamp is byte-identical in shape to an edited one (D29).
-                value = datetimes.normalize("now", fmt)
+        if f.name not in declared:
+            out[f.name] = ""
+            continue
+        value = declared[f.name]
+        if value is None:                    # a DECLARED null, kept as null
+            out[f.name] = None
+            continue
+        value = str(value)
         if value and config is not None:
             value = _pad_zero_value(value, layout.name, f.name, f.size, config)
         out[f.name] = value

@@ -148,17 +148,40 @@ def test_it_works_where_the_marker_looks_like_a_real_row(tmp_path, registry, con
 
 
 def test_a_vendor_shipped_blank_row_is_replaced(tmp_path, registry, config):
-    """The accepted trade. `styleheader_fmtB` ships one blank store row; adding
-    a store replaces it, because an all-blank section holds no data and nothing
-    distinguishes that row from D45's marker."""
+    """The accepted trade. An all-blank section holds no data and nothing
+    distinguishes its rows from D45's marker, so the first row added replaces
+    them rather than stacking on them.
+
+    Uses DistLabel: `styleheader_fmtB` also ships a blank store row, but Style
+    Header stores are out of business scope and their SEED is blank too, so the
+    replacement there is invisible (see
+    `test_styleheader_stores_is_intentionally_not_growable` in the parity
+    suite). DistLabel shows the replacement with a real row landing.
+    """
+    doc = json.loads((FIX / "distlabel.json").read_text(encoding="utf-8"))
+    blank = {k: "" for k in doc["data"]["header"]["stores"][0]}
+    doc["data"]["header"]["stores"] = [blank]
     p = tmp_path / "f.json"
-    shutil.copy2(FIX / "styleheader_fmtB.json", p)
-    assert _counts(p, "stores") == (1, 1), "fixture must ship one blank store"
+    p.write_text(json.dumps(doc, indent=4), encoding="utf-8")
+    assert _counts(p, "stores") == (1, 1), "fixture must start as one blank store"
 
     service.add_record(p, _si(p, "Stores", registry, config), [], registry, config,
                        preview=False, backup=False)
 
     assert _counts(p, "stores") == (1, 0)
+
+
+def test_styleheader_stores_replaces_but_stays_blank(tmp_path, registry, config):
+    """The same replacement on Style Header stores, where the seed is the
+    sample's blank row: still ONE row rather than two, just an empty one."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / "styleheader_fmtB.json", p)
+    assert _counts(p, "stores") == (1, 1)
+
+    service.add_record(p, _si(p, "Stores", registry, config), [], registry, config,
+                       preview=False, backup=False)
+
+    assert _counts(p, "stores") == (1, 1), "replaced, not stacked"
 
 
 # --------------------------------------------------------------------------- #

@@ -86,25 +86,26 @@ def test_declared_seed_values_are_used(tmp_path, registry, config):
                        preview=False, backup=False)
 
     row = _rows(p, "stores")[0]
-    assert row["store"] == "0001"
-    assert row["units"] == "1"
-    assert row["storeQuantity"] == "1"
+    assert row["store"] == "0100"
+    assert row["units"] == "20"
+    assert row["storeQuantity"] == "5"
     assert row["qtyToPrint"] == "1"
 
 
-def test_seed_values_are_placeholders_not_a_real_order(tmp_path, registry, config):
-    """D46: the vendor template's rows are a specific real order's data. A seed
-    must never reproduce one of its store numbers."""
+def test_a_seeded_row_matches_the_vendor_sample_row(tmp_path, registry, config):
+    """The user's call: an added row should look like the rows their real files
+    carry. An earlier cut used invented placeholders (0001) to keep a real
+    order's numbers out of generated files — that is D46's rule for CONVERSION,
+    where the values arrive silently. Here the user asked for them, and the row
+    is an editable starting point rather than inherited data."""
+    sample = json.loads((FIX / "distlabel.json").read_text(
+        encoding="utf-8"))["data"]["header"]["stores"][0]
     p = _with_empty(tmp_path, "distlabel.json", "stores")
-    spec = config.conversion_for("DistLabels")
-    template = json.loads((Path(config.config_dir) / spec["template"]).read_text())
-    borrowed = {s.get("store") for s in template["data"]["header"]["stores"]}
 
     service.add_record(p, _si(p, "Stores", registry, config), [], registry, config,
                        preview=False, backup=False)
 
-    assert borrowed, "template must carry stores for this to mean anything"
-    assert _rows(p, "stores")[0]["store"] not in borrowed
+    assert _rows(p, "stores")[0] == sample
 
 
 def test_size_is_seeded_blank_by_choice(tmp_path, registry, config):
@@ -129,15 +130,20 @@ def test_lanes_seed_a_lane_id(tmp_path, registry, config):
 # --------------------------------------------------------------------------- #
 # The fallback for fields config does not declare
 # --------------------------------------------------------------------------- #
-def test_a_temporal_field_seeds_the_current_time(tmp_path, registry, config):
-    """`date` is an RFC 3339 nanosecond stamp — blank is not a valid value, and
-    config does not declare it, so the date_fields rule must fill it."""
+def test_date_is_seeded_from_config_never_generated(tmp_path, registry, config):
+    """An earlier cut filled any temporal field with the CURRENT time. That was
+    wrong on two of three layouts — CartonLabel's sample carries `date: null`
+    and StyleHeader's `" "` — so it invented a stamp those files never hold.
+    `date` is an ordinary seed value now."""
     p = _with_empty(tmp_path, "distlabel.json", "stores")
+    sample_date = json.loads((FIX / "distlabel.json").read_text(
+        encoding="utf-8"))["data"]["header"]["stores"][0]["date"]
 
     service.add_record(p, _si(p, "Stores", registry, config), [], registry, config,
                        preview=False, backup=False)
 
-    assert RFC3339_NANO.match(_rows(p, "stores")[0]["date"] or "")
+    assert _rows(p, "stores")[0]["date"] == sample_date
+    assert RFC3339_NANO.match(sample_date), "fixture must carry a real stamp"
 
 
 def test_a_pad_zeros_field_is_padded(tmp_path, registry, config):
@@ -149,7 +155,7 @@ def test_a_pad_zeros_field_is_padded(tmp_path, registry, config):
                        preview=False, backup=False)
 
     store = _rows(p, "stores")[0]["store"]
-    assert store == "0001" and len(store) == 4
+    assert store == "0100" and len(store) == 4
 
 
 def test_free_text_stays_blank(tmp_path, registry, config):
@@ -160,8 +166,10 @@ def test_free_text_stays_blank(tmp_path, registry, config):
                        preview=False, backup=False)
 
     row = _rows(p, "stores")[0]
-    assert row["distroType"] == ""
-    assert row["adDate"] == ""
+    # the StyleHeader sample carries a single space in these, and the seed is
+    # the sample row verbatim
+    assert row["distroType"] == " "
+    assert row["adDate"] == " "
 
 
 # --------------------------------------------------------------------------- #
@@ -175,7 +183,7 @@ def test_bulk_add_seeds_too(tmp_path, registry, config):
 
     rows = _rows(p, "stores")
     assert len(rows) == 2
-    assert all(r["store"] == "0001" for r in rows), rows
+    assert all(r["store"] == "0100" for r in rows), rows
 
 
 def test_volume_generate_seeds_too(tmp_path, registry, config):
@@ -189,7 +197,7 @@ def test_volume_generate_seeds_too(tmp_path, registry, config):
     out = sorted(Path(res["folder"]).iterdir())[0]
     rows = json.loads(out.read_text(encoding="utf-8"))["data"]["header"]["stores"]
     assert len(rows) == 3
-    assert all(r["store"] == "0001" for r in rows), rows
+    assert all(r["store"] == "0100" for r in rows), rows
 
 
 def test_adding_after_a_bulk_empty_seeds_rather_than_cloning_the_skeleton(
@@ -210,7 +218,7 @@ def test_adding_after_a_bulk_empty_seeds_rather_than_cloning_the_skeleton(
     rows = _rows(p, "stores")
     seeded = [r for r in rows if any(v not in (None, "") for v in r.values())]
     assert len(seeded) == 1, rows
-    assert seeded[0]["store"] == "0001"
+    assert seeded[0]["store"] == "0100"
 
 
 def test_the_seeded_file_still_opens(tmp_path, registry, config):
@@ -272,3 +280,114 @@ def test_an_ok_date_is_still_written_verbatim(tmp_path, registry, config):
                         registry, config=config, backup=False)
 
     assert parse_okfile(p, registry=registry).records[0].get("date") == "20260115"
+
+
+# --------------------------------------------------------------------------- #
+# The seed mirrors the sample — including null, and including no timestamp
+# --------------------------------------------------------------------------- #
+SEED_CASES = [
+    ("distlabel.json", "CalgaryDistLabel", "Stores", ("header", "stores")),
+    ("cartonlabel_minified.json", "CalgaryCartonLabel", "Stores", ("header", "stores")),
+    ("styleheader_fmtB.json", "CalgaryStyleHeader", "Details", ("details",)),
+]
+
+
+def _sample_row(fixture, jpath):
+    cur = json.loads((FIX / fixture).read_text(encoding="utf-8"))["data"]
+    for step in jpath:
+        cur = cur.get(step)
+    return cur[0]
+
+
+@pytest.mark.parametrize("fixture,layout,section,jpath", SEED_CASES)
+def test_a_seeded_row_equals_the_sample_row_exactly(tmp_path, registry, config,
+                                                    fixture, layout, section, jpath):
+    """Field for field, including nulls and blanks — not merely 'similar'."""
+    doc = json.loads((FIX / fixture).read_text(encoding="utf-8"))
+    node = doc["data"]
+    for step in jpath[:-1]:
+        node = node[step]
+    node[jpath[-1]] = []                      # empty it so the add SEEDS
+    p = tmp_path / "f.json"
+    p.write_text(json.dumps(doc, indent=4), encoding="utf-8")
+
+    service.add_record(p, _si(p, section, registry, config), [], registry, config,
+                       preview=False, backup=False)
+
+    got = json.loads(p.read_text(encoding="utf-8"))["data"]
+    for step in jpath:
+        got = got[step]
+    assert got[0] == _sample_row(fixture, jpath)
+
+
+@pytest.mark.parametrize("fixture,layout,section,jpath", SEED_CASES)
+def test_a_null_in_the_sample_is_seeded_as_a_real_null(tmp_path, registry, config,
+                                                       fixture, layout, section, jpath):
+    """`null` and `""` are different things (D34/D39). The seed used to write ""
+    for both, collapsing the distinction on every added row."""
+    sample = _sample_row(fixture, jpath)
+    nulls = [k for k, v in sample.items() if v is None]
+    if not nulls:
+        pytest.skip(f"{layout}.{section} sample has no null fields")
+
+    doc = json.loads((FIX / fixture).read_text(encoding="utf-8"))
+    node = doc["data"]
+    for step in jpath[:-1]:
+        node = node[step]
+    node[jpath[-1]] = []
+    p = tmp_path / "f.json"
+    p.write_text(json.dumps(doc, indent=4), encoding="utf-8")
+
+    service.add_record(p, _si(p, section, registry, config), [], registry, config,
+                       preview=False, backup=False)
+
+    got = json.loads(p.read_text(encoding="utf-8"))["data"]
+    for step in jpath:
+        got = got[step]
+    for k in nulls:
+        assert got[0][k] is None, f"{k} should be null, got {got[0][k]!r}"
+
+
+def test_cartonlabel_date_is_seeded_null_not_a_stamp(tmp_path, registry, config):
+    """The clearest case of the old bug: this layout's samples never carry a
+    date, yet every added row got a fresh RFC 3339 timestamp."""
+    p = _with_empty(tmp_path, "cartonlabel_minified.json", "stores")
+
+    service.add_record(p, _si(p, "Stores", registry, config), [], registry, config,
+                       preview=False, backup=False)
+
+    assert _rows(p, "stores")[0]["date"] is None
+
+
+def test_no_seeded_row_contains_todays_date(tmp_path, registry, config):
+    """A seed must never be time-dependent — two runs a day apart have to
+    produce the same file."""
+    import datetime
+    today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+    for fixture, layout, section, key in (
+            ("distlabel.json", "CalgaryDistLabel", "Stores", "stores"),
+            ("cartonlabel_minified.json", "CalgaryCartonLabel", "Stores", "stores")):
+        p = _with_empty(tmp_path, fixture, key)
+        service.add_record(p, _si(p, section, registry, config), [], registry,
+                           config, preview=False, backup=False)
+        assert today not in json.dumps(_rows(p, key)), fixture
+
+
+def test_date_is_still_editable_and_validated(tmp_path, registry, config):
+    """Removing the auto-fill must not un-declare the field: typing a date must
+    still normalize, and rubbish must still be refused (D29)."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / "distlabel.json", p)
+    view = service.parse_file_view(p, registry, config)
+    sec = next(s for s in view["sections"] if s["name"] == "Stores")
+    ri = sec["records"][0]["index"]
+
+    service.apply_edits(p, [{"record_index": ri, "field": "date",
+                             "value": "2026-01-08"}],
+                        registry, config=config, backup=False)
+    assert RFC3339_NANO.match(_rows(p, "stores")[0]["date"])
+
+    with pytest.raises(Exception):
+        service.apply_edits(p, [{"record_index": ri, "field": "date",
+                                 "value": "not-a-date"}],
+                            registry, config=config, backup=False)

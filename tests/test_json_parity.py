@@ -34,8 +34,15 @@ FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config"
 pytestmark = pytest.mark.skipif(not FIX.is_dir(), reason="no calgary fixtures")
 
 # (fixture, layout, an array section with rows, the JSON path to those rows)
+# StyleHeader's `Stores` is deliberately NOT here. Its seed row is the vendor
+# sample's, which is entirely blank (a StyleHeader `.OK` has no store section,
+# and stores are out of scope for Style Headers), so D52 reads the section as
+# holding no data and a second add replaces the first instead of stacking. That
+# is intended and unreachable in practice; `Sizes` covers the same
+# header-nested array shape on this layout. See
+# test_styleheader_stores_is_intentionally_not_growable below.
 ROW_CASES = [
-    ("styleheader_fmtB.json", "CalgaryStyleHeader", "Stores", ("header", "stores")),
+    ("styleheader_fmtB.json", "CalgaryStyleHeader", "Sizes", ("header", "sizes")),
     ("styleheader_fmtB.json", "CalgaryStyleHeader", "Details", ("details",)),
     ("distlabel.json", "CalgaryDistLabel", "Stores", ("header", "stores")),
     ("cartonlabel_minified.json", "CalgaryCartonLabel", "Stores", ("header", "stores")),
@@ -770,3 +777,22 @@ def test_chains_like_is_the_rule_it_is_named_after(config):
     assert config.chains_like("05") == ["05"]           # Europe: itself only
     na = config.chains_like("01")
     assert "05" not in na and {"01", "02"} <= set(na)
+
+
+def test_styleheader_stores_is_intentionally_not_growable(tmp_path, registry, config):
+    """Stores are out of business scope for a Style Header, so its seed row is
+    the vendor sample's — which is entirely blank. D52 therefore treats the
+    section as holding no data and each add replaces the last.
+
+    Pinned so the behaviour is a recorded decision rather than a puzzle: if the
+    seed ever gains a non-blank field, this test fails and someone re-reads why.
+    """
+    p = _copy(tmp_path, "styleheader_fmtB.json")
+    si = _section_index(service.parse_file_view(p, registry, config), "Stores")
+
+    for _ in range(3):
+        service.add_record(p, si, [], registry, config, preview=False, backup=False)
+
+    rows = _rows(p, ("header", "stores"))
+    assert len(rows) == 1
+    assert not _real_rows(p, ("header", "stores")), rows

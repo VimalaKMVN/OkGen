@@ -1,78 +1,127 @@
-# The FIRST row added to an empty JSON array section.
+# The row OkGen writes when you ADD a row to a JSON section.
 #
 # A `.OK` layout gets this for free: the compiler lifts a real record line out
 # of the reference `.OK` and bakes it into the layout as `sample_raw`, so adding
 # a row to an empty `.OK` section produces a realistic, valid row. JSON layouts
-# are hand-authored specs with no reference file to learn from, so adding a row
-# produced one with every field blank — including fields that cannot legally be
-# empty. This file is the JSON equivalent of `sample_raw`.
+# are hand-authored specs with no reference file to learn from, so this file is
+# the JSON equivalent of `sample_raw`.
 #
-# Values here are deliberately OBVIOUS PLACEHOLDERS (0001, 1, RCD001) rather
-# than values lifted from a real vendor order. That is D46's lesson: conversion
-# used to inherit the template's rows and handed users another order's store
-# numbers. A seed's job is a valid starting shape, not a real order.
+# The values below are TAKEN FROM THE VENDOR SAMPLE ROWS — the user's explicit
+# call: a newly added row should look like the rows their real files carry, so
+# it is a usable starting point rather than something to fill in from scratch.
+# They were generated from the samples rather than typed, so they cannot drift
+# by transcription. An added row is a starting point the user then edits.
 #
-# A field NOT listed here still gets a usable value, resolved in this order:
-#   1. a temporal field (config/date_fields.yaml) -> the current UTC time in
-#      that field's exact format, because a blank timestamp is not valid;
-#   2. a `pad_zeros` field (config/field_display.yaml) -> its declared value
-#      zero-padded to the field size (D34), digits only;
-#   3. anything else -> "" (free text is the user's to fill in).
+# EVERY value is quoted, except a deliberate `null`. YAML 1.1 reads bare
+# true/false/Yes/No/Y/N as BOOLEANS, so `compareAtUp: true` would load as Python
+# True and be written as the string "True" — a value no Calgary file contains.
 #
-# So a new layout, or a newly added field, is never INVALID with no config at
-# all — config carries the exceptions, not the rule. Same shape as
-# `json_empty_rows.yaml`, which says what an EMPTIED section holds.
+# `null` here means a real JSON null, NOT an empty string. The samples use both
+# and they are different things — D34/D39 exist because "absent" and "empty" are
+# not interchangeable downstream. A field OMITTED from a section below falls
+# back to "" (see `_json_seed_values`).
 #
-# JSON layouts only. `.OK` seeding goes through `sample_raw` and is untouched.
+# NOTE there is deliberately NO automatic timestamp. An earlier cut filled any
+# temporal field with the current time, which was wrong on two of the three
+# layouts: CalgaryCartonLabel's sample carries `date: null` and
+# CalgaryStyleHeader's carries `" "`. `date` is an ordinary config value here,
+# and stays a declared date field in `date_fields.yaml` so editing it, its
+# validation, and Bulk/Generate's random-date range all still work.
+#
+# SCOPE: adding rows only — the single-file "+", Bulk Add rows, and Volume
+# Generate's row counts. Nothing here is read by `.OK` -> JSON conversion (that
+# has its own rule for an empty section) or by deleting/emptying a section
+# (see `json_empty_rows.yaml`), and none of it applies to `.OK` layouts.
 #
 #   layout -> { section -> { field -> seed value } }
 seed_rows:
   CalgaryStyleHeader:
+    # Lanes and Sizes are confirmed good as they are, so they keep their chosen
+    # values rather than the sample row (whose `lane` is blank).
     Lanes:
       lane: "RCD001"
     Sizes:
-      # `size` is left blank deliberately (user's call) — the row is there to be
-      # typed into, and a size code is order-specific.
+      # `size` blank by the user's call — a size code is order-specific.
       size: ""
       quantity: "1"
+
+    # Stores is the sample row VERBATIM, blanks and all. A StyleHeader `.OK` has
+    # no store section, and stores are out of scope for Style Headers as a
+    # business matter, so there is nothing here to make "work" — it only has to
+    # match the sample, and it does.
+    #
+    # Consequence, accepted and unreachable in practice: because every field is
+    # blank, D52 reads the section as holding no data, so a single add replaces
+    # the previous row rather than stacking (bulk add N and Generate n still
+    # produce N blank rows). Nobody adds stores to a Style Header.
     Stores:
-      # Least evidenced of the six: a StyleHeader `.OK` has no store section at
-      # all, so the vendor sample's row is itself a blank placeholder.
-      store: "0001"
-      puertoRicoFlag: "N"
-      units: "1"
-      storeQuantity: "1"
-      numberOfPacks: "1"
-      suppress: "N"
-      qtyToPrint: "1"
+      store: ""
+      puertoRicoFlag: " "
+      units: " "
+      distroType: " "
+      date: " "
+      storeQuantity: " "
+      cartonSequence: " "
+      numberOfPacks: " "
+      adDate: " "
+      suppress: " "
+      qtyToPrint: null
+      puertoRicoStoreSeq: null
+      puertoRicoStore: null
+
     Details:
       pageNumber: "001"
       lineNumber: "001"
-      style: "000001"
+      style: "275886"
       type: "1"
-      quantity: "0000001"
+      pastSeasonIndicator: " "
+      messageCode1: "GTA TEST01"
+      messageCode2: "GTA TEST02"
+      compareAtPrice: "000999999"
+      compareAtUp: "true"
+      retailPrice: "000799999"
+      quantity: "0000020"
+      houseNumber: null
       pieces: "00"
-      ladderPlanMMYY: "0126"
-      ladderPlan: "20260101"
+      ladderPlanMMYY: "0326"
+      ladderPlan: "20260301"
+      frenchDescription: null
+      englishNoun: ""
+      frenchNoun: ""
       category: "6204"
-      # messageCode1/2, item, fact1-3, the nouns and descriptions are free text
-      # and stay "" — there is no neutral placeholder for a message.
-      # retailPrice / compareAtPrice / compareAtUp are left blank rather than
-      # seeded with a price: a wrong price reads as real data.
+      item: ""
+      fact1: ""
+      fact2: ""
+      fact3: ""
 
   CalgaryDistLabel:
     Stores:
-      store: "0001"
-      units: "1"
-      storeQuantity: "1"
+      store: "0100"
+      puertoRicoFlag: null
+      units: "20"
+      distroType: ""
+      date: "2026-02-10T14:47:45.394277988Z"
+      storeQuantity: "5"
+      cartonSequence: null
+      numberOfPacks: null
+      adDate: ""
+      suppress: null
       qtyToPrint: "1"
-      # `date` is an RFC 3339 nanosecond stamp (see date_fields.yaml) and is
-      # filled with the current time by rule 1 above.
+      puertoRicoStoreSeq: null
+      puertoRicoStore: null
 
   CalgaryCartonLabel:
     Stores:
-      store: "0001"
+      store: "0208"
       puertoRicoFlag: "N"
-      storeQuantity: "1"
-      numberOfPacks: "1"
+      units: null
+      distroType: null
+      date: null
+      storeQuantity: "2"
+      cartonSequence: null
+      numberOfPacks: "2"
+      adDate: ""
       suppress: "N"
+      qtyToPrint: null
+      puertoRicoStoreSeq: ""
+      puertoRicoStore: null
