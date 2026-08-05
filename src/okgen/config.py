@@ -133,6 +133,7 @@ class Config:
         readonly_fields: Optional[Dict[str, set]] = None,
         literal_fields: Optional[Dict[str, set]] = None,
         detail_fill: Optional[Dict[str, dict]] = None,
+        json_empty_rows: Optional[Dict[str, dict]] = None,
         trim_trailing: Optional[List[str]] = None,
         derived_fields: Optional[Dict[str, list]] = None,
         isolated_chain_groups: Optional[List[set]] = None,
@@ -193,6 +194,9 @@ class Config:
         self._readonly_fields = readonly_fields or {}
         self._literal_fields = literal_fields or {}
         self._detail_fill = detail_fill or {}
+        # {layout: {section: {field: empty value}}} — what one kept row holds
+        # when an operation empties a JSON array section.
+        self._json_empty_rows = json_empty_rows or {}
         # Layouts whose detail lines get trailing pad (after the record
         # terminator) trimmed on write.
         self._trim_trailing = {str(l) for l in (trim_trailing or [])}
@@ -447,6 +451,26 @@ class Config:
 
     def is_pad_zero(self, layout: Optional[str], field: Optional[str]) -> bool:
         return bool(field) and field in self.pad_zero_fields(layout)
+
+    # ----- JSON empty-row skeletons -----
+    def json_empty_row(self, layout: Optional[str], section: Optional[str],
+                       fields: Optional[List[str]] = None) -> Dict[str, object]:
+        """What the ONE kept row holds when a JSON array section is emptied.
+
+        Every field of the section is present. The value is ``None`` (JSON
+        null) unless ``json_empty_rows.yaml`` declares something else for it —
+        so a new layout or a newly added field needs no config to behave
+        sensibly, and config exists only for the exceptions.
+        """
+        declared = self._json_empty_rows.get(layout or "", {}).get(section or "", {})
+        if fields is None:
+            return dict(declared)
+        return {f: declared.get(f) for f in fields}
+
+    def has_json_empty_rows(self) -> bool:
+        """Whether any layout declares one. Only used to keep the feature out
+        of a config set that predates it."""
+        return bool(self._json_empty_rows)
 
     # ----- trailing zero-fill (Preticket-style filler rows) -----
     def zero_fill(self, layout: Optional[str], section: Optional[str]) -> Optional[int]:
@@ -783,6 +807,16 @@ class Config:
             }
             trim_trailing = [str(l) for l in (data.get("trim_trailing") or [])]
 
+        json_empty_rows: Dict[str, dict] = {}
+        jer_path = cdir / "json_empty_rows.yaml"
+        if jer_path.is_file():
+            data = yaml.safe_load(jer_path.read_text(encoding="utf-8")) or {}
+            json_empty_rows = {
+                str(l): {str(sec): dict(fields or {})
+                         for sec, fields in (secs or {}).items()}
+                for l, secs in (data.get("empty_rows") or {}).items()
+            }
+
         derived_fields: Dict[str, list] = {}
         df2_path = cdir / "derived_fields.yaml"
         if df2_path.is_file():
@@ -859,7 +893,7 @@ class Config:
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
                    nicelabel_warning, send_quips, send_done_quips, regions,
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
-                   trim_trailing, derived_fields, isolated_chain_groups, tosca,
+                   json_empty_rows, trim_trailing, derived_fields, isolated_chain_groups, tosca,
                    json_sources, json_source_default, date_fields, nicelabel_post,
                    nicelabel_post_error, ok_to_json, str(cdir),
                    pad_zero_fields=pad_zero_fields,

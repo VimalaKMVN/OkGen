@@ -1,0 +1,46 @@
+# Keeping a JSON array section's TAGS when an operation removes all its rows.
+#
+# Since D43, emptying a Calgary JSON array actually writes — bulk "keep 0 rows",
+# a bulk delete, Generate and deleting the last row in the editor all now
+# produce `"lanes": []`. A bare `[]` tells the consuming system nothing about
+# the shape it should have had, so instead OkGen keeps exactly ONE row with
+# every field present and empty:
+#
+#     "sizes": []                ->   "sizes": [ { "size": null, "quantity": null } ]
+#
+# Every field defaults to JSON **null**. List a field here only when its empty
+# value should be something else — an empty string for a text field, say. The
+# value written is exactly the YAML value, so `""` writes `""` and `null` (or
+# omitting the field entirely) writes `null`.
+#
+# Scope: this runs ONLY when an operation empties an array that HAD rows. An
+# array already stored as `[]` (or as `null`, which several layouts use for
+# lanes/sizes) is left exactly as it is, so opening and saving an untouched
+# file still round-trips byte-for-byte (D20).
+#
+# NOTE this is the JSON engine only. `.OK` -> JSON conversion has its own rule
+# for an empty section (it keeps the vendor template's placeholder row) and is
+# deliberately not affected by this file.
+#
+#   layout -> { section -> { field -> empty value } }
+empty_rows:
+  CalgaryStyleHeader:
+    Lanes:
+      lane: ""
+    Sizes:
+      size: null
+      quantity: null
+
+  CalgaryDistLabel:
+    Lanes:
+      lane: ""
+    Sizes:
+      size: null
+      quantity: null
+
+  CalgaryCartonLabel:
+    Lanes:
+      lane: ""
+    Sizes:
+      size: null
+      quantity: null

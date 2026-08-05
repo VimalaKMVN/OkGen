@@ -278,7 +278,22 @@ def test_bulk_row_ops_reach_the_disk(tmp_path, registry, config, op, expected):
 # carry. Remove them ALL and no record names the array, so it looked untouched:
 # "keep 0 rows" reported `changed` and wrote nothing, and so did deleting the
 # final row by hand. The array set is now taken from the FILE at parse time.
+#
+# The WRITE is what D43 guarantees, and that is what these assert. The written
+# SHAPE changed afterwards: rather than a bare `[]`, an emptied array keeps one
+# row with every field present and empty, so the consuming system still sees
+# the section's tags (`_apply_json_empty_rows`, config/json_empty_rows.yaml).
 # --------------------------------------------------------------------------- #
+def _assert_emptied(p, jpath, section=""):
+    """The array kept its tags but lost every value: exactly one row, all of
+    whose fields are present and empty (null, or "" where config says so)."""
+    rows = _rows(p, jpath)
+    assert len(rows) == 1, f"{section}: expected one empty row, got {rows!r}"
+    row = rows[0]
+    assert row, f"{section}: the kept row must still carry its field tags"
+    bad = {k: v for k, v in row.items() if v not in (None, "")}
+    assert not bad, f"{section}: kept row still carries values {bad!r}"
+    return row
 @pytest.mark.parametrize("fixture,layout,section,jpath", ROW_CASES)
 def test_bulk_keep_zero_actually_empties_the_array(
         tmp_path, registry, config, fixture, layout, section, jpath):
@@ -290,7 +305,9 @@ def test_bulk_keep_zero_actually_empties_the_array(
                                 registry, config, backup=False)
 
     assert res["results"][0]["status"] == "changed"
-    assert _rows(p, jpath) == [], "reported success but the rows are still there"
+    # D43: the write must actually reach the disk. The rows are gone; only the
+    # empty skeleton remains, so a "success" that changed nothing still fails.
+    _assert_emptied(p, jpath, section)
 
 
 @pytest.mark.parametrize("fixture,layout,section,jpath", ROW_CASES)
@@ -307,7 +324,7 @@ def test_deleting_the_last_row_by_hand_also_empties_the_array(
                         ops=[{"type": "delete", "record_index": i}
                              for i in reversed(idxs)])
 
-    assert _rows(p, jpath) == []
+    _assert_emptied(p, jpath, section)
 
 
 @pytest.mark.parametrize("fixture,layout,section,jpath", ROW_CASES)
@@ -323,7 +340,9 @@ def test_an_emptied_file_still_parses_and_reopens(
     view = service.parse_file_view(p, registry, config)
     assert view["layout"] == layout                      # still detects
     sec = next(s for s in view["sections"] if s["name"] == section)
-    assert (sec.get("records") or []) == []
+    # the kept skeleton reads back as ONE blank row, not as no rows
+    assert len(sec.get("records") or []) == 1
+    _assert_emptied(p, jpath, section)
     # the OTHER sections are untouched — only the emptied one lost its rows
     for other in view["sections"]:
         if other["name"] not in (section, "Header"):
@@ -336,11 +355,12 @@ def test_seeding_the_array_after_emptying_it_works(tmp_path, registry, config):
     service.bulk_op_apply([str(p)], "CalgaryDistLabel", "Stores",
                           {"type": "keep", "count": 0}, registry, config,
                           backup=False)
-    assert _rows(p, ("header", "stores")) == []
+    _assert_emptied(p, ("header", "stores"), "Stores")
 
     si = _section_index(service.parse_file_view(p, registry, config), "Stores")
     service.add_record(p, si, [], registry, config, preview=False, backup=False)
-    assert len(_rows(p, ("header", "stores"))) == 1
+    # the skeleton row plus the newly added one
+    assert len(_rows(p, ("header", "stores"))) == 2
 
 
 def test_a_file_whose_array_is_already_empty_is_left_byte_exact(

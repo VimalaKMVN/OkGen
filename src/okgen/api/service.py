@@ -563,6 +563,7 @@ def apply_edits(
     replay_ops(okf, ops, config)
     _apply_edits_to_okf(okf, edits, config)
     _apply_detail_fill(okf, config)
+    _apply_json_empty_rows(okf, config)   # keep an emptied JSON array's tags
 
     _assert_layout_stable(okf)
     out = Path(target_path) if target_path else src
@@ -835,6 +836,7 @@ def _record_op(path, registry, config, ops, edits, backup, preview, mutate) -> t
     _normalize_eols(okf)
     _reindex(okf)
     _apply_detail_fill(okf, config)
+    _apply_json_empty_rows(okf, config)   # keep an emptied JSON array's tags
 
     if preview:
         return _build_file_view(okf, src, config), result
@@ -1061,6 +1063,48 @@ def _is_blank_row(rec, hidden: set) -> bool:
         if v is not None and v.strip("0 ") != "":
             return False
     return True
+
+
+def _apply_json_empty_rows(okf: OkFile, config: Config) -> None:
+    """Keep a JSON array section's TAGS when an operation removes all its rows.
+
+    Since D43 an emptied array really does write, so bulk "keep 0 rows", a bulk
+    delete, Generate and deleting the last row in the editor all produce
+    ``"lanes": []``. A bare ``[]`` tells the consuming system nothing about the
+    shape it should have had, so one row is kept with every field present and
+    empty — values from ``json_empty_rows.yaml``, defaulting to JSON null.
+
+    Only fires for an array that HAD rows and now has none. An array already
+    stored as ``[]`` (or as ``null``, which several layouts use for
+    ``lanes``/``sizes``) is untouched, so opening and saving an unmodified file
+    still round-trips byte-for-byte (D20).
+
+    Lives here, beside :func:`_apply_detail_fill` and called from the same write
+    sites, for the D16/D30 reason: a write rule applied in one path and skipped
+    by the parallel ones is invisible for months. `.OK` files have no JSON
+    arrays, so this is a no-op for them.
+    """
+    state = getattr(okf, "json_state", None)
+    if config is None or state is None:
+        return
+    from okgen import jsonengine
+
+    layout = okf.layout
+    for sec in layout.sections:
+        if getattr(sec, "json_kind", None) != "array":
+            continue
+        base = ("data",) + tuple(sec.json_path or [])
+        if base not in state.array_paths:
+            continue                       # absent or null in this file — leave it
+        original = jsonengine._at(state.data, base)
+        if not original:
+            continue                       # already [] on disk; keep it byte-exact
+        if any(r.section is sec for r in okf.records):
+            continue                       # still has rows; nothing to do
+        rec = jsonengine.seed_record(state, sec, base)
+        rec.pending = config.json_empty_row(layout.name, sec.name,
+                                            [f.name for f in sec.fields])
+        okf.records.append(rec)
 
 
 def _apply_detail_fill(okf: OkFile, config: Config) -> None:
@@ -2309,6 +2353,7 @@ def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> 
         if r["status"] == "change" and okf is not None:
             try:
                 _apply_detail_fill(okf, config)   # keep Preticket-style filler rows
+                _apply_json_empty_rows(okf, config)
                 _backup_and_save(okf, sp, backup)
                 r["status"] = "changed"
             except (OSError, EditError) as exc:
@@ -2386,6 +2431,7 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
         if r["status"] == "change" and okf is not None:
             try:
                 _apply_detail_fill(okf, config)   # keep Preticket-style filler rows
+                _apply_json_empty_rows(okf, config)
                 _backup_and_save(okf, sp, backup)
                 r["status"] = "changed"
             except (OSError, EditError) as exc:
@@ -3022,6 +3068,7 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
         okf = parse_okfile(src, layout=layout, registry=registry)
         _generate_one(okf, spec, config, key_field, key_size, k, key_parts=key_parts)
         _apply_detail_fill(okf, config)          # keep Preticket-style filler rows
+        _apply_json_empty_rows(okf, config)
         _assert_layout_stable(okf)          # a random value must never break detection
 
         toks = _tokens_from_okf(okf, config, orig_stem=src.stem, custom={})
