@@ -8,7 +8,8 @@ Four separate rules, all JSON-only:
   capitalisation. Blank is a real value, not a synonym for `false`;
 * **`chain`** allows a code (`04`) or a name (`Winners`), in any capitalisation
   — the real samples carry both (D41);
-* **`type`** allows any of the three document words in any capitalisation.
+* **`type`** allows its OWN document word in any capitalisation — never
+  another layout's, since the document's shape does not change with it.
 
 Two safety rules fall out of the last two, and both were broken before:
 
@@ -154,6 +155,84 @@ def test_type_accepts_any_capitalisation(tmp_path, registry, config, value):
     assert json.loads(p.read_text(encoding="utf-8"))["data"]["type"] == value
     assert detect.detect_layout(p).layout == "CalgaryStyleHeader", \
         "a re-cased type must still detect — otherwise the file is unopenable"
+
+
+# (fixture, its own type word, the other two layouts' words)
+TYPE_CASES = [
+    ("styleheader_fmtB.json", "styleHeaders",
+     ["cartonLabels", "distributionLabels"]),
+    ("distlabel.json", "distributionLabels",
+     ["styleHeaders", "cartonLabels"]),
+    ("cartonlabel_minified.json", "cartonLabels",
+     ["styleHeaders", "distributionLabels"]),
+]
+
+
+@pytest.mark.parametrize("fixture,own,others", TYPE_CASES)
+def test_every_layout_accepts_any_casing_of_its_own_type(tmp_path, registry, config,
+                                                         fixture, own, others):
+    for value in (own, own.upper(), own.lower(), own.capitalize()):
+        p = tmp_path / "f.json"
+        shutil.copy2(FIX / fixture, p)
+        view = service.parse_file_view(p, registry, config)
+        layout = view["layout"]
+        ri = view["sections"][0]["records"][0]["index"]
+
+        service.apply_edits(p, [{"record_index": ri, "field": "type",
+                                 "value": value}],
+                            registry, config=config, backup=False)
+
+        assert json.loads(p.read_text(encoding="utf-8"))["data"]["type"] == value
+        assert detect.detect_layout(p).layout == layout
+
+
+@pytest.mark.parametrize("fixture,own,others", TYPE_CASES)
+def test_a_cross_type_change_is_refused(tmp_path, registry, config,
+                                        fixture, own, others):
+    """The document's shape does not change with its discriminator, so re-typing
+    a style header as a carton label leaves the two contradicting each other."""
+    for value in others:
+        p = tmp_path / "f.json"
+        shutil.copy2(FIX / fixture, p)
+        original = p.read_bytes()
+        view = service.parse_file_view(p, registry, config)
+        ri = view["sections"][0]["records"][0]["index"]
+
+        with pytest.raises(Exception):
+            service.apply_edits(p, [{"record_index": ri, "field": "type",
+                                     "value": value}],
+                                registry, config=config, backup=False)
+
+        assert p.read_bytes() == original
+
+
+@pytest.mark.parametrize("fixture,own,others", TYPE_CASES)
+def test_a_cross_type_change_is_refused_in_bulk_too(tmp_path, registry, config,
+                                                    fixture, own, others):
+    """Bulk is where D12 said a signature change matters most — one apply would
+    otherwise re-type a whole selection."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+    original = p.read_bytes()
+    layout = service.parse_file_view(p, registry, config)["layout"]
+
+    res = service.bulk_apply([str(p)], layout, "type", others[0],
+                             registry, config, backup=False)
+
+    assert res["results"][0]["status"] == "error"
+    assert p.read_bytes() == original
+
+
+@pytest.mark.parametrize("fixture,own,others", TYPE_CASES)
+def test_only_the_layouts_own_word_is_offered(tmp_path, registry, config,
+                                              fixture, own, others):
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+    header = service.parse_file_view(p, registry, config)["sections"][0]
+    field = next(f for f in header["fields"] if f["name"] == "type")
+
+    assert set(field["options"]) == {own}
+    assert not set(field["options"]) & set(others)
 
 
 @pytest.mark.parametrize("value", ["nonsense", "", "styleHeader", "style Headers"])

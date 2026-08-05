@@ -77,11 +77,11 @@ rules:
   # NOTE: labels are DISPLAY-ONLY — the file always keeps the raw code.
   #
   # `type` IS the detection signature (`data.type` decides the layout), and it
-  # is editable: all three document words are offered on every Calgary layout,
-  # and any capitalisation is accepted because detection lower-cases before
-  # matching. `service._assert_layout_stable` is the backstop — a value that is
-  # not one of the three words is refused, because it would leave the file
-  # detecting as no layout at all and therefore unopenable.
+  # is editable — but only in its CAPITALISATION. Detection lower-cases before
+  # matching, so `STYLEHEADERS` is the same document type as `styleHeaders`.
+  # `service._assert_layout_stable` refuses anything that does not resolve back
+  # to this same layout: an unknown word (the file would not open at all) and a
+  # CROSS-TYPE change alike, since the rest of the document keeps its shape.
   #
   # TO ADD A VARIATION: if the vendor starts sending another document kind, add
   # it under the right layout below, mapping the code to itself:
@@ -90,13 +90,17 @@ rules:
   # A code that is NOT listed still displays as-is; it just won't be offered as
   # a known value. A NEW document kind also needs a detection rule and a layout
   # spec before OkGen can open it — this file alone is not enough for that.
-  - match:
-      layout: [CalgaryStyleHeader, CalgaryCartonLabel, CalgaryDistLabel]
-      section: Header
-      field: type
+  # ONE word per layout: a document's type may be re-cased but never changed to
+  # another layout's. `_assert_layout_stable` enforces that on every write path
+  # — the list here is what the editor offers, not what makes it safe.
+  - match: {layout: CalgaryStyleHeader, section: Header, field: type}
     values:
       styleHeaders: "styleHeaders"
+  - match: {layout: CalgaryCartonLabel, section: Header, field: type}
+    values:
       cartonLabels: "cartonLabels"
+  - match: {layout: CalgaryDistLabel, section: Header, field: type}
+    values:
       distributionLabels: "distributionLabels"
 
   # ---- Calgary JSON: chain by CODE or by NAME ----

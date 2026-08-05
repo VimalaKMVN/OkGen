@@ -109,9 +109,16 @@ _JSON_TYPE_TO_LAYOUT = {
 _JSON_TYPE_LOWER = {k.lower(): v for k, v in _JSON_TYPE_TO_LAYOUT.items()}
 
 
+def layout_for_json_type(value) -> Optional[str]:
+    """The Calgary layout ``value`` names, in any casing, or None."""
+    if not isinstance(value, str):
+        return None
+    return _JSON_TYPE_LOWER.get(value.strip().lower())
+
+
 def json_type_is_known(value) -> bool:
     """Whether ``value`` names a Calgary document type, in any casing."""
-    return isinstance(value, str) and value.strip().lower() in _JSON_TYPE_LOWER
+    return layout_for_json_type(value) is not None
 
 
 def canonical_json_types() -> list:

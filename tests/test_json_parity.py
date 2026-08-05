@@ -489,9 +489,7 @@ def test_the_two_different_type_fields_get_their_own_labels(tmp_path, registry, 
     sections = {s["name"]: s for s in service.parse_file_view(p, registry, config)["sections"]}
 
     header = next(f for f in sections["Header"]["fields"] if f["name"] == "type")
-    assert header["options"] == {"styleHeaders": "styleHeaders",
-                                 "cartonLabels": "cartonLabels",
-                                 "distributionLabels": "distributionLabels"}
+    assert header["options"] == {"styleHeaders": "styleHeaders"}
     assert sections["Header"]["records"][0]["values"]["type"] == "styleHeaders"
 
     detail = next(f for f in sections["Details"]["fields"] if f["name"] == "type")
@@ -504,8 +502,7 @@ def test_the_two_different_type_fields_get_their_own_labels(tmp_path, registry, 
 def test_a_section_scoped_rule_beats_a_layout_scoped_one(config):
     """The specificity ordering the fix relies on."""
     assert config.options("type", layout="CalgaryStyleHeader", section="Header") == \
-        {"styleHeaders": "styleHeaders", "cartonLabels": "cartonLabels",
-         "distributionLabels": "distributionLabels"}
+        {"styleHeaders": "styleHeaders"}
     detail = config.options("type", layout="CalgaryStyleHeader", section="Details")
     assert detail and "styleHeaders" not in detail
 
@@ -568,7 +565,9 @@ def test_the_document_type_cannot_become_an_unknown_value(tmp_path, registry, co
     Hiding the field from bulk/generate was the other half of that defence.
 
     Now the field is offered everywhere and `_assert_layout_stable` enforces the
-    value: any of the three document words in any capitalisation, nothing else.
+    value: its OWN type in any capitalisation, nothing else. A cross-type change
+    is refused too — re-typing a style header as a carton label would leave the
+    document's shape contradicting its own discriminator.
     That is strictly stronger — it holds on every write path rather than on the
     ones that remembered to consult a list.
     """
@@ -576,8 +575,8 @@ def test_the_document_type_cannot_become_an_unknown_value(tmp_path, registry, co
     header = service.parse_file_view(p, registry, config)["sections"][0]
     field = next(f for f in header["fields"] if f["name"] == "type")
     assert field["editable"] is True
-    assert set(field["options"]) == {"styleHeaders", "cartonLabels",
-                                     "distributionLabels"}
+    assert set(field["options"]) == {"styleHeaders"}, \
+        "only this layout's own word — a cross-type change is not offered"
 
     ri = header["records"][0]["index"]
     original = p.read_bytes()
@@ -590,13 +589,22 @@ def test_the_document_type_cannot_become_an_unknown_value(tmp_path, registry, co
     from okgen import detect
     assert detect.detect_layout(p).layout == "CalgaryStyleHeader"
 
-    # anything else is refused, on the single-edit path...
+    # anything else is refused, on the single-edit path — an unknown word...
     p.write_bytes(original)
     with pytest.raises(Exception):
         service.apply_edits(p, [{"record_index": ri, "field": "type",
                                  "value": "nonsense"}],
                             registry, config=config, backup=False)
     assert p.read_bytes() == original, "a refused write must leave the file alone"
+
+    # ...and ANOTHER layout's word, which would leave a style header claiming
+    # to be a carton label while the rest of the document keeps its shape
+    for other in ("cartonLabels", "distributionLabels"):
+        with pytest.raises(Exception):
+            service.apply_edits(p, [{"record_index": ri, "field": "type",
+                                     "value": other}],
+                                registry, config=config, backup=False)
+        assert p.read_bytes() == original
 
     # ...and on the bulk path, which is where D12 said it matters most
     res = service.bulk_apply([str(p)], "CalgaryStyleHeader", "type", "nonsense",

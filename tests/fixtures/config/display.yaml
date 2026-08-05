@@ -18,17 +18,14 @@ rules:
   # Calgary JSON has TWO `type` fields — the document kind on the Header, and
   # a coded 1-9 type on each detail row. Scoped by section so each gets its
   # own labels. Mirrors production display.yaml.
-  # All three document words are offered on every Calgary layout — `type` is
-  # editable and any capitalisation is accepted (detection lower-cases), with
-  # `_assert_layout_stable` refusing anything that is not one of them.
-  - match:
-      layout: [CalgaryStyleHeader, CalgaryCartonLabel, CalgaryDistLabel]
-      section: Header
-      field: type
-    values:
-      styleHeaders: "styleHeaders"
-      cartonLabels: "cartonLabels"
-      distributionLabels: "distributionLabels"
+  # ONE word per layout: `type` is editable in its CAPITALISATION only, never
+  # to another layout's word. `_assert_layout_stable` enforces it.
+  - match: {layout: CalgaryStyleHeader, section: Header, field: type}
+    values: {styleHeaders: "styleHeaders"}
+  - match: {layout: CalgaryCartonLabel, section: Header, field: type}
+    values: {cartonLabels: "cartonLabels"}
+  - match: {layout: CalgaryDistLabel, section: Header, field: type}
+    values: {distributionLabels: "distributionLabels"}
 
   # Calgary chain by CODE or by NAME (D41 — the samples carry both). Scoped to
   # the Calgary layouts so the .OK layouts keep the code-only chain registry.

@@ -968,18 +968,30 @@ def _assert_layout_stable(okf: OkFile) -> None:
     # unopenable in OkGen. That is exactly the D12 failure this function exists
     # to prevent, in the one engine it skipped.
     #
-    # Any of the three type words is allowed (in any casing — detection is
-    # case-insensitive); anything else is refused.
+    # The value must still resolve to THIS layout. Re-casing is free
+    # (`STYLEHEADERS` is the same document type as `styleHeaders`), but a
+    # CROSS-TYPE change is refused: the rest of the document is still shaped
+    # like the layout it was parsed as, so re-typing it would leave a style
+    # header claiming to be a carton label. That is the same "silently detects
+    # as a different layout" failure D12 blocks on the fixed-width side.
     if getattr(okf.layout, "json_mode", False):
         header = okf.records[0] if okf.records else None
         value = header.get("type") if header is not None else None
-        if value is None or detect.json_type_is_known(value):
+        if value is None:
             return
+        became = detect.layout_for_json_type(value)
+        if became == okf.layout.name:
+            return
+        own = getattr(okf.layout, "json_type", None)
+        allowed = f" Use '{own}' (any capitalisation)." if own else ""
+        if became is None:
+            raise EditError(
+                f"'{value}' is not a Calgary document type — the file would no "
+                f"longer be openable.{allowed}")
         raise EditError(
-            f"'{value}' is not a Calgary document type — the file would no "
-            f"longer be openable. Use one of: "
-            f"{', '.join(detect.canonical_json_types())} (any capitalisation)."
-        )
+            f"this file is a {okf.layout.name}, so its type cannot be changed "
+            f"to '{value}' — that would make it detect as {became} while the "
+            f"rest of the document keeps its current shape.{allowed}")
     head = okf.to_bytes().split(b"\n", 1)[0].decode(ENCODING).rstrip("\r\n")
     det = detect_from_header(head)
     if det.layout == okf.layout.name:
