@@ -252,8 +252,18 @@ class Config:
         return info.name if info else (code or "")
 
     def _chain_group_of(self, code: Optional[str]):
-        """Index of the isolated group containing ``code``, or None if free."""
+        """Index of the isolated group containing ``code``, or None if free.
+
+        The groups are written as 2-char CODES, but a Calgary JSON file may
+        carry its chain by NAME ("Winners", "Europe") — D41. Resolve first, or
+        a name matches no group, reads as ungrouped, and the isolation rule
+        silently passes: writing ``Europe`` onto an NA carton label was accepted
+        while ``05`` was correctly refused.
+        """
         c = (code or "").strip()
+        info = self.chain(c)
+        if info is not None:
+            c = info.code
         for i, group in enumerate(self._isolated_chain_groups):
             if c in group:
                 return i
