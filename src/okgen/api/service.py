@@ -1382,6 +1382,19 @@ def _json_seed_values(layout, sec, config: Config = None) -> Dict[str, str]:
             continue
         value = str(value)
         if value and config is not None:
+            # A temporal field's seed is resolved through the same forgiving
+            # parser the editor uses (D29), so config can declare either an
+            # exact stamp — which passes through byte-for-byte — or `now`, and
+            # the row is stamped when it is added. Per FIELD, per LAYOUT: this
+            # is opt-in config, not D49's withdrawn blanket auto-`now`, so
+            # CartonLabel's `date: null` and StyleHeader's blank stay as they
+            # are because that is what those sections declare.
+            # ...but only for a value with something in it. CalgaryStyleHeader's
+            # store `date` is declared `" "`, exactly as its sample carries it —
+            # a blank the parser rightly refuses, and a seed OkGen must be able
+            # to write. Blank in, blank out.
+            if value.strip():
+                value = _coerce_date(layout.name, f.name, value, config)
             value = _pad_zero_value(value, layout.name, f.name, f.size, config)
         out[f.name] = value
     return out

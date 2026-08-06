@@ -137,14 +137,47 @@ def test_generate_yields_exactly_n_real_rows(tmp_path, registry, config, n):
 def test_it_works_where_the_marker_looks_like_a_real_row(tmp_path, registry, config,
                                                          section, key):
     """An emptied `lanes` marker is `{"lane": ""}` — exactly what the vendor
-    ships. A rule that tried to RECOGNISE the marker would fail here."""
+    ships. A rule that tried to RECOGNISE the marker would fail here.
+
+    The marker must be GONE afterwards; whether what replaces it is blank is a
+    question about the seed, not about this rule (see the next test for Lanes,
+    whose seed the user has since chosen to be blank).
+    """
     p = _emptied(tmp_path, registry, config, "styleheader_fmtB.json",
                  "CalgaryStyleHeader", section)
 
     service.add_record(p, _si(p, section, registry, config), [], registry, config,
                        preview=False, backup=False)
 
-    assert _counts(p, key) == (1, 0)
+    assert _counts(p, key)[0] == 1
+
+
+def test_a_blank_seed_makes_a_section_read_as_having_no_data(tmp_path, registry,
+                                                             config):
+    """The consequence of the user's `lane: ""` seed, stated rather than
+    discovered. Lanes has ONE field, so a blank seed is a blank ROW — which is
+    exactly what D52 treats as "this section holds no data". A repeated single
+    add therefore REPLACES rather than stacks, the same accepted behaviour
+    StyleHeader Stores already has.
+
+    Bulk add N and Generate n are unaffected: both build the whole section, so
+    they still produce N rows. Giving `lane` any non-blank value in
+    `json_seed_rows.yaml` restores stacking — that is the whole fix, and it is a
+    config edit.
+    """
+    doc = json.loads((FIX / "styleheader_fmtB.json").read_text(encoding="utf-8"))
+    doc["data"]["header"]["lanes"] = []
+    p = tmp_path / "f.json"
+    p.write_text(json.dumps(doc, indent=4), encoding="utf-8")
+
+    for _ in range(3):
+        service.add_record(p, _si(p, "Lanes", registry, config), [], registry,
+                           config, preview=False, backup=False)
+    assert _counts(p, "lanes") == (1, 1)
+
+    service.bulk_op_apply([str(p)], "CalgaryStyleHeader", "Lanes",
+                          {"type": "add", "count": 4}, registry, config, backup=False)
+    assert _counts(p, "lanes")[0] == 4
 
 
 def test_a_vendor_shipped_blank_row_is_replaced(tmp_path, registry, config):
@@ -224,7 +257,9 @@ def test_an_emptied_section_still_reports_its_tags_until_a_row_is_added(
     p = _emptied(tmp_path, registry, config)
     rows = _rows(p, "stores")
     assert len(rows) == 1 and rows[0], "tags must still be there"
-    assert all(v is None for v in rows[0].values())
+    assert set(rows[0]) == set(_rows(FIX / "distlabel.json", "stores")[0]), \
+        "every tag the real rows carry must be present"
+    assert _blank(rows[0]), rows[0]
 
 
 # --------------------------------------------------------------------------- #

@@ -6,16 +6,17 @@ realistic row. JSON layouts are hand-authored specs with no reference file, and
 `seed_record` filled every field with "" — including fields that cannot legally
 be blank (a Calgary store's `date` is an RFC 3339 nanosecond stamp).
 
-`config/json_seed_rows.yaml` is the JSON equivalent of `sample_raw`. Values are
-deliberate PLACEHOLDERS (0001, RCD001), never lifted from a real vendor order —
-D46's lesson, where conversion inherited the template's rows and handed users
-another order's store numbers.
+`config/json_seed_rows.yaml` is the JSON equivalent of `sample_raw`. Its values
+started as the vendor sample rows and are the USER'S to choose — the file is the
+one place a seed is decided, and no value below is known to any code.
 
-A field not listed still gets a usable value: a temporal field gets `now` in its
-declared format, a `pad_zeros` field is zero-padded, everything else is blank.
+A field the config does not list falls back to "". A `pad_zeros` field is still
+padded, and a temporal field is resolved through the same forgiving parser a
+typed value uses, so config may declare an exact stamp or `now`.
 
 JSON only. `.OK` seeding goes through `sample_raw` and must not move.
 """
+import datetime
 import json
 import re
 import shutil
@@ -86,18 +87,23 @@ def test_declared_seed_values_are_used(tmp_path, registry, config):
                        preview=False, backup=False)
 
     row = _rows(p, "stores")[0]
-    assert row["store"] == "0100"
+    assert row["store"] == "0115"
     assert row["units"] == "20"
     assert row["storeQuantity"] == "5"
-    assert row["qtyToPrint"] == "1"
+    assert row["qtyToPrint"] == "600"
 
 
-def test_a_seeded_row_matches_the_vendor_sample_row(tmp_path, registry, config):
+def test_a_seeded_row_looks_like_a_real_row(tmp_path, registry, config):
     """The user's call: an added row should look like the rows their real files
     carry. An earlier cut used invented placeholders (0001) to keep a real
     order's numbers out of generated files — that is D46's rule for CONVERSION,
     where the values arrive silently. Here the user asked for them, and the row
-    is an editable starting point rather than inherited data."""
+    is an editable starting point rather than inherited data.
+
+    The seed STARTED as the sample row and the user has since chosen their own
+    values for some fields, so this asserts the shape the sample establishes —
+    same keys, and the sample's own value wherever config does not override —
+    rather than equality with the sample."""
     sample = json.loads((FIX / "distlabel.json").read_text(
         encoding="utf-8"))["data"]["header"]["stores"][0]
     p = _with_empty(tmp_path, "distlabel.json", "stores")
@@ -105,57 +111,77 @@ def test_a_seeded_row_matches_the_vendor_sample_row(tmp_path, registry, config):
     service.add_record(p, _si(p, "Stores", registry, config), [], registry, config,
                        preview=False, backup=False)
 
-    assert _rows(p, "stores")[0] == sample
+    row = _rows(p, "stores")[0]
+    assert row.keys() == sample.keys()
+    unchanged = ["units", "distroType", "storeQuantity", "cartonSequence",
+                 "numberOfPacks", "adDate", "suppress", "puertoRicoFlag",
+                 "puertoRicoStoreSeq", "puertoRicoStore"]
+    assert {k: row[k] for k in unchanged} == {k: sample[k] for k in unchanged}
 
 
-def test_size_is_seeded_blank_by_choice(tmp_path, registry, config):
-    """`size` is declared "" deliberately — a size code is order-specific."""
+def test_size_is_seeded_null_by_choice(tmp_path, registry, config):
+    """`size` is declared a real null, as the vendor sample carries it — not ""
+    (D34/D39: absent and empty are different things). A size code is
+    order-specific, so there is nothing meaningful to seed."""
     p = _with_empty(tmp_path, "styleheader_fmtB.json", "sizes")
 
     service.add_record(p, _si(p, "Sizes", registry, config), [], registry, config,
                        preview=False, backup=False)
 
-    assert _rows(p, "sizes")[0] == {"size": "", "quantity": "1"}
+    assert _rows(p, "sizes")[0] == {"size": None, "quantity": "100"}
 
 
-def test_lanes_seed_a_lane_id(tmp_path, registry, config):
+def test_lanes_seed_the_samples_blank_lane(tmp_path, registry, config):
+    """The user's chosen value, matching the vendor sample. Its one consequence
+    is pinned by `test_a_blank_seed_makes_a_section_read_as_having_no_data`."""
     p = _with_empty(tmp_path, "styleheader_fmtB.json", "lanes")
 
     service.add_record(p, _si(p, "Lanes", registry, config), [], registry, config,
                        preview=False, backup=False)
 
-    assert _rows(p, "lanes")[0] == {"lane": "RCD001"}
+    assert _rows(p, "lanes")[0] == {"lane": ""}
 
 
 # --------------------------------------------------------------------------- #
 # The fallback for fields config does not declare
 # --------------------------------------------------------------------------- #
-def test_date_is_seeded_from_config_never_generated(tmp_path, registry, config):
-    """An earlier cut filled any temporal field with the CURRENT time. That was
-    wrong on two of three layouts — CartonLabel's sample carries `date: null`
-    and StyleHeader's `" "` — so it invented a stamp those files never hold.
-    `date` is an ordinary seed value now."""
+def test_a_date_declared_now_is_stamped_when_the_row_is_added(tmp_path, registry,
+                                                              config):
+    """CONFIG decides, not the code. `CalgaryDistLabel.Stores.date` is declared
+    `now` at the user's request, so the seed carries the current instant in the
+    field's declared RFC 3339 nanosecond format. An earlier cut did this to ANY
+    temporal field automatically, which was wrong on the other two layouts — the
+    rule is opt-in per field, per layout, which the next two tests pin."""
     p = _with_empty(tmp_path, "distlabel.json", "stores")
-    sample_date = json.loads((FIX / "distlabel.json").read_text(
-        encoding="utf-8"))["data"]["header"]["stores"][0]["date"]
 
     service.add_record(p, _si(p, "Stores", registry, config), [], registry, config,
                        preview=False, backup=False)
 
-    assert _rows(p, "stores")[0]["date"] == sample_date
-    assert RFC3339_NANO.match(sample_date), "fixture must carry a real stamp"
+    stamped = _rows(p, "stores")[0]["date"]
+    assert RFC3339_NANO.match(stamped), stamped
+    assert stamped.startswith(
+        datetime.datetime.utcnow().strftime("%Y-%m-%d")), stamped
+
+
+def test_a_date_declared_as_an_exact_stamp_passes_through(registry, config):
+    """The other form config may use: an exact stamp is written byte-for-byte,
+    so a seed can be reproducible where that is what the user wants."""
+    from okgen.api.service import _coerce_date
+    exact = "2026-02-10T14:47:45.107359353Z"
+
+    assert _coerce_date("CalgaryDistLabel", "date", exact, config) == exact
 
 
 def test_a_pad_zeros_field_is_padded(tmp_path, registry, config):
-    """`store` is declared "0001"; the D34 padder must still run over a seed so
-    a value written as "1" could not slip through unpadded."""
+    """The D34 padder must still run over a seed, so a value written in config
+    as "115" could not slip through to a 4-character field unpadded."""
     p = _with_empty(tmp_path, "distlabel.json", "stores")
 
     service.add_record(p, _si(p, "Stores", registry, config), [], registry, config,
                        preview=False, backup=False)
 
     store = _rows(p, "stores")[0]["store"]
-    assert store == "0100" and len(store) == 4
+    assert store == "0115" and len(store) == 4
 
 
 def test_free_text_stays_blank(tmp_path, registry, config):
@@ -183,7 +209,7 @@ def test_bulk_add_seeds_too(tmp_path, registry, config):
 
     rows = _rows(p, "stores")
     assert len(rows) == 2
-    assert all(r["store"] == "0100" for r in rows), rows
+    assert all(r["store"] == "0115" for r in rows), rows
 
 
 def test_volume_generate_seeds_too(tmp_path, registry, config):
@@ -197,7 +223,7 @@ def test_volume_generate_seeds_too(tmp_path, registry, config):
     out = sorted(Path(res["folder"]).iterdir())[0]
     rows = json.loads(out.read_text(encoding="utf-8"))["data"]["header"]["stores"]
     assert len(rows) == 3
-    assert all(r["store"] == "0100" for r in rows), rows
+    assert all(r["store"] == "0115" for r in rows), rows
 
 
 def test_adding_after_a_bulk_empty_seeds_rather_than_cloning_the_skeleton(
@@ -218,7 +244,7 @@ def test_adding_after_a_bulk_empty_seeds_rather_than_cloning_the_skeleton(
     rows = _rows(p, "stores")
     seeded = [r for r in rows if any(v not in (None, "") for v in r.values())]
     assert len(seeded) == 1, rows
-    assert seeded[0]["store"] == "0100"
+    assert seeded[0]["store"] == "0115"
 
 
 def test_the_seeded_file_still_opens(tmp_path, registry, config):
@@ -300,9 +326,13 @@ def _sample_row(fixture, jpath):
 
 
 @pytest.mark.parametrize("fixture,layout,section,jpath", SEED_CASES)
-def test_a_seeded_row_equals_the_sample_row_exactly(tmp_path, registry, config,
-                                                    fixture, layout, section, jpath):
-    """Field for field, including nulls and blanks — not merely 'similar'."""
+def test_a_seeded_row_is_the_declared_row_exactly(tmp_path, registry, config,
+                                                  fixture, layout, section, jpath):
+    """Field for field, including nulls and blanks — not merely 'similar'. The
+    expectation comes from the config, since the values are the user's to change
+    and a test that restates them would just be a second copy to keep in sync;
+    what must hold is that every declared value reaches the file with its TYPE
+    intact, which is the class D49 and D53 were both about."""
     doc = json.loads((FIX / fixture).read_text(encoding="utf-8"))
     node = doc["data"]
     for step in jpath[:-1]:
@@ -310,6 +340,9 @@ def test_a_seeded_row_equals_the_sample_row_exactly(tmp_path, registry, config,
     node[jpath[-1]] = []                      # empty it so the add SEEDS
     p = tmp_path / "f.json"
     p.write_text(json.dumps(doc, indent=4), encoding="utf-8")
+    okf = parse_okfile(p, registry=registry)
+    sec = next(s for s in okf.layout.sections if s.name == section)
+    expected = service._json_seed_values(okf.layout, sec, config)
 
     service.add_record(p, _si(p, section, registry, config), [], registry, config,
                        preview=False, backup=False)
@@ -317,7 +350,12 @@ def test_a_seeded_row_equals_the_sample_row_exactly(tmp_path, registry, config,
     got = json.loads(p.read_text(encoding="utf-8"))["data"]
     for step in jpath:
         got = got[step]
-    assert got[0] == _sample_row(fixture, jpath)
+    # `date: now` is stamped per call, so compare it by shape, not by value.
+    stamped = [k for k, v in expected.items() if RFC3339_NANO.match(str(v))]
+    for k in stamped:
+        assert RFC3339_NANO.match(got[0][k]), got[0][k]
+    assert {k: v for k, v in got[0].items() if k not in stamped} == \
+           {k: v for k, v in expected.items() if k not in stamped}
 
 
 @pytest.mark.parametrize("fixture,layout,section,jpath", SEED_CASES)
@@ -359,18 +397,20 @@ def test_cartonlabel_date_is_seeded_null_not_a_stamp(tmp_path, registry, config)
     assert _rows(p, "stores")[0]["date"] is None
 
 
-def test_no_seeded_row_contains_todays_date(tmp_path, registry, config):
-    """A seed must never be time-dependent — two runs a day apart have to
-    produce the same file."""
-    import datetime
+def test_only_a_field_declared_now_becomes_time_dependent(tmp_path, registry, config):
+    """The guard that keeps `now` opt-in. DistLabel asked for it; nothing else
+    may quietly acquire a stamp — a seed that is time-dependent by accident
+    makes two runs a day apart produce different files."""
     today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-    for fixture, layout, section, key in (
-            ("distlabel.json", "CalgaryDistLabel", "Stores", "stores"),
-            ("cartonlabel_minified.json", "CalgaryCartonLabel", "Stores", "stores")):
+    for fixture, section, key in (
+            ("cartonlabel_minified.json", "Stores", "stores"),
+            ("styleheader_fmtB.json", "Stores", "stores"),
+            ("styleheader_fmtB.json", "Sizes", "sizes"),
+            ("styleheader_fmtB.json", "Lanes", "lanes")):
         p = _with_empty(tmp_path, fixture, key)
         service.add_record(p, _si(p, section, registry, config), [], registry,
                            config, preview=False, backup=False)
-        assert today not in json.dumps(_rows(p, key)), fixture
+        assert today not in json.dumps(_rows(p, key)), f"{fixture}/{section}"
 
 
 def test_date_is_still_editable_and_validated(tmp_path, registry, config):
