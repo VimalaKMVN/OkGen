@@ -86,7 +86,7 @@ def test_no_store_rows_means_no_store_data(tmp_path, registry, config,
     stores = doc["data"]["header"]["stores"]
 
     assert len(stores) == 1, f"expected one empty row, got {len(stores)}"
-    assert all(v in (None, "") for v in stores[0].values()), stores[0]
+    assert all(v is None or not str(v).strip() for v in stores[0].values()), stores[0]
 
 
 @pytest.mark.parametrize("name,layout,section", CASES)
@@ -172,7 +172,7 @@ def test_styleheader_is_unaffected_by_layout(tmp_path, registry, config):
     h = json.loads(out.read_text())["data"]["header"]
 
     assert len(h["stores"]) == 1
-    assert all(v in (None, "") for v in h["stores"][0].values())
+    assert all(v is None or not str(v).strip() for v in h["stores"][0].values())
 
 
 def test_the_report_no_longer_calls_them_placeholders(tmp_path, registry, config):

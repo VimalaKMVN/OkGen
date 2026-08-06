@@ -23,6 +23,11 @@
 # deliberately not affected by this file.
 #
 #   layout -> { section -> { field -> empty value } }
+# The Stores block below is the user's chosen empty row, and is IDENTICAL on all
+# three layouts: the first ten fields empty out to a blank rather than a null
+# (`store` to "", the rest to a single space, as the vendor's own blank store
+# row carries them), while the last three stay null. Quoting matters — a bare
+# YAML space would be read as nothing at all.
 empty_rows:
   CalgaryStyleHeader:
     Lanes:
@@ -30,6 +35,20 @@ empty_rows:
     Sizes:
       size: null
       quantity: null
+    Stores: &empty_store_row
+      store: ""
+      puertoRicoFlag: " "
+      units: " "
+      distroType: " "
+      date: " "
+      storeQuantity: " "
+      cartonSequence: " "
+      numberOfPacks: " "
+      adDate: " "
+      suppress: " "
+      qtyToPrint: null
+      puertoRicoStoreSeq: null
+      puertoRicoStore: null
 
   CalgaryDistLabel:
     Lanes:
@@ -37,6 +56,7 @@ empty_rows:
     Sizes:
       size: null
       quantity: null
+    Stores: *empty_store_row
 
   CalgaryCartonLabel:
     Lanes:
@@ -44,3 +64,4 @@ empty_rows:
     Sizes:
       size: null
       quantity: null
+    Stores: *empty_store_row

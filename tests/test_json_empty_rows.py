@@ -38,6 +38,11 @@ def registry():
 @pytest.fixture(scope="module")
 def config():
     return Config.load(FIXTURE_CONFIG)
+def _is_empty(v):
+    """A value the empty-row rule may write: JSON null, "", or the blank a
+    config entry declares (the Stores row empties to single spaces, matching the
+    blank store row the vendor's own files carry)."""
+    return v is None or (isinstance(v, str) and not v.strip())
 
 
 def _copy(tmp_path, fixture, name="f.json"):
@@ -84,7 +89,63 @@ def test_every_kept_value_is_empty(tmp_path, registry, config):
     _empty_stores(p, "CalgaryDistLabel", registry, config)
 
     row = _at(p, ("header", "stores"))[0]
-    assert all(v in (None, "") for v in row.values()), row
+    assert all(_is_empty(v) for v in row.values()), row
+
+
+# The user's chosen empty Stores row, verbatim. Identical on all three layouts:
+# the first ten fields empty to a BLANK (`store` to "", the rest to a single
+# space, as the vendor's own blank store row carries them) and the last three
+# stay null. Pinned literally rather than read back from config, because these
+# are values a downstream system sees and a silent change to any one of them is
+# exactly what this test exists to catch.
+EMPTY_STORE_ROW = {
+    "store": "", "puertoRicoFlag": " ", "units": " ", "distroType": " ",
+    "date": " ", "storeQuantity": " ", "cartonSequence": " ",
+    "numberOfPacks": " ", "adDate": " ", "suppress": " ",
+    "qtyToPrint": None, "puertoRicoStoreSeq": None, "puertoRicoStore": None,
+}
+
+STORE_CASES = [
+    ("distlabel.json", "CalgaryDistLabel"),
+    ("cartonlabel_minified.json", "CalgaryCartonLabel"),
+    ("styleheader_fmtB.json", "CalgaryStyleHeader"),
+]
+
+
+@pytest.mark.parametrize("fixture,layout", STORE_CASES)
+def test_an_emptied_stores_section_is_the_declared_row(tmp_path, registry, config,
+                                                       fixture, layout):
+    p = _copy(tmp_path, fixture)
+
+    _empty_stores(p, layout, registry, config)
+
+    assert _at(p, ("header", "stores")) == [EMPTY_STORE_ROW]
+
+
+@pytest.mark.parametrize("fixture,layout", STORE_CASES)
+def test_every_path_that_empties_stores_writes_the_same_row(tmp_path, registry,
+                                                            config, fixture, layout):
+    """Bulk keep-0, the editor's own delete, and Generate 0 must agree — the
+    D16/D30 rule, checked on the values rather than merely on 'a row is there'.
+    """
+    editor = _copy(tmp_path, fixture, "editor.json")
+    for _ in range(len(_at(editor, ("header", "stores")) or [])):
+        view = service.parse_file_view(editor, registry, config)
+        recs = next(s for s in view["sections"] if s["name"] == "Stores")["records"]
+        if not recs:
+            break
+        service.delete_record(editor, recs[-1]["index"], [], registry, config,
+                              backup=False)
+
+    gen_src = _copy(tmp_path, fixture, "gen.json")
+    res = service.generate_apply(
+        [str(gen_src)],
+        {"count": 1, "row_counts": [{"section": "Stores", "min": 0, "max": 0}],
+         "dest": str(tmp_path / "gen_out")}, registry, config)
+    generated = sorted(Path(res["folder"]).glob("*.json"))[0]
+
+    assert _at(editor, ("header", "stores")) == [EMPTY_STORE_ROW]
+    assert _at(generated, ("header", "stores")) == [EMPTY_STORE_ROW]
 
 
 def test_config_decides_which_fields_empty_to_a_string(tmp_path, registry, config):
@@ -103,13 +164,20 @@ def test_config_decides_which_fields_empty_to_a_string(tmp_path, registry, confi
     assert _at(p, ("header", "sizes")) == [{"size": None, "quantity": None}]
 
 
-def test_an_undeclared_field_defaults_to_null(tmp_path, registry, config):
+def test_an_undeclared_section_defaults_to_null(tmp_path, registry, config):
     """A section nobody has written config for still behaves — otherwise a new
-    layout would silently go back to writing []."""
+    layout would silently go back to writing []. `Details` is that section: the
+    config names Lanes, Sizes and Stores, so Details proves the fallback rather
+    than the declaration."""
     p = _copy(tmp_path, "styleheader_fmtB.json")
-    _empty_stores(p, "CalgaryStyleHeader", registry, config)
+    assert not config.json_empty_row("CalgaryStyleHeader", "Details", []), \
+        "this test is only meaningful while Details is undeclared"
 
-    row = _at(p, ("header", "stores"))
+    service.bulk_op_apply([str(p)], "CalgaryStyleHeader", "Details",
+                          {"type": "keep", "count": 0}, registry, config,
+                          backup=False)
+
+    row = _at(p, ("details",))
     assert len(row) == 1
     assert all(v is None for v in row[0].values()), row[0]
 
@@ -129,7 +197,7 @@ def test_the_single_file_editor_delete_also_keeps_the_tags(tmp_path, registry, c
                              for i in reversed(idxs)])
 
     rows = _at(p, ("header", "stores"))
-    assert len(rows) == 1 and all(v in (None, "") for v in rows[0].values())
+    assert len(rows) == 1 and all(_is_empty(v) for v in rows[0].values())
 
 
 def test_generate_volume_files_keep_the_tags(tmp_path, registry, config):
@@ -144,7 +212,7 @@ def test_generate_volume_files_keep_the_tags(tmp_path, registry, config):
     for f in out:
         rows = _at(f, ("header", "stores"))
         assert len(rows) == 1, f"{f.name} lost the section's tags"
-        assert all(v in (None, "") for v in rows[0].values())
+        assert all(_is_empty(v) for v in rows[0].values())
 
 
 # --------------------------------------------------------------------------- #

@@ -318,7 +318,7 @@ def _assert_emptied(p, jpath, section=""):
     assert len(rows) == 1, f"{section}: expected one empty row, got {rows!r}"
     row = rows[0]
     assert row, f"{section}: the kept row must still carry its field tags"
-    bad = {k: v for k, v in row.items() if v not in (None, "")}
+    bad = {k: v for k, v in row.items() if v is not None and str(v).strip()}
     assert not bad, f"{section}: kept row still carries values {bad!r}"
     return row
 @pytest.mark.parametrize("fixture,layout,section,jpath", ROW_CASES)
