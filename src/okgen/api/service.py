@@ -1173,8 +1173,8 @@ def _apply_json_empty_rows(okf: OkFile, config: Config) -> None:
         if any(r.section is sec for r in okf.records):
             continue                       # still has rows; nothing to do
         rec = jsonengine.seed_record(state, sec, base)
-        rec.pending = config.json_empty_row(layout.name, sec.name,
-                                            [f.name for f in sec.fields])
+        rec.inherited = config.json_empty_row(layout.name, sec.name,
+                                              [f.name for f in sec.fields])
         okf.records.append(rec)
 
 
@@ -1410,7 +1410,10 @@ def _seed_record(okf, sec, config: Config = None):
         # (see _json_seed_values) rather than learned at compile time.
         from okgen import jsonengine
         rec = jsonengine.seed_record(okf.json_state, sec, _json_array_path(sec))
-        rec.pending = _json_seed_values(okf.layout, sec, config)
+        # `inherited`, not `pending`: these are the values the row STARTS with,
+        # not edits made to it — the same slot a clone fills from its template,
+        # so both kinds of new row behave identically from here on.
+        rec.inherited = _json_seed_values(okf.layout, sec, config)
         return rec
     seed = getattr(sec, "sample_raw", None)
     if not seed:

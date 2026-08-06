@@ -297,10 +297,17 @@ def _base_indent(text: str, pos: int) -> str:
 def _new_row_text(text: str, spans, array_path: Tuple, rec, indent: str) -> str:
     """Source text for a row that wasn't in the file.
 
-    A cloned row copies its template's exact source and splices its own edited
-    values into that copy, so it matches the file's formatting perfectly. A
-    seeded row (the section was empty, so there is nothing to clone) is rendered
-    from the layout's fields using the document's indent.
+    A cloned row copies its template's exact source and splices its own EDITED
+    values into that copy, so it matches the file's formatting perfectly. Only
+    what was actually ``set`` on the row is spliced: a field nobody touched
+    keeps the template's own token, so an unedited clone is byte-identical to
+    the row it came from. Splicing every field instead (from ``values()``, which
+    renders through ``_display``) rewrote a `null` as `""` and any non-string
+    scalar as a quoted string — collapsing the absent/empty distinction D34/D39
+    exist to keep, on every added row.
+
+    A seeded row (the section was empty, so there is nothing to clone) is
+    rendered from its values using the document's indent.
     """
     tpl = getattr(rec, "template_index", None)
     if tpl is not None and (array_path + (tpl,)) in spans:
@@ -316,7 +323,8 @@ def _new_row_text(text: str, spans, array_path: Tuple, rec, indent: str) -> str:
                 snippet = snippet[:a] + tok + snippet[b:]
         return snippet
 
-    obj = getattr(rec, "pending", None) or {}
+    obj = dict(getattr(rec, "inherited", None) or {})
+    obj.update(getattr(rec, "pending", None) or {})
     if not indent:
         return json.dumps(obj, ensure_ascii=False)
     base = _base_indent(text, spans[array_path][0]) + indent
@@ -358,7 +366,13 @@ class JsonRecord:
         self.array_path = array_path
         self.orig_index = orig_index
         self.template_index = None        # a new row's source row, if cloned
-        self.pending: Dict[str, str] = {}  # a new row's values (no spans yet)
+        self.pending: Dict[str, str] = {}  # a new row's EDITS (no spans yet)
+        # A new row's INHERITED values, as raw JSON (null stays None, a number
+        # stays a number) — what a clone carries from its template before
+        # anything is set on it. Kept apart from `pending` so serialization can
+        # splice only real edits and leave every other token exactly as the
+        # template wrote it.
+        self.inherited: Dict[str, object] = {}
 
     @property
     def is_new(self) -> bool:
@@ -379,8 +393,22 @@ class JsonRecord:
 
     def get(self, name: str) -> Optional[str]:
         if self.is_new:                   # not in the document yet
-            return _display(self.pending.get(name))
+            if name in self.pending:
+                return _display(self.pending[name])
+            return _display(self.inherited.get(name))
         return _display(_at(self._state.data, self._path(self._field(name))))
+
+    def raw_values(self) -> Dict[str, object]:
+        """This row's values as raw JSON — the un-displayed form a clone needs,
+        so `null` is copied as `null` rather than as an empty string."""
+        if self.section is None:
+            return {}
+        if self.is_new:
+            merged = dict(self.inherited)
+            merged.update(self.pending)
+            return {f.name: merged.get(f.name) for f in self.section.fields}
+        return {f.name: _at(self._state.data, self._path(f))
+                for f in self.section.fields}
 
     def values(self) -> Dict[str, Optional[str]]:
         if self.section is None:
@@ -414,7 +442,14 @@ class JsonRecord:
 def clone_record(template: "JsonRecord") -> "JsonRecord":
     """A new row copied from ``template`` — the JSON equivalent of duplicating
     a fixed-width line. The copy carries the template's CURRENT values and, on
-    save, its exact source text, so it matches the file's formatting."""
+    save, its exact source text, so it matches the file's formatting.
+
+    The values are copied RAW (``raw_values``), not through the editor's display
+    form: a fixed-width clone copies bytes, so a JSON clone must copy the value
+    the row actually holds. Reading them through ``values()`` turned every
+    `null` into `""` — the added row then differed in kind from the rows it was
+    cloned from, on every add path (single add, bulk add, Volume Generate).
+    """
     if template.array_path is None:
         raise ValueError("only rows of an array section can be duplicated")
     clone = JsonRecord(template._state, template.section, template.index,
@@ -422,11 +457,11 @@ def clone_record(template: "JsonRecord") -> "JsonRecord":
                        orig_index=None)
     clone.template_index = (template.orig_index if template.orig_index is not None
                             else template.template_index)
-    clone.pending = dict(template.values())
-    if clone.template_index is None:
-        # Duplicating a row that is itself new: there is no source text to copy,
-        # so it renders from its values like a seeded row.
-        clone.pending = {k: (v or "") for k, v in clone.pending.items()}
+    # Inherited, not pending: nothing has been SET on this row yet, so an
+    # unedited clone splices nothing and serializes as a byte-identical copy of
+    # its template. A row cloned from a row that is itself new has no source
+    # text to copy and renders from these values, like a seeded row.
+    clone.inherited = template.raw_values()
     return clone
 
 
@@ -438,7 +473,7 @@ def seed_record(state: "JsonState", section, array_path: Tuple) -> "JsonRecord":
     """
     rec = JsonRecord(state, section, 0, array_path + (0,),
                      array_path=array_path, orig_index=None)
-    rec.pending = {f.name: "" for f in section.fields}
+    rec.inherited = {f.name: "" for f in section.fields}
     return rec
 
 
