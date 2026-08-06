@@ -275,3 +275,47 @@ def test_a_count_left_alone_is_reported_as_the_templates(tmp_path, registry, con
     assert rows["storeLines"]["provenance"] == "template"
     assert rows["numberOfStores"]["provenance"] == "count"
 
+
+# --------------------------------------------------------------------------- #
+# A field the .OK cannot supply, declared outright in config
+# --------------------------------------------------------------------------- #
+def test_a_distlabel_store_date_is_stamped_not_inherited(tmp_path, registry, config):
+    """`date` has no .OK source. It used to fall through to the TEMPLATE, so
+    every converted store carried the vendor sample's timestamp — another
+    order's data (D34/D39's class, wearing a date). Config now declares
+    `value: now`, so it is stamped per conversion."""
+    import datetime
+    import re
+    h = _converted(tmp_path, "DistLabels.OK", registry, config)
+    template = json.loads(
+        (Path(config.config_dir) /
+         config.conversion_for("DistLabels")["template"]).read_text())
+    borrowed = {s.get("date") for s in template["data"]["header"]["stores"]}
+
+    stamps = {s["date"] for s in h["stores"]}
+    assert not (stamps & borrowed), f"template timestamp leaked: {stamps & borrowed}"
+    for s in stamps:
+        assert re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}Z$", s), s
+        assert s.startswith(datetime.datetime.utcnow().strftime("%Y-%m-%d")), s
+
+
+def test_the_other_layouts_keep_their_own_date_rule(tmp_path, registry, config):
+    """Opt-in per layout, per field: CartonLabel's samples carry `date: null`
+    and it declares nothing, so nothing is stamped there."""
+    h = _converted(tmp_path, "CartonLabel.OK", registry, config)
+
+    assert all(s["date"] is None for s in h["stores"])
+
+
+def test_a_generated_field_is_reported_as_generated(tmp_path, registry, config):
+    """Provenance must distinguish it from `ok` and from `template` — the whole
+    point of the coverage report is that nothing is invented silently."""
+    p = tmp_path / "DistLabels.OK"
+    shutil.copy2(DATA_DIR / "DistLabels.OK", p)
+
+    pv = service.convert_preview([str(p)], registry, config)
+    row = next(r for r in pv["samples"][0]["report"]
+               if r["field"] == "stores[].date")
+
+    assert row["provenance"] == "generated"
+    assert row["source"] == "declared in config"

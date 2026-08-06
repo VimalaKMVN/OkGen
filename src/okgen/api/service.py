@@ -3441,7 +3441,11 @@ def _convert_one(path: Path, registry, config: Config, used_keys: Dict[tuple, se
     okf = parse_okfile(path, layout)
     doc, report = okjson.convert(okf, layout, spec, template,
                                  empty_rows=_json_empty_rows_by_array(
-                                     spec.get("target"), registry, config))
+                                     spec.get("target"), registry, config),
+                                 # the TARGET layout's temporal fields, so a
+                                 # config `value: now` is stamped in the format
+                                 # that field is declared with (D29)
+                                 date_formats=config.date_fields(spec.get("target")))
 
     # Keys stay unique across the batch. These files are SCAN because the
     # conversion emits `headerASNid: null` — the file's OWN content decides it

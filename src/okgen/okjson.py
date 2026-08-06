@@ -159,8 +159,33 @@ def _empty_row(placeholder: list, mapped_fields, nullable, empty_rows, arr_name)
     return {k: declared.get(k) for k in keys}
 
 
+def _generated(rule: dict, date_formats: Dict[str, str], field: str):
+    """A field the .OK cannot supply but config declares outright.
+
+    ``value:`` is written as given, EXCEPT ``now`` on a field the layout
+    declares temporal (``date_fields.yaml``), which is stamped at conversion
+    time in that field's own format — the same word the editor accepts when a
+    date is typed by hand (D29), so config has one spelling to learn.
+
+    Exists because "no .OK source" had exactly two possible answers before:
+    keep the vendor template's value (another order's data) or write null.
+    A DistLabels store `date` wants neither.
+    """
+    value = rule.get("value")
+    fmt = date_formats.get(field)
+    if fmt and isinstance(value, str) and value.strip():
+        from okgen import datetimes
+        try:
+            return datetimes.normalize(value, fmt), "generated"
+        except datetimes.DateError as exc:
+            raise ConvertError(
+                f"{field}: {exc} — check `value:` in config/ok_to_json.yaml") from exc
+    return value, "generated"
+
+
 def convert(okf, layout, spec: dict, template: dict,
-            empty_rows: Optional[Dict[str, dict]] = None) -> Tuple[dict, List[dict]]:
+            empty_rows: Optional[Dict[str, dict]] = None,
+            date_formats: Optional[Dict[str, str]] = None) -> Tuple[dict, List[dict]]:
     """Build the JSON document for one parsed .OK file.
 
     Returns ``(document, report)`` where report rows are
@@ -178,6 +203,7 @@ def convert(okf, layout, spec: dict, template: dict,
         report.append({"field": field, "provenance": prov,
                        "value": value, "source": source})
 
+    date_formats = dict(date_formats or {})
     hdr_section = layout.sections[0].name
     hdr_rows = _section_values(okf, layout, hdr_section)
     if not hdr_rows:
@@ -186,6 +212,10 @@ def convert(okf, layout, spec: dict, template: dict,
 
     # --- header ------------------------------------------------------------
     for field, rule in (spec.get("header") or {}).items():
+        if "value" in rule:                       # declared outright, no .OK source
+            header[field], prov = _generated(rule, date_formats, field)
+            note(field, prov, header[field], "declared in config")
+            continue
         src = rule.get("from")
         if src not in H:
             if rule.get("null_when_blank"):
@@ -255,6 +285,12 @@ def convert(okf, layout, spec: dict, template: dict,
             item = json.loads(json.dumps(proto))      # keep the sample's shape
             blank_in_ok = set()
             for field, rule in (arr_spec.get("fields") or {}).items():
+                if "value" in rule:               # declared outright, per ROW
+                    item[field], prov = _generated(rule, date_formats, field)
+                    if not out:
+                        note(f"{arr_name}[].{field}", prov, item[field],
+                             "declared in config")
+                    continue
                 src = rule.get("from")
                 if src not in row or _is_blank(row[src]):
                     # Blankness is judged on the .OK VALUE, before any transform
@@ -287,6 +323,12 @@ def convert(okf, layout, spec: dict, template: dict,
         for row in rows:
             item = json.loads(json.dumps(proto))
             for field, rule in (det_spec.get("fields") or {}).items():
+                if "value" in rule:               # declared outright, per ROW
+                    item[field], prov = _generated(rule, date_formats, field)
+                    if not out:
+                        note(f"details.{field}", prov, item[field],
+                             "declared in config")
+                    continue
                 src = rule.get("from")
                 if src not in row:
                     if rule.get("null_when_blank"):

@@ -18,6 +18,9 @@
 #   from:       the .OK field name to read
 #   transform:  see the list at the bottom (default: trim trailing/leading pad)
 #   raw:        true = take the .OK value verbatim, padding and all
+#   value:      no .OK source — write THIS, per row. `now` on a field declared
+#               temporal in date_fields.yaml is stamped at conversion time in
+#               that field's own format; anything else is written as given.
 
 conversions:
 
@@ -194,7 +197,14 @@ conversions:
           qtyToPrint:     { from: store_qty, transform: strip_zeros }
           cartonSequence: { from: cartseq }
           adDate:         { from: ad }
-          # `date` has no .OK source -> template value.
+          # `date` has no .OK source. It used to fall through to the TEMPLATE's
+          # value, which meant every converted store carried the vendor
+          # sample's timestamp — another order's data, the class D34/D39 exist
+          # to stop, just wearing a date. Declared outright instead: `now` is
+          # stamped per conversion in the field's own declared format
+          # (date_fields.yaml). Write an exact stamp here for a fixed one, or
+          # `null` to leave the store with no date at all.
+          date:           { value: now }
 
     # No `details:` block — every distributionLabels sample carries an EMPTY
     # details[], unlike styleHeaders where it is built from the .OK header.

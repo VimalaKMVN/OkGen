@@ -3022,9 +3022,14 @@ function confirmConvert(pv) {
 
     if (s0) {
       const tbl = el("div", "tosca-rows");
+      // `generated` is named explicitly: a field OkGen invents (a `now` stamp
+      // config declares for a field the .OK has no source for) must be visible
+      // here, or the one provenance that is neither read nor inherited would be
+      // the only one the summary hides.
       tbl.appendChild(el("div", "tosca-row",
         `From the .OK file: ${cov.ok || 0} fields · derived: ${cov.derived || 0} `
-        + `· from the template: ${cov.template || 0}`));
+        + `· generated: ${cov.generated || 0} · from the template: `
+        + `${cov.template || 0}`));
       // The converted file is SCAN because it carries no headerASNid — its own
       // content says so (D38). The output folder's name is only a label; the
       // batch resolves the same after the folder is renamed.
