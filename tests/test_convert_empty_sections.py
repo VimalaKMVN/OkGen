@@ -102,15 +102,31 @@ def test_the_templates_store_numbers_never_reach_the_output(
 
 
 @pytest.mark.parametrize("name,layout,section", CASES)
-def test_the_store_count_says_zero(tmp_path, registry, config, name, layout, section):
+def test_the_store_count_never_claims_a_store(tmp_path, registry, config,
+                                              name, layout, section):
     """The count agreeing with the borrowed rows is what made the document look
-    legitimate. One tag-carrying row is not one store."""
+    legitimate. One tag-carrying row is not one store — whatever form the empty
+    count takes, it must not be a number of stores."""
     doc = _emptied_and_converted(tmp_path, name, layout, section, registry, config)
     h = doc["data"]["header"]
 
-    assert h.get("numberOfStores") == "0", h.get("numberOfStores")
-    if "storeLines" in h and h["storeLines"] is not None:
-        assert h["storeLines"] in ("0", None, " "), h["storeLines"]
+    for field in ("numberOfStores", "storeLines"):
+        v = h.get(field)
+        assert v is None or not str(v).strip() or int(str(v)) == 0, f"{field}={v!r}"
+
+
+@pytest.mark.parametrize("name,layout,section", CASES)
+def test_the_empty_counts_are_the_declared_ones(tmp_path, registry, config,
+                                                name, layout, section):
+    """The user's chosen forms for a store-less distribution/carton label. These
+    are what a downstream system reads, so they are pinned literally rather than
+    read back out of the config they come from."""
+    doc = _emptied_and_converted(tmp_path, name, layout, section, registry, config)
+    h = doc["data"]["header"]
+
+    assert h["numberOfStores"] == ""
+    assert h["storeLines"] is None
+    assert h["laneRecords"] is None
 
 
 @pytest.mark.parametrize("name,layout,section", CASES)
@@ -173,6 +189,31 @@ def test_styleheader_is_unaffected_by_layout(tmp_path, registry, config):
 
     assert len(h["stores"]) == 1
     assert all(v is None or not str(v).strip() for v in h["stores"][0].values())
+    # Its store counts keep the single-space form this layout has always
+    # carried — declared in `empty_counts` rather than inherited, but the same
+    # value, so a StyleHeader conversion is unchanged by that config.
+    assert h["numberOfStores"] == " " and h["storeLines"] == " "
+    # ...and `laneRecords` still reports the lanes the file DOES have.
+    assert h["laneRecords"] == "10" and len(h["lanes"]) == 10
+
+
+def test_an_emptied_lane_section_nulls_the_lane_count(tmp_path, registry, config):
+    """`laneRecords` is not a computed count (lanes/sizes are excluded on
+    purpose, D35) — it is copied from the .OK header, which reports `00` once
+    the section is emptied. The user's call is that a section with no lanes
+    reports null rather than a zero-ish string."""
+    p = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", p)
+    service.bulk_op_apply([str(p)], "StyleHeader", "Lane",
+                          {"type": "keep", "count": 0}, registry, config, backup=False)
+
+    cres = service.convert_apply([str(p)], registry, config)
+    h = json.loads(sorted(Path(cres["folder"]).glob("*.json"))[0].read_text())["data"]["header"]
+
+    assert h["laneRecords"] is None
+    assert h["lanes"] == [{"lane": ""}], h["lanes"]
+    # sizes untouched by emptying lanes
+    assert len(h["sizes"]) == 4
 
 
 def test_the_report_no_longer_calls_them_placeholders(tmp_path, registry, config):
@@ -189,3 +230,48 @@ def test_the_report_no_longer_calls_them_placeholders(tmp_path, registry, config
 
     assert rows, "the report must still account for the section"
     assert "placeholder" not in str(rows[0]).lower(), rows[0]
+
+
+# --------------------------------------------------------------------------- #
+# Counts conversion must NOT touch when the .OK carries data
+# --------------------------------------------------------------------------- #
+def _converted(tmp_path, name, registry, config):
+    p = tmp_path / name
+    shutil.copy2(DATA_DIR / name, p)
+    cres = service.convert_apply([str(p)], registry, config)
+    out = sorted(Path(cres["folder"]).glob("*.json"))[0]
+    return json.loads(out.read_text(encoding="utf-8"))["data"]["header"]
+
+
+@pytest.mark.parametrize("name,stores", [("DistLabels.OK", 10), ("CartonLabel.OK", 91)])
+def test_storelines_is_left_alone_when_the_ok_has_stores(tmp_path, registry, config,
+                                                         name, stores):
+    """The user's call: `storeLines` is never recalculated. `numberOfStores`
+    still is, so this also pins that the two are deliberately different."""
+    h = _converted(tmp_path, name, registry, config)
+
+    assert len(h["stores"]) == stores
+    assert h["numberOfStores"] == str(stores)
+    assert h["storeLines"] is None
+
+
+def test_linecount_is_left_alone_when_details_are_built(tmp_path, registry, config):
+    """StyleHeader always emits one details row (built from the .OK header), and
+    `lineCount` must still not be written for it."""
+    h = _converted(tmp_path, "StyleHeader.OK", registry, config)
+
+    assert len(json.dumps(h)) and h["lineCount"] == " "
+
+
+def test_a_count_left_alone_is_reported_as_the_templates(tmp_path, registry, config):
+    """Provenance has to say so, or 'not updated' is indistinguishable from
+    'updated to the same value' in the coverage report."""
+    p = tmp_path / "DistLabels.OK"
+    shutil.copy2(DATA_DIR / "DistLabels.OK", p)
+
+    pv = service.convert_preview([str(p)], registry, config)
+    rows = {r["field"]: r for r in pv["samples"][0]["report"]}
+
+    assert rows["storeLines"]["provenance"] == "template"
+    assert rows["numberOfStores"]["provenance"] == "count"
+

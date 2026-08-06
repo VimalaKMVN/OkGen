@@ -692,7 +692,11 @@ def test_cartonlabel_store_count_corrects_a_stale_ok_header(registry, config):
     doc, report = _convert_cl(registry, config)
     h = doc["data"]["header"]
     assert len(h["stores"]) == 91
-    assert h["numberOfStores"] == "91" and h["storeLines"] == "91"
+    assert h["numberOfStores"] == "91"
+    # `storeLines` is deliberately NOT computed (the user's call): conversion
+    # leaves it alone whenever the .OK carries data, so it keeps the template's
+    # value rather than tracking the rows.
+    assert h["storeLines"] is None
     assert any(r["provenance"] == "count" for r in report)
 
 
@@ -700,7 +704,8 @@ def test_distlabels_store_counts_track_the_rows(registry, config):
     doc, _ = _convert_dl(registry, config)
     h = doc["data"]["header"]
     assert len(h["stores"]) == 10
-    assert h["numberOfStores"] == "10" and h["storeLines"] == "10"
+    assert h["numberOfStores"] == "10"
+    assert h["storeLines"] is None      # not computed — see the CartonLabel test
 
 
 def test_styleheader_counts_details_but_not_the_store_placeholder(registry, config):
@@ -708,7 +713,9 @@ def test_styleheader_counts_details_but_not_the_store_placeholder(registry, conf
     would claim a store that does not exist."""
     doc, _ = _convert(registry, config)
     h = doc["data"]["header"]
-    assert h["lineCount"] == "1"                      # one details row
+    # `lineCount` is not computed either — with a details row present it keeps
+    # the template's own value, which on this layout is a single space.
+    assert h["lineCount"] == " "
     assert h["numberOfStores"] == " " and h["storeLines"] == " "   # untouched
 
 

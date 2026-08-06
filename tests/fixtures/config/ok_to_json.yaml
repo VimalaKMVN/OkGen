@@ -81,8 +81,26 @@ conversions:
     # which can be stale. Only written when the rows really came from the .OK —
     # `stores` here is a template placeholder, so its counts are left alone.
     # `lanes`/`sizes` counts are deliberately NOT listed (user's call for now).
-    counts:
-      lineCount: details
+    # `lineCount` is deliberately NOT computed — the user's call: conversion
+    # must not touch it when the .OK carries data, so it keeps the template's
+    # value. Only the empty form below is written, and only when there are no
+    # details to count.
+    counts: {}
+
+    # What a count field says when its array carries no real .OK rows — whether
+    # the section was emptied, or the .OK layout has no such section at all.
+    # Written VERBATIM, so `null` is a JSON null and `" "` is a single space.
+    # Declared per layout because the three do not agree, and because a count
+    # that claims rows a file does not have is the failure D46 exists to stop.
+    #
+    # A StyleHeader has no store section, so these two are always the empty
+    # form; they are declared rather than inherited so the value is visible
+    # here rather than dependent on whatever the template happens to carry.
+    empty_counts:
+      laneRecords:    { array: lanes,   value: null }
+      numberOfStores: { array: stores,  value: " " }
+      storeLines:     { array: stores,  value: " " }
+      lineCount:      { array: details, value: " " }
 
     # --- data.details[] ----------------------------------------------------
     # The reshape: an .OK StyleHeader has NO detail rows, but the JSON needs
@@ -142,9 +160,19 @@ conversions:
       headerASNid:    { from: header_asn_id, null_when_blank: true }
 
     # Counted from the rows actually emitted (lanes/sizes excluded on purpose).
+    # `storeLines` is NOT computed (user's call) — untouched while the .OK has
+    # data, so it keeps the template's value; only its empty form is written.
     counts:
       numberOfStores: stores
-      storeLines:     stores
+
+    # See CalgaryStyleHeader's block above for what this is. `lanes` is null on
+    # this layout, so `laneRecords` resolves to the empty form either way — it
+    # is declared so the answer comes from config rather than from the template.
+    empty_counts:
+      laneRecords:    { array: lanes,   value: null }
+      numberOfStores: { array: stores,  value: "" }
+      storeLines:     { array: stores,  value: null }
+      lineCount:      { array: details, value: null }
 
     # --- nested arrays -----------------------------------------------------
     # distributionLabels carry `lanes`/`sizes` as null (not [{}]), so they are
@@ -228,9 +256,19 @@ conversions:
       # numberOfStores is NOT mapped from the .OK header: it declares 38 while
       # the file carries 91 store rows. It is counted below instead.
 
+    # `storeLines` is NOT computed (user's call) — untouched while the .OK has
+    # data, so it keeps the template's value; only its empty form is written.
     counts:
       numberOfStores: stores
-      storeLines:     stores
+
+    # See CalgaryStyleHeader's block above for what this is. `lanes` is null on
+    # this layout, so `laneRecords` resolves to the empty form either way — it
+    # is declared so the answer comes from config rather than from the template.
+    empty_counts:
+      laneRecords:    { array: lanes,   value: null }
+      numberOfStores: { array: stores,  value: "" }
+      storeLines:     { array: stores,  value: null }
+      lineCount:      { array: details, value: null }
 
     # --- nested arrays -----------------------------------------------------
     # Same shape as distributionLabels: lanes/sizes are null and details[] is

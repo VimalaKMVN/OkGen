@@ -306,6 +306,7 @@ def convert(okf, layout, spec: dict, template: dict,
         data["details"] = out
 
     # --- row counts --------------------------------------------------------
+    empty_counts = dict(spec.get("empty_counts") or {})
     # Computed from what was ACTUALLY emitted, not copied from the .OK header,
     # which can be stale (CartonLabel declares 38 stores and carries 91 rows).
     # Only counted when the rows really came from the .OK: a template
@@ -317,9 +318,12 @@ def convert(okf, layout, spec: dict, template: dict,
                 continue                              # details not built here
             rows = data.get("details") or []
         else:
-            if source in emptied_arrays:
+            if source in emptied_arrays and field not in empty_counts:
                 # The kept row carries tags, not data — the count is 0, not 1,
-                # or the header would claim a store that does not exist.
+                # or the header would claim a store that does not exist. What
+                # an empty section's count SAYS is config's to decide
+                # (`empty_counts`); "0" is only the default for a field that
+                # declares nothing.
                 header[field] = "0"
                 note(field, "count", "0", f"no {source} rows in .OK")
                 continue
@@ -329,8 +333,27 @@ def convert(okf, layout, spec: dict, template: dict,
         header[field] = str(len(rows))
         note(field, "count", header[field], f"{len(rows)} {source} row(s)")
 
-    # everything the mapping never touched keeps its template value
-    mapped = set(spec.get("header") or {}) | set(spec.get("counts") or {})
+    # --- counts for an array with no rows ------------------------------------
+    # Declared per layout, per field: what the header says when that array
+    # carries no real .OK rows — whether it was emptied, or the template holds
+    # it as null and the .OK has no such section at all. A field is left alone
+    # while its array HAS rows, so the computed count above still governs the
+    # normal case. The value is written verbatim, so `null` is a JSON null and
+    # `" "` is the single space a StyleHeader already carries.
+    applied_empty = set()
+    for field, rule in empty_counts.items():
+        arr = (rule or {}).get("array")
+        if not arr or field not in header or arr in populated_arrays:
+            continue
+        header[field] = rule.get("value")
+        applied_empty.add(field)
+        note(field, "count", header[field], f"no {arr} rows — declared empty count")
+
+    # everything the mapping never touched keeps its template value — including
+    # a count whose empty rule did NOT fire, which is the point of not computing
+    # `storeLines`/`lineCount`: with data present they are the template's.
+    mapped = (set(spec.get("header") or {}) | set(spec.get("counts") or {})
+              | applied_empty)
     for field in header:
         if field not in mapped and not isinstance(header[field], list):
             note(field, "template", header[field], "unmapped — template value")
