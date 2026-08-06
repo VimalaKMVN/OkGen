@@ -117,11 +117,10 @@ def test_volume_generate_writes_new_formats(tmp_path, registry, config,
 
 
 @pytest.mark.parametrize("name,src,layout,formats", CASES)
-def test_a_renamed_file_carries_the_new_format(tmp_path, registry, config,
-                                               name, src, layout, formats):
-    """A format that resolves in the editor must also reach a filename — the two
-    used to be able to disagree (D43 found `format_label` silently empty for
-    EUStyleHeader)."""
+def test_a_renamed_file_carries_the_format_LETTER(tmp_path, registry, config,
+                                                  name, src, layout, formats):
+    """Filenames carry the letter, not the wording (the user's call) — so a new
+    format has to reach the name as `X`, never as `Purple_Rat_Tail`."""
     code = formats[-1]
     p = _copy(tmp_path, src, name)
     view = service.parse_file_view(p, registry, config)
@@ -151,3 +150,60 @@ def test_an_ok_and_a_json_file_agree_on_the_new_formats(registry, config):
         js = prod.options("format", chain=chain, layout="CalgaryStyleHeader")
         assert ok == js != {}, chain
 
+
+# --------------------------------------------------------------------------- #
+# Rename uses the format LETTER, not the label wording
+# --------------------------------------------------------------------------- #
+SHIPPED_CONFIG = Path(__file__).resolve().parents[1] / "config"
+shipped = pytest.mark.skipif(not (SHIPPED_CONFIG / "rename_tokens.yaml").is_file(),
+                             reason="shipped config not present")
+
+
+@pytest.fixture(scope="module")
+def prod():
+    return Config.load(SHIPPED_CONFIG)
+
+
+@shipped
+def test_the_palette_offers_the_letter_and_not_the_wording(prod):
+    """`format_label` resolves to "Purple Rat Tail", which lands in a filename
+    as `Purple_Rat_Tail` — long, space-sanitised, and not what the naming
+    convention expects. It is withdrawn from the palette so a rename cannot be
+    built from it by accident; the raw `format` token stays."""
+    groups = prod.rename_token_groups()
+
+    assert "format_label" not in groups["derived"]
+    assert "format" in groups["header_fields"]
+
+
+@shipped
+def test_no_shipped_preset_uses_the_wording(prod):
+    """A preset is the path most users take, so the palette alone is not
+    enough — none may name the label token."""
+    def names(parts):
+        return [p if isinstance(p, str) else (p or {}).get("name")
+                for p in (parts or [])]
+
+    for preset in prod.rename_presets():
+        used = names(preset.get("parts"))
+        assert "format_label" not in used, preset.get("name")
+        assert "format" in used or not any(n and "format" in str(n) for n in used), \
+            preset.get("name")
+
+
+@shipped
+def test_an_existing_preset_naming_the_wording_still_resolves(tmp_path, registry,
+                                                              prod):
+    """Withdrawing a token from the PALETTE must not make it resolve to nothing.
+    That is exactly D43's failure — a preset referenced `ticket_format`, which
+    the palette never offered, and its segment came out silently blank on every
+    file. Anyone with a saved preset naming `format_label` keeps working."""
+    p = tmp_path / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", p)
+    parts = [{"type": "token", "name": "format_label"},
+             {"type": "token", "name": "key"}]
+
+    pv = service.bulk_rename_preview([str(p)], parts, "_", registry, prod)
+
+    new_name = pv["results"][0]["new"]
+    assert new_name == "Regular_Tag_550000.OK", new_name

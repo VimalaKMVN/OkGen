@@ -29,7 +29,19 @@ rename_tokens:
   # ---- derived (computed) tokens ----
   derived:
     - brand          # chain name from chains.yaml (e.g. Homegoods)
-    - format_label   # friendly format from display.yaml (e.g. Regular Tag)
+    # format_label — the FRIENDLY format wording from display.yaml ("Regular
+    # Tag", "Purple Rat Tail"). Deliberately NOT offered: filenames carry the
+    # format LETTER (the `format` header token below — A, B, W, X, 1, 7), which
+    # is what the shipped presets use and what the downstream naming convention
+    # expects. A label also drags spaces into a filename, which then have to be
+    # sanitised to underscores, making the name longer and harder to parse.
+    #
+    # Uncomment to offer it again. Nothing else needs changing: the token still
+    # RESOLVES if an existing saved preset names it, so removing it from the
+    # palette cannot turn a preset's segment blank (the D43 failure, where a
+    # preset referenced a token the palette never had and its segment silently
+    # came out empty).
+    # - format_label
     - region         # region label from regions.yaml, keyed off `zone` (e.g. Reg2)
     - layout         # CartonLabel / DistLabels / Preticket / StyleHeader
     - key            # the layout's unique key value (keytrol / po / picklist_id)
