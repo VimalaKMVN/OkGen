@@ -287,3 +287,84 @@ def test_the_ok_type_field_is_a_different_field_entirely(registry, config):
                           section=header.name)
     assert "styleHeaders" not in opts
     assert "distributionLabels" not in opts
+
+
+# --------------------------------------------------------------------------- #
+# `type` must be TYPEABLE, not just legally editable
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("fixture,layout", [
+    ("styleheader_fmtB.json", "CalgaryStyleHeader"),
+    ("distlabel.json", "CalgaryDistLabel"),
+    ("cartonlabel_minified.json", "CalgaryCartonLabel"),
+])
+def test_type_is_offered_as_a_freeform_field(tmp_path, registry, config,
+                                             fixture, layout):
+    """User-reported: "type is not allowing me to edit". It was editable and a
+    re-casing already saved fine — but the editor renders a field with options
+    as a dropdown, and this field's list is the ONE word its layout carries, so
+    the control offered a single choice and no way to type another casing.
+
+    The descriptor now says `freeform`, which is what makes the client render a
+    text box (with the known values suggested). Asserted per layout: a flag set
+    for one and forgotten for the others would be the same bug, two thirds of
+    the time."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+
+    view = service.parse_file_view(p, registry, config)
+    f = next(x for x in view["sections"][0]["fields"] if x["name"] == "type")
+
+    assert f["editable"] is True
+    assert f["freeform"] is True
+    assert f["options"], "the known value must still be offered as a suggestion"
+
+
+def test_an_ordinary_coded_field_is_not_freeform(tmp_path, registry, config):
+    """The flag has to be opt-in, or every dropdown in the app quietly becomes a
+    text box. An `.OK` StyleHeader is the check: it carries the same field NAMES
+    (`chain`, `type`, `format`) as the Calgary layouts, all coded, and none of
+    them may pick up the JSON layouts' freeform rendering — a fixed-width field
+    IS its width, so free text there is a different and much worse idea."""
+    p = tmp_path / "s.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", p)
+
+    view = service.parse_file_view(p, registry, config)
+    coded = [x for x in view["sections"][0]["fields"] if x["options"]]
+
+    assert coded, "fixture must carry coded fields for this to mean anything"
+    assert all(x["freeform"] is False for x in coded), \
+        [x["name"] for x in coded if x["freeform"]]
+
+
+@pytest.mark.parametrize("typed", ["STYLEHEADERS", "styleheaders", "StyleHeaders"])
+def test_any_capitalisation_the_user_types_is_saved(tmp_path, registry, config, typed):
+    """What the text box allows must actually reach the file, verbatim."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / "styleheader_fmtB.json", p)
+    view = service.parse_file_view(p, registry, config)
+    ri = view["sections"][0]["records"][0]["index"]
+
+    service.apply_edits(p, [{"section_index": 0, "record_index": ri,
+                             "field": "type", "value": typed}],
+                        registry, config=config, backup=False)
+
+    assert json.loads(p.read_text(encoding="utf-8"))["data"]["type"] == typed
+    # ...and the file still opens as the same layout
+    assert service.parse_file_view(p, registry, config)["layout"] == "CalgaryStyleHeader"
+
+
+def test_a_cross_layout_type_is_still_refused(tmp_path, registry, config):
+    """Making the field typeable must not widen what may be saved."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / "styleheader_fmtB.json", p)
+    before = p.read_bytes()
+    view = service.parse_file_view(p, registry, config)
+    ri = view["sections"][0]["records"][0]["index"]
+
+    for bad in ("cartonLabels", "CARTONLABELS", "distributionLabels", "nonsense"):
+        with pytest.raises(Exception):
+            service.apply_edits(p, [{"section_index": 0, "record_index": ri,
+                                     "field": "type", "value": bad}],
+                                registry, config=config, backup=False)
+    assert p.read_bytes() == before, "a refused write must leave the file untouched"
+

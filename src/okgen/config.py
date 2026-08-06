@@ -147,12 +147,14 @@ class Config:
         ok_to_json: Optional[dict] = None,
         config_dir: Optional[str] = None,
         pad_zero_fields: Optional[Dict[str, set]] = None,
+        freeform_fields: Optional[Dict[str, set]] = None,
         # Declared source per .OK layout (display only) — see layout_source().
         layout_sources: Optional[Dict[str, str]] = None,
     ):
         # .OK -> Calgary JSON conversion mapping (ok_to_json.yaml). `config_dir`
         # is kept because the mapping names a TEMPLATE file relative to it.
         self._pad_zero_fields = pad_zero_fields or {}
+        self._freeform_fields = freeform_fields or {}
         self._ok_to_json = ok_to_json or {}
         self._config_dir = config_dir or ""
         # The JSON hand-off (HTTP POST) block — see nicelabel_post.yaml. The
@@ -447,6 +449,28 @@ class Config:
 
     def is_literal(self, layout: Optional[str], field: Optional[str]) -> bool:
         return bool(field) and field in self.literal_fields(layout)
+
+    # ----- typeable fields that still OFFER their known values -----
+    def freeform_fields(self, layout: Optional[str]) -> set:
+        """Fields the editor must let the user TYPE, even though display.yaml
+        gives them a value list.
+
+        A field with options normally renders as a dropdown, which is right when
+        the list is the whole truth. It is wrong for a field whose list is one
+        entry the user must be able to re-type in another capitalisation: the
+        dropdown offers a single choice and there is no way to enter anything.
+        Listed fields render as a text box with their known values SUGGESTED, so
+        discoverability survives. What is actually allowed is still decided on
+        save, never by this list. Same ``"*"``-plus-layout merge as
+        :meth:`literal_fields`.
+        """
+        names = set(self._freeform_fields.get("*", set()))
+        if layout:
+            names |= set(self._freeform_fields.get(layout, set()))
+        return names
+
+    def is_freeform(self, layout: Optional[str], field: Optional[str]) -> bool:
+        return bool(field) and field in self.freeform_fields(layout)
 
     # ----- zero-padded fields (JSON layouts have no fixed width) -----
     def pad_zero_fields(self, layout: Optional[str]) -> set:
@@ -800,6 +824,7 @@ class Config:
         readonly_fields: Dict[str, set] = {}
         literal_fields: Dict[str, set] = {}
         pad_zero_fields: Dict[str, set] = {}
+        freeform_fields: Dict[str, set] = {}
         fd_path = cdir / "field_display.yaml"
         if fd_path.is_file():
             data = yaml.safe_load(fd_path.read_text(encoding="utf-8")) or {}
@@ -818,6 +843,10 @@ class Config:
             pad_zero_fields = {
                 str(l): {str(f) for f in (fs or [])}
                 for l, fs in (data.get("pad_zeros") or {}).items()
+            }
+            freeform_fields = {
+                str(l): {str(f) for f in (fs or [])}
+                for l, fs in (data.get("freeform") or {}).items()
             }
 
         detail_fill: Dict[str, dict] = {}
@@ -931,4 +960,5 @@ class Config:
                    json_sources, json_source_default, date_fields, nicelabel_post,
                    nicelabel_post_error, ok_to_json, str(cdir),
                    pad_zero_fields=pad_zero_fields,
+                   freeform_fields=freeform_fields,
                    layout_sources=layout_sources)

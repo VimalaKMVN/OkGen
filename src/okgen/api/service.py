@@ -424,6 +424,12 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
                     # user can see and keep their spaces (the editor strips pad
                     # spaces from ordinary fields for comfortable typing).
                     "literal": config.is_literal(layout_name, f.name),
+                    # Options are SUGGESTIONS, not the whole list: render a text
+                    # box the user can type into. `type` needs this — its list
+                    # is the one word this layout's documents carry, so a
+                    # dropdown offered a single choice and no way to re-case it.
+                    # Saving is still policed by _assert_layout_stable.
+                    "freeform": config.is_freeform(layout_name, f.name),
                 })
         # Derived (computed) fields: not in the raw file — inject their meta
         # (read-only, carrying the rules so the client can recompute live) and

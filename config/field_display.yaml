@@ -30,6 +30,26 @@ readonly:
   EUStyleHeader: [process]      # 'D' at raw pos 2
   EUCartonLabel: [process]      # 'H' at raw pos 2
 
+# Fields the editor must let you TYPE, even though display.yaml gives them a
+# value list. A field with options renders as a dropdown, which is right when
+# the list is the whole truth — and wrong for `type`, whose list is the ONE word
+# this layout's documents carry: the dropdown offered a single choice, so there
+# was no way to enter another capitalisation of it. Listed fields render as a
+# text box with their known values suggested instead.
+#
+# This only decides how the field is PRESENTED. What may actually be saved is
+# decided on save by `service._assert_layout_stable`, which resolves the value
+# back through detection and refuses anything that is not this same layout — a
+# re-casing is free, a cross-type change is refused, and an unknown word (which
+# would make the file unopenable) is refused too. So adding a field here can
+# never widen what a file is allowed to become.
+#
+#   layout name -> [output_field_name, ...]   ("*" applies to every layout)
+freeform:
+  CalgaryStyleHeader: [type]
+  CalgaryCartonLabel: [type]
+  CalgaryDistLabel: [type]
+
 # Fields stored EXACTLY as the user typed them: never zero-padded, never
 # re-justified, leading/middle/trailing spaces preserved. Only the leftover
 # space at the END is filled (with spaces) — the record must keep its exact

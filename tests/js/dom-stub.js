@@ -15,7 +15,7 @@ function mkEl(tag = "div") {
   const el = {
     tagName: String(tag).toUpperCase(),
     children: [], childNodes: [], parentNode: null,
-    dataset: {}, style: {}, _handlers: {},
+    dataset: {}, style: {}, _handlers: {}, attrs: {},
     _text: "", value: "", disabled: false, type: "", checked: false,
     get textContent() { return this._text; },
     set textContent(v) { this._text = String(v); },
@@ -44,7 +44,17 @@ function mkEl(tag = "div") {
       while (n) { if (matches(n, sel)) return n; n = n.parentNode; }
       return null;
     },
-    focus() {}, blur() {}, setAttribute() {}, getAttribute() { return null; },
+    focus() {}, blur() {},
+    // Attributes are RECORDED, not swallowed. They used to be no-ops, so a
+    // suite could not tell `setAttribute("list", id)` from the call never
+    // happening — and an assertion about it would pass vacuously either way.
+    setAttribute(name, value) { this.attrs[String(name)] = String(value); },
+    getAttribute(name) {
+      const v = this.attrs[String(name)];
+      return v === undefined ? null : v;
+    },
+    hasAttribute(name) { return String(name) in this.attrs; },
+    removeAttribute(name) { delete this.attrs[String(name)]; },
   };
   el.classList = mkClassList(el);
   // app.js assigns `el.className = "a b"`; keep classList in sync with it or

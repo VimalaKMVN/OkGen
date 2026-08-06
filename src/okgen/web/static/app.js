@@ -1373,7 +1373,35 @@ function makeControl(sec, rec, field) {
   }
   let ctrl;
   let orig = value;
-  if (field.options) {
+  if (field.options && field.freeform) {
+    // Options are SUGGESTIONS here, not the whole list — a text box with a
+    // datalist, so the value can be typed in any capitalisation while the
+    // known words stay one click away. `type` is the case that forced it: its
+    // list holds the single word this layout's documents carry, so a dropdown
+    // offered one choice and no way to enter another casing of it. What may
+    // actually be saved is decided server-side (_assert_layout_stable), which
+    // is what still refuses a cross-layout type.
+    ctrl = el("input", "cell fval");
+    ctrl.type = "text";
+    orig = value;
+    ctrl.value = orig;
+    // The datalist is a SIBLING, never a child: an <input> is a void element,
+    // so appending to it is invalid. `list=` resolves by id anywhere in the
+    // document, and the caller drops this node in beside the control.
+    const listId = `dl-${sec.index}-${rec.index}-${field.name}`;
+    const dl = el("datalist");
+    dl.id = listId;
+    Object.keys(field.options).forEach((code) => {
+      const o = el("option");
+      o.value = code;
+      dl.appendChild(o);
+    });
+    ctrl.setAttribute("list", listId);
+    ctrl.okgenDatalist = dl;
+    ctrl.title = "Type any capitalisation of this document type. Changing it to "
+               + "another layout's type is refused on save.";
+    if (field.size != null) ctrl.maxLength = field.size;
+  } else if (field.options) {
     ctrl = el("select", "cell fval");
     const codes = Object.keys(field.options);
     if (!codes.includes(value)) {
@@ -1457,7 +1485,9 @@ function renderForm(sec) {
       }
     }
     f.appendChild(label);
-    f.appendChild(makeControl(sec, rec, field));
+    const ctl = makeControl(sec, rec, field);
+    f.appendChild(ctl);
+    if (ctl.okgenDatalist) f.appendChild(ctl.okgenDatalist);   // sibling, see makeControl
     grid.appendChild(f);
   });
   return grid;
@@ -1500,7 +1530,9 @@ function renderTable(sec) {
     sec.fields.forEach((field) => {
       if (field.hidden) return;   // structural/marker field — never shown
       const td = el("td");
-      td.appendChild(makeControl(sec, rec, field));
+      const ctl = makeControl(sec, rec, field);
+      td.appendChild(ctl);
+      if (ctl.okgenDatalist) td.appendChild(ctl.okgenDatalist);
       tr.appendChild(td);
     });
     const atMax = sec.max_records != null && n >= sec.max_records;

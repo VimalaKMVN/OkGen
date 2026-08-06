@@ -15,17 +15,40 @@ hidden:
   EUCartonLabel: [marker, detail_marker]
 
 readonly:
-  # Layout DETECTION SIGNATURES — locked in the editor AND in bulk, because
-  # changing one makes the saved file unopenable or silently detect as another
-  # layout. Mirrors config/field_display.yaml; service._assert_layout_stable is
-  # the backstop if this list drifts.
-  StyleHeader: [indicator]
-  Preticket: [indicator]
-  DistLabels: [format]
-  CartonLabel: [picklist_pre]
-  EUPreticket: [indicator]
-  EUStyleHeader: [process]
-  EUCartonLabel: [process]
+  # --- layout DETECTION SIGNATURES — do not unlock ---
+  # Each of these fields IS the byte(s) detect.py keys off to identify the file's
+  # layout, so editing one makes the saved file unopenable — or worse, silently
+  # detect as a DIFFERENT layout (StyleHeader/Preticket 'indicator' -> a digit
+  # reads as DistLabels, and every field then parses at the wrong offset).
+  # Locking them here also removes them from Bulk Edit. A save-time check
+  # (service._assert_layout_stable) backstops this list if it ever drifts.
+  StyleHeader: [indicator]      # 'N' at raw pos 4
+  Preticket: [indicator]        # 'Y' at raw pos 4
+  DistLabels: [format]          # '7'/'9' at raw pos 4
+  CartonLabel: [picklist_pre]   # 'C:' at raw pos 5..6
+  EUPreticket: [indicator]      # 'P' in the '¦P|' delimited header signature
+  EUStyleHeader: [process]      # 'D' at raw pos 2
+  EUCartonLabel: [process]      # 'H' at raw pos 2
+
+# Fields the editor must let you TYPE, even though display.yaml gives them a
+# value list. A field with options renders as a dropdown, which is right when
+# the list is the whole truth — and wrong for `type`, whose list is the ONE word
+# this layout's documents carry: the dropdown offered a single choice, so there
+# was no way to enter another capitalisation of it. Listed fields render as a
+# text box with their known values suggested instead.
+#
+# This only decides how the field is PRESENTED. What may actually be saved is
+# decided on save by `service._assert_layout_stable`, which resolves the value
+# back through detection and refuses anything that is not this same layout — a
+# re-casing is free, a cross-type change is refused, and an unknown word (which
+# would make the file unopenable) is refused too. So adding a field here can
+# never widen what a file is allowed to become.
+#
+#   layout name -> [output_field_name, ...]   ("*" applies to every layout)
+freeform:
+  CalgaryStyleHeader: [type]
+  CalgaryCartonLabel: [type]
+  CalgaryDistLabel: [type]
 
 # Fields stored EXACTLY as the user typed them: never zero-padded, never
 # re-justified, leading/middle/trailing spaces preserved. Only the leftover
@@ -85,7 +108,18 @@ literal:
     - approx_size
     - country
 
-# Mirrors production: JSON store numbers are zero-padded to the field's size.
+# --------------------------------------------------------------------------- #
+# pad_zeros — values LEFT-padded with zeros to the field's declared size.
+#
+# Fixed-width .OK layouts pad by construction: a 4-char field is always 4 chars.
+# JSON values are trimmed strings, so a store typed as `202` (or arriving as 3
+# digits from an input file) would be stored as `202` and REJECTED downstream,
+# which expects `0202`. Applied on every write path — single edit, Bulk Edit
+# (set / list / random / unique) and volume generation — so it cannot be
+# bypassed by one of them.
+#
+# A blank value stays blank: padding an empty field to `0000` would invent a
+# store number that was never entered.
 pad_zeros:
   CalgaryStyleHeader:
     - store
