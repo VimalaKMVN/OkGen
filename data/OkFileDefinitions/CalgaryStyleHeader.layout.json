@@ -25,7 +25,7 @@
         },
         {
           "name": "chain",
-          "size": 2,
+          "size": 9,
           "json_path": [
             "header",
             "chain"

@@ -408,11 +408,31 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
                 # Chain edits can't cross an isolation boundary (e.g. Europe):
                 # offer only chains the current one may become; lock it when the
                 # only option is itself.
+                value_forms = None
                 if f.name == "chain" and opts:
                     opts = {c: n for c, n in opts.items() if config.can_change_chain(chain, c)}
                     if len(opts) <= 1:
                         editable = False
+                    # A chain may be written as a CODE (`04`) or as a brand NAME
+                    # (`Winners`) — D41, and both are offered. Which form a file
+                    # actually carries is invisible in the editor otherwise: the
+                    # box just shows a value. Resolve each offered value once
+                    # here, where `Config.chain()` is authoritative, so the
+                    # client can label the current one instead of guessing from
+                    # its shape.
+                    # Only for a field the editor renders freeform: the badge
+                    # is the sole consumer, and an `.OK` chain is a fixed-width
+                    # 2-char code that can only ever BE a code. Emitting it
+                    # there would add a key to every `.OK` descriptor that
+                    # nothing reads.
+                    if config.is_freeform(layout_name, f.name):
+                        value_forms = {}
+                        for key in opts:
+                            info = config.chain(key)
+                            value_forms[key] = ("code" if info and key == info.code
+                                                else "name")
                 field_meta.append({
+                    "value_forms": value_forms,
                     "name": f.name,
                     "start": f.start,
                     "size": f.size,

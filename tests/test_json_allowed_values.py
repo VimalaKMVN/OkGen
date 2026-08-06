@@ -368,3 +368,205 @@ def test_a_cross_layout_type_is_still_refused(tmp_path, registry, config):
                                 registry, config=config, backup=False)
     assert p.read_bytes() == before, "a refused write must leave the file untouched"
 
+
+# --------------------------------------------------------------------------- #
+# Chain by NAME on the JSON layouts
+# --------------------------------------------------------------------------- #
+JSON_LAYOUTS = [
+    ("styleheader_fmtB.json", "CalgaryStyleHeader"),
+    ("distlabel.json", "CalgaryDistLabel"),
+    ("cartonlabel_minified.json", "CalgaryCartonLabel"),
+]
+# Every declared North-America brand name, in the casings a user actually types.
+NAMES = ["Winners", "winners", "WINNERS", "HomeSense", "homesense",
+         "Marshalls", "MARSHALLS", "TJMAXX", "tjmaxx", "Homegoods", "homegoods"]
+# ...and the codes. BOTH forms are valid input — widening the field for names
+# must not quietly make a code the second-class citizen, so the codes are
+# parametrized alongside the names rather than spot-checked.
+CODES = ["01", "02", "03", "04", "06"]
+# Europe, by code and by name — refused on every JSON layout, these being NA.
+EUROPE = ["05", "Europe", "europe", "EUROPE"]
+
+
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+def test_chain_is_wide_enough_for_every_brand_name(tmp_path, registry, config,
+                                                   fixture, layout):
+    """User-reported: bulk edit and Volume Generate failed with "too long" for
+    the field. D48 widened `chain` to 9 on CalgaryCartonLabel — whose samples
+    carry a NAME — and the other two layouts, whose samples carry a CODE, were
+    left at 2. So a name overflowed on two of the three, on every write path."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+
+    field = next(x for x in service.parse_file_view(p, registry, config)
+                 ["sections"][0]["fields"] if x["name"] == "chain")
+
+    assert field["size"] >= max(len(n) for n in NAMES)
+    assert field["freeform"] is True, "a dropdown cannot be typed in another casing"
+
+
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+@pytest.mark.parametrize("name", NAMES + CODES)
+def test_a_chain_name_or_code_saves_in_the_single_editor(tmp_path, registry, config,
+                                                         fixture, layout, name):
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+    view = service.parse_file_view(p, registry, config)
+    ri = view["sections"][0]["records"][0]["index"]
+
+    service.apply_edits(p, [{"section_index": 0, "record_index": ri,
+                             "field": "chain", "value": name}],
+                        registry, config=config, backup=False)
+
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    assert doc["data"]["header"]["chain"] == name, "stored exactly as typed"
+
+
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+@pytest.mark.parametrize("value", ["homesense", "HomeSense", "06", "01"])
+def test_a_chain_name_or_code_saves_through_bulk_edit(tmp_path, registry, config,
+                                                      fixture, layout, value):
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+
+    res = service.bulk_apply([str(p)], layout, "chain", value,
+                             registry, config, backup=False)["results"][0]
+
+    # `unchanged` is a legitimate outcome, not a failure: distlabel.json already
+    # carries chain 06, and a bulk write of the value a file already has is a
+    # no-op by design. What must hold either way is that the value was ACCEPTED
+    # (never an error) and that the file ends up carrying it.
+    assert res["status"] in ("changed", "unchanged"), res
+    assert json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["chain"] == value
+
+
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+@pytest.mark.parametrize("listed", [
+    "Winners, HomeSense, Marshalls",          # names only
+    "01, 03, 06",                             # codes only
+    "04, HomeSense, 01, marshalls",           # both forms in ONE list
+])
+def test_volume_generate_accepts_names_and_codes(tmp_path, registry, config,
+                                                 fixture, layout, listed):
+    """A generated batch may mix the two forms — the user picks per value, not
+    per run."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+    wanted = {v.strip() for v in listed.split(",")}
+
+    res = service.generate_apply(
+        [str(p)],
+        {"count": 8, "dest": str(tmp_path / "out"),
+         "header_fields": [{"name": "chain", "values": listed}]},
+        registry, config)
+
+    chains = {json.loads(f.read_text(encoding="utf-8"))["data"]["header"]["chain"]
+              for f in sorted(Path(res["folder"]).glob("*.json"))}
+    assert chains, "generate produced no files"
+    assert chains <= wanted, chains
+
+
+# --------------------------------------------------------------------------- #
+# ...but Europe is still out of reach. These layouts are North America.
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+@pytest.mark.parametrize("value", EUROPE)
+def test_europe_is_refused_in_the_single_editor(tmp_path, registry, config,
+                                                fixture, layout, value):
+    """Widening the field must not open the isolation boundary (D9/D30/D50) —
+    by code OR by name, in any casing."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+    before = p.read_bytes()
+    view = service.parse_file_view(p, registry, config)
+    ri = view["sections"][0]["records"][0]["index"]
+
+    with pytest.raises(Exception):
+        service.apply_edits(p, [{"section_index": 0, "record_index": ri,
+                                 "field": "chain", "value": value}],
+                            registry, config=config, backup=False)
+    assert p.read_bytes() == before
+
+
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+@pytest.mark.parametrize("value", EUROPE)
+def test_europe_is_refused_by_bulk_edit(tmp_path, registry, config,
+                                        fixture, layout, value):
+    """The bulk path is where this rule has been bypassed before (D30, D50), so
+    it is asserted separately rather than assumed from the editor."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+    before = p.read_bytes()
+
+    res = service.bulk_apply([str(p)], layout, "chain", value,
+                             registry, config, backup=False)["results"][0]
+
+    assert res["status"] == "error", res
+    assert p.read_bytes() == before
+
+
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+def test_generate_never_offers_europe(tmp_path, registry, config, fixture, layout):
+    """Randomizing `chain` picks from the template's own isolation group."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+
+    res = service.generate_apply(
+        [str(p)], {"count": 12, "dest": str(tmp_path / "out"),
+                   "header_fields": [{"name": "chain"}]},
+        registry, config)
+
+    chains = {json.loads(f.read_text(encoding="utf-8"))["data"]["header"]["chain"]
+              for f in sorted(Path(res["folder"]).glob("*.json"))}
+    assert chains, "generate produced no files"
+    assert "05" not in chains and "Europe" not in chains, chains
+
+
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+def test_the_editor_is_told_which_values_are_codes_and_which_are_names(
+        tmp_path, registry, config, fixture, layout):
+    """A chain may be stored either way, so the rendered view says which form
+    the file on disk is using. The client must not have to guess that from the
+    text — `Config.chain()` is authoritative here, and it is what decides."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+
+    field = next(x for x in service.parse_file_view(p, registry, config)
+                 ["sections"][0]["fields"] if x["name"] == "chain")
+
+    forms = field["value_forms"]
+    assert forms, "no form map — the editor cannot label the value"
+    assert set(forms) == set(field["options"]), "every offered value must be labelled"
+    assert {v for v in forms.values()} == {"code", "name"}
+    for code in CODES:
+        assert forms.get(code) == "code", code
+    for name in ("Winners", "HomeSense", "Marshalls", "TJMAXX", "Homegoods"):
+        assert forms.get(name) == "name", name
+
+
+@pytest.mark.parametrize("fixture,layout", JSON_LAYOUTS)
+def test_europe_is_never_offered_to_the_editor(tmp_path, registry, config,
+                                               fixture, layout):
+    """Isolation filters the OFFER as well as policing the write, so Europe is
+    absent from the dropdown and from the form map — a value the user cannot
+    save should not be presented as a choice."""
+    p = tmp_path / "f.json"
+    shutil.copy2(FIX / fixture, p)
+
+    field = next(x for x in service.parse_file_view(p, registry, config)
+                 ["sections"][0]["fields"] if x["name"] == "chain")
+
+    assert "05" not in field["options"] and "Europe" not in field["options"]
+    assert "05" not in field["value_forms"] and "Europe" not in field["value_forms"]
+
+
+def test_an_ok_layout_gets_no_form_map(tmp_path, registry, config):
+    """It is a JSON question: an `.OK` chain is a fixed-width 2-char code and
+    can only ever be a code."""
+    p = tmp_path / "s.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", p)
+
+    fields = {x["name"]: x for x in
+              service.parse_file_view(p, registry, config)["sections"][0]["fields"]}
+
+    assert fields["chain"]["value_forms"] is None

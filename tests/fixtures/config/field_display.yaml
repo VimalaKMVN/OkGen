@@ -45,10 +45,15 @@ readonly:
 # never widen what a file is allowed to become.
 #
 #   layout name -> [output_field_name, ...]   ("*" applies to every layout)
+# `chain` is here for the same reason as `type`: its list is a set of SUGGESTIONS
+# (the codes and the brand names), and the user needs to type any capitalisation
+# of a name. Isolation is unaffected — `can_change_chain` resolves whatever is
+# typed through `Config.chain()` and still refuses Europe (05) on these
+# North-America layouts, by code or by name, in any casing.
 freeform:
-  CalgaryStyleHeader: [type]
-  CalgaryCartonLabel: [type]
-  CalgaryDistLabel: [type]
+  CalgaryStyleHeader: [type, chain]
+  CalgaryCartonLabel: [type, chain]
+  CalgaryDistLabel: [type, chain]
 
 # Fields stored EXACTLY as the user typed them: never zero-padded, never
 # re-justified, leading/middle/trailing spaces preserved. Only the leftover

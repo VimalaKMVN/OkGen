@@ -1374,20 +1374,22 @@ function makeControl(sec, rec, field) {
   let ctrl;
   let orig = value;
   if (field.options && field.freeform) {
-    // Options are SUGGESTIONS here, not the whole list — a text box with a
-    // datalist, so the value can be typed in any capitalisation while the
-    // known words stay one click away. `type` is the case that forced it: its
-    // list holds the single word this layout's documents carry, so a dropdown
-    // offered one choice and no way to enter another casing of it. What may
-    // actually be saved is decided server-side (_assert_layout_stable), which
-    // is what still refuses a cross-layout type.
+    // TYPE IT or PICK IT — both, side by side. The list is a set of
+    // SUGGESTIONS, not the whole truth: `type` needs another capitalisation of
+    // its one word, and `chain` needs `homesense` as readily as `HomeSense` or
+    // `06`. A bare <select> could express none of that, so the input is the
+    // source of truth (it carries the data-* the edit collector reads) and the
+    // picker beside it writes into it. The datalist keeps the same values on
+    // the keyboard path. What may actually be SAVED is unchanged and decided
+    // server-side — _assert_layout_stable for `type`, can_change_chain for
+    // `chain`, which is what still refuses Europe on these NA layouts.
     ctrl = el("input", "cell fval");
     ctrl.type = "text";
     orig = value;
     ctrl.value = orig;
     // The datalist is a SIBLING, never a child: an <input> is a void element,
     // so appending to it is invalid. `list=` resolves by id anywhere in the
-    // document, and the caller drops this node in beside the control.
+    // document, and the caller drops these nodes in beside the control.
     const listId = `dl-${sec.index}-${rec.index}-${field.name}`;
     const dl = el("datalist");
     dl.id = listId;
@@ -1397,10 +1399,56 @@ function makeControl(sec, rec, field) {
       dl.appendChild(o);
     });
     ctrl.setAttribute("list", listId);
-    ctrl.okgenDatalist = dl;
-    ctrl.title = "Type any capitalisation of this document type. Changing it to "
-               + "another layout's type is refused on save.";
+    ctrl.title = "Type any capitalisation, or pick from the list beside it. "
+               + "A value this layout does not allow is refused on save.";
     if (field.size != null) ctrl.maxLength = field.size;
+
+    // The picker. Its first entry is a placeholder so it never claims to be
+    // showing the field's value — the input is what shows that.
+    const pick = el("select", "fval-pick");
+    pick.appendChild(new Option("pick…", ""));
+    Object.keys(field.options).forEach((code) =>
+      pick.appendChild(new Option(optionLabel(field.options[code], code), code)));
+    pick.title = "Pick a known value — it fills the box, which stays editable.";
+    pick.addEventListener("change", () => {
+      if (!pick.value) return;
+      ctrl.value = pick.value;
+      pick.value = "";                      // back to "pick…"; the box is the value
+      onEdit({ target: ctrl });
+      if (ctrl.okgenForm) ctrl.okgenForm(ctrl.value);
+    });
+
+    // Which FORM the value is in — a brand name or a chain code. Both are
+    // valid and a file may carry either (D41/D57), so the editor says which
+    // one is on disk rather than leaving the user to infer it from the text.
+    if (field.value_forms) {
+      const badge = el("span", "form-badge");
+      const formOf = (v) => {
+        if (v == null || v === "") return "";
+        const keys = Object.keys(field.value_forms);
+        const hit = keys.find((k) => k === v)
+                 || keys.find((k) => k.toLowerCase() === String(v).toLowerCase());
+        return hit ? field.value_forms[hit] : "unknown";
+      };
+      const paint = (v) => {
+        const kind = formOf(v);
+        badge.textContent = kind;
+        badge.className = "form-badge" + (kind ? " form-badge-" + kind : "");
+        badge.title = kind === "code"
+          ? "This file stores the chain as a CODE. A brand name is equally valid here."
+          : kind === "name"
+            ? "This file stores the chain as a brand NAME. A code is equally valid here."
+            : kind === "unknown"
+              ? "Not a chain this layout knows — it will be refused on save."
+              : "";
+      };
+      paint(value);
+      ctrl.okgenForm = paint;
+      ctrl.addEventListener("input", () => paint(ctrl.value));
+      ctrl.okgenBadge = badge;
+    }
+    ctrl.okgenDatalist = dl;
+    ctrl.okgenPicker = pick;
   } else if (field.options) {
     ctrl = el("select", "cell fval");
     const codes = Object.keys(field.options);
@@ -1487,7 +1535,10 @@ function renderForm(sec) {
     f.appendChild(label);
     const ctl = makeControl(sec, rec, field);
     f.appendChild(ctl);
-    if (ctl.okgenDatalist) f.appendChild(ctl.okgenDatalist);   // sibling, see makeControl
+    // Siblings, never children of the void <input> — see makeControl.
+    if (ctl.okgenPicker) f.appendChild(ctl.okgenPicker);
+    if (ctl.okgenBadge) f.appendChild(ctl.okgenBadge);
+    if (ctl.okgenDatalist) f.appendChild(ctl.okgenDatalist);
     grid.appendChild(f);
   });
   return grid;
@@ -1532,6 +1583,8 @@ function renderTable(sec) {
       const td = el("td");
       const ctl = makeControl(sec, rec, field);
       td.appendChild(ctl);
+      if (ctl.okgenPicker) td.appendChild(ctl.okgenPicker);
+      if (ctl.okgenBadge) td.appendChild(ctl.okgenBadge);
       if (ctl.okgenDatalist) td.appendChild(ctl.okgenDatalist);
       tr.appendChild(td);
     });
