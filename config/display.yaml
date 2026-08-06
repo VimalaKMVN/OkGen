@@ -212,13 +212,20 @@ rules:
       U: "Trophy Tag"
       Y: "Small DuraTag"
 
-  # (7) LISTS — one rule covering several chains AND several layouts at once.
-  # Homegoods formats
+  # Homegoods formats.
+  #
+  # SPLIT BY LAYOUT: `Q` and `X` are Style-Header-only formats (the user's
+  # word), so Pre-Ticket must NOT gain them. The anchor is what makes the split
+  # cheap — the base list below is the SINGLE source, and the Style Header rule
+  # merges it with `<<` and adds its own two. Duplicating the list instead would
+  # leave two copies to keep in step, which is the drift D41 set out to avoid.
+  # Rules never merge with each other (most-specific-wins, see the header), so
+  # the split has to be expressed in the YAML rather than by layering rules.
   - match:
       chain: ["03"]
-      layout: [StyleHeader, Preticket, CalgaryStyleHeader]
+      layout: [Preticket]
       field: format
-    values:
+    values: &homegoods_formats
       A: "Regular Tag"
       B: "Regular Gum Label"
       D: "Mini Gum"
@@ -231,13 +238,25 @@ rules:
       V: "Rug Tag"
       W: "LeadDuraTG"
 
-  # (7) LISTS — one rule covering several chains AND several layouts at once.
-  # Winners and HomeSense formats
+  # Style Headers — the same list PLUS the Style-Header-only formats. Both
+  # engines' style-header layouts are named here, so one entry still serves the
+  # `.OK` and the Calgary side at once (D41).
   - match:
-      chain: ["04", "06"]
-      layout: [StyleHeader, Preticket, CalgaryStyleHeader]
+      chain: ["03"]
+      layout: [StyleHeader, CalgaryStyleHeader]
       field: format
     values:
+      <<: *homegoods_formats
+      Q: "Two Part Tag"
+      X: "Dumbbell Gum Label"
+
+  # Winners and HomeSense formats — split by layout for the same reason as
+  # Homegoods above; see that comment for what the anchor is doing.
+  - match:
+      chain: ["04", "06"]
+      layout: [Preticket]
+      field: format
+    values: &winners_homesense_formats
       A: "Coordinate Gum Label"
       B: "Blue Gum"
       C: "Coordinate Hard"
@@ -258,6 +277,16 @@ rules:
       V: "USA Gum"
       Y: "Trophy Tag"
       Z: "Fact Tag"
+
+  # Style Headers — the base list plus the Style-Header-only formats.
+  - match:
+      chain: ["04", "06"]
+      layout: [StyleHeader, CalgaryStyleHeader]
+      field: format
+    values:
+      <<: *winners_homesense_formats
+      W: "Purple Tuff Tag"
+      X: "Purple Rat Tail"
 
   # (7) LISTS — one rule covering several chains AND several layouts at once.
   # TJMAXX formats
