@@ -357,7 +357,50 @@ def _file_node(path: Path, config: Config, registry=None,
         "key_value": key_value,
         "key_values": key_values,
         "duplicate": False,
+        # True when this layout declares a roll-up and the section it sums has
+        # no rows — the header total is then the quantity itself. Shown as a
+        # quiet marker, NOT a warning: in the new system an empty size section
+        # is a normal file shape, and flagging it red would train people to
+        # ignore the badge. None when the layout declares no roll-up.
+        "no_rollup_rows": _rollup_section_empty(path, layout, config, registry),
     }
+
+
+def _rollup_section_empty(path: Path, layout, config: Config, registry) -> Optional[bool]:
+    """Does this file's rolled-up section have no real rows?
+
+    Deliberately NOT a full parse: the tree renders every file in a folder, and
+    `_file_node` otherwise reads only the header line. This reads the file only
+    for a layout that actually declares a roll-up (StyleHeader today), and then
+    only scans for lines carrying the section's marker — so the cost lands on
+    the handful of layouts that need it rather than on every tree node.
+    """
+    if not layout or registry is None or config is None:
+        return None
+    specs = config.rollups(layout)
+    if not specs:
+        return None
+    reg_layout = registry.get(layout)
+    if reg_layout is None or getattr(reg_layout, "delimited", False):
+        return None
+    sec = next((s for s in reg_layout.sections
+                if s.name == specs[0].get("section")), None)
+    marker = getattr(sec, "marker", None) if sec else None
+    if not marker:
+        return None
+    try:
+        raw = fs.read_bytes(path)
+    except OSError:
+        return None
+    mb = marker.encode(ENCODING, errors="ignore")
+    for line in raw.split(b"\n"):
+        if not line.startswith(mb):
+            continue
+        # Same test as _is_blank_row: zeros and spaces only is not a real row.
+        body = line[len(mb):].rstrip(b"\r").rstrip(b"\\")
+        if body.strip(b"0 ") != b"":
+            return False
+    return True
 
 
 # --------------------------------------------------------------------------- #
@@ -543,6 +586,11 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
         "json_source": (json_source_for(path, config, source)
                         if config.source_dependent(layout_name) else None),
         "raw_text": raw_text,  # for the Raw verify tab
+        # Roll-up totals (config/rollup_fields.yaml) as they stand RIGHT NOW —
+        # read-only. A mismatch is shown on open and corrected on save; opening
+        # a file never writes. `authoritative` marks the empty-section case,
+        # where the header total is the real quantity rather than a sum.
+        "rollups": rollup_state(okf, config),
         "sections": sections_out,
     }
 
@@ -591,6 +639,7 @@ def apply_edits(
     _apply_edits_to_okf(okf, edits, config)
     _apply_detail_fill(okf, config)
     _apply_json_empty_rows(okf, config)   # keep an emptied JSON array's tags
+    rollups = _apply_rollups(okf, config)   # header totals follow their detail rows
 
     _assert_layout_stable(okf)
     out = Path(target_path) if target_path else src
@@ -602,6 +651,9 @@ def apply_edits(
         "edits_applied": len(edits),
         "ops_applied": len(ops or []),
         "roundtrip_ok": okf.to_bytes() == fs.read_bytes(out),
+        # What the save corrected on its own, so the UI can say so rather than
+        # the user finding a changed total by accident.
+        "rollups": rollups,
     }
 
 
@@ -864,6 +916,7 @@ def _record_op(path, registry, config, ops, edits, backup, preview, mutate) -> t
     _reindex(okf)
     _apply_detail_fill(okf, config)
     _apply_json_empty_rows(okf, config)   # keep an emptied JSON array's tags
+    _apply_rollups(okf, config)     # header totals follow their detail rows
 
     if preview:
         return _build_file_view(okf, src, config), result
@@ -1202,6 +1255,136 @@ def _apply_json_empty_rows(okf: OkFile, config: Config) -> None:
         rec.inherited = config.json_empty_row(layout.name, sec.name,
                                               [f.name for f in sec.fields])
         okf.records.append(rec)
+
+
+def rollup_state(okf: OkFile, config: Config) -> List[dict]:
+    """What each roll-up field WOULD be, without changing anything.
+
+    One entry per configured roll-up on this layout:
+    ``{field, section, source, rows, current, expected, matches, authoritative}``.
+    ``rows`` is the number of REAL detail rows; when it is 0 the section is
+    empty, the header field is the authoritative quantity (``authoritative``
+    True) and ``expected`` is None — there is nothing to sum it against.
+
+    Read-only on purpose: it feeds the editor's live warning, the tree badge and
+    the bulk preview, none of which may write. :func:`_apply_rollups` is the
+    single place a roll-up is actually applied.
+    """
+    out: List[dict] = []
+    if config is None or not okf.records:
+        return out
+    layout = okf.layout
+    hidden = config.hidden_fields(layout.name)
+    header = okf.records[0]
+    for spec in config.rollups(layout.name):
+        fname, sec_name = spec.get("field"), spec.get("section")
+        src = spec.get("source")
+        if not (fname and sec_name and src):
+            continue
+        sec = next((x for x in layout.sections if x.name == sec_name), None)
+        if sec is None:
+            continue
+        try:
+            f = header._field(fname)               # noqa: SLF001
+        except KeyError:
+            continue
+        rows = [r for r in okf.records
+                if r.section is sec and not _is_blank_row(r, hidden)]
+        current = header.get(fname)
+        entry = {"field": fname, "section": sec_name, "source": src,
+                 "rows": len(rows), "current": current, "expected": None,
+                 "matches": True, "authoritative": not rows}
+        if rows:
+            try:
+                total = _rollup_total(rows, src, sec_name)
+            except EditError as exc:
+                entry.update({"error": str(exc), "matches": False})
+                out.append(entry)
+                continue
+            expected = str(total).zfill(f.size or 0)
+            entry["expected"] = expected
+            entry["matches"] = (current == expected)
+            if f.size is not None and len(str(total)) > f.size:
+                entry["error"] = _rollup_overflow_msg(fname, total, f.size)
+                entry["matches"] = False
+        out.append(entry)
+    return out
+
+
+def _rollup_total(rows, src: str, sec_name: str) -> int:
+    """Sum ``src`` across ``rows``. Blank counts as 0; non-numeric is an error.
+
+    A blank is genuinely zero (an unfilled quantity prints nothing), but a value
+    that is neither blank nor a number cannot be silently read as 0 — that would
+    under-report the total with no sign anything went wrong.
+    """
+    total = 0
+    for r in rows:
+        raw = (r.get(src) or "").strip()
+        if raw == "":
+            continue
+        if not raw.isdigit():
+            raise EditError(
+                f"{sec_name} row {r.index + 1}: {src} is {raw!r}, which is not a "
+                f"number — the total cannot be calculated")
+        total += int(raw)
+    return total
+
+
+def _rollup_overflow_msg(fname: str, total: int, size: int) -> str:
+    return (f"{fname} holds {size} digits, but the rows total {total} "
+            f"({len(str(total))} digits) — refusing to write a truncated total")
+
+
+def _apply_rollups(okf: OkFile, config: Config) -> List[dict]:
+    """Write each roll-up header field from the rows it totals.
+
+    The rule, per config/rollup_fields.yaml:
+
+    - **rows present** — the sum WINS. Whatever the header carried is corrected,
+      because with rows on disk the total is knowable and a disagreeing header
+      is simply wrong. A sum too wide for the field raises rather than writing a
+      truncated total (D40).
+    - **no rows** — the header field is the real quantity and is left EXACTLY as
+      it is, so deleting the last detail row keeps the total that was there.
+      Only a blank/zero value is seeded, from ``seed_when_empty``.
+
+    Returns one note per field it changed (``reason`` ``"sum"`` or ``"seeded"``),
+    so callers can tell the user what happened instead of writing silently.
+    Runs on writes only, never on plain open, so an untouched file that predates
+    the rule round-trips byte-for-byte until someone saves it.
+    """
+    notes: List[dict] = []
+    if config is None or not okf.records:
+        return notes
+    header = okf.records[0]
+    for st in rollup_state(okf, config):
+        fname = st["field"]
+        spec = config.rollup_for_field(okf.layout.name, fname) or {}
+        if st.get("error"):
+            raise EditError(st["error"])
+        if st["rows"]:
+            if not st["matches"]:
+                header.set(fname, st["expected"])
+                notes.append({"field": fname, "section": st["section"],
+                              "from": st["current"], "to": st["expected"],
+                              "rows": st["rows"], "reason": "sum"})
+            continue
+        # No rows: authoritative. Seed ONLY a blank/zero value.
+        rng = spec.get("seed_when_empty")
+        cur = (st["current"] or "").strip()
+        if not rng or (cur and cur.strip("0") != ""):
+            continue
+        try:
+            f = header._field(fname)               # noqa: SLF001
+        except KeyError:
+            continue
+        val = str(random.randint(int(rng[0]), int(rng[1]))).zfill(f.size or 0)
+        header.set(fname, val)
+        notes.append({"field": fname, "section": st["section"],
+                      "from": st["current"], "to": val, "rows": 0,
+                      "reason": "seeded"})
+    return notes
 
 
 def _apply_detail_fill(okf: OkFile, config: Config) -> None:
@@ -2114,6 +2297,156 @@ def make_unique_files(paths, registry, config, backup=True,
     return {"folders": results}
 
 
+def total_qty_scan(paths, registry, config: Config, apply: bool = False,
+                   backup: bool = True) -> dict:
+    """Inventory (and optionally fix) the roll-up totals across a selection.
+
+    The backlog answer: files written before the rule existed carry a header
+    total that disagrees with their rows. ``apply=False`` is a pure PREVIEW —
+    it writes nothing and reports what a fix WOULD do, which is the point, since
+    this is the first bulk action that rewrites field CONTENT rather than junk.
+
+    Per-file status:
+
+    - ``fixed`` / ``would_fix`` — has rows, total corrected (``from`` -> ``to``)
+    - ``ok``       — has rows and already agrees; **nothing is written**, so a
+                     correct file keeps its timestamp
+    - ``no_rows``  — the detail section is empty, so the header total is the
+                     real quantity: it is REPORTED with its current value and
+                     left completely alone. Zeroing these would silently destroy
+                     the print quantity on every file of the shape the new
+                     system produces most.
+    - ``skipped``  — layout declares no roll-up (or the file is JSON)
+    - ``error``    — unreadable, locked, or a total that will not fit (D40)
+
+    ``no_rows`` entries come back sorted by their current total, descending, so
+    the implausibly large legacy values are the first thing the user sees.
+    """
+    results, no_rows = [], []
+    fixed = 0
+    for p in paths or []:
+        p = Path(p)
+        entry = {"path": str(p), "name": p.name}
+        try:
+            if _is_json_file(p):
+                entry.update(status="skipped",
+                             detail="JSON layouts declare no roll-up")
+                results.append(entry)
+                continue
+            okf = parse_okfile(p, registry=registry)
+            state = rollup_state(okf, config)
+            if not state:
+                entry.update(status="skipped",
+                             detail=f"{okf.layout.name} declares no roll-up")
+                results.append(entry)
+                continue
+            st = state[0]                     # one roll-up per layout today
+            entry.update(field=st["field"], section=st["section"],
+                         rows=st["rows"], current=st["current"])
+            if st.get("error"):
+                entry.update(status="error", error=st["error"])
+            elif not st["rows"]:
+                entry.update(status="no_rows", detail="no detail rows — this "
+                             "total is the quantity and was left as it is")
+                no_rows.append(entry)
+            elif st["matches"]:
+                entry.update(status="ok")
+            else:
+                entry.update({"from": st["current"], "to": st["expected"]})
+                if not apply:
+                    entry["status"] = "would_fix"
+                else:
+                    _apply_rollups(okf, config)
+                    _atomic_write_okf(okf, p, backup=backup)
+                    entry["status"] = "fixed"
+                    fixed += 1
+        except Exception as exc:              # unreadable / locked / won't fit
+            entry.update(status="error", error=str(exc))
+        results.append(entry)
+
+    order = {"error": 0, "would_fix": 1, "fixed": 1, "no_rows": 2,
+             "ok": 3, "skipped": 4}
+    no_rows.sort(key=lambda e: -_as_int(e.get("current")))
+    results.sort(key=lambda e: (order.get(e["status"], 9),
+                                -_as_int(e.get("current"))
+                                if e["status"] == "no_rows" else 0))
+    summary = {
+        "total": len(paths or []),
+        "fixed": fixed,
+        "would_fix": sum(1 for r in results if r["status"] == "would_fix"),
+        "ok": sum(1 for r in results if r["status"] == "ok"),
+        "no_rows": len(no_rows),
+        "errors": sum(1 for r in results if r["status"] == "error"),
+        "skipped": sum(1 for r in results if r["status"] == "skipped"),
+        "applied": apply,
+    }
+    report = build_total_qty_report(summary, results)
+    return {"results": results, "summary": summary, "report": report,
+            "log": _write_total_qty_log(report) if apply else None}
+
+
+def _as_int(v) -> int:
+    v = (v or "").strip()
+    return int(v) if v.isdigit() else 0
+
+
+def build_total_qty_report(summary: dict, results: List[dict]) -> str:
+    """The scan/fix report as plain text.
+
+    One function feeds the UI and the log file (the D36 rule), so what the user
+    pastes into a ticket is exactly what the log on disk says.
+    """
+    verb = "FIX" if summary.get("applied") else "PREVIEW"
+    lines = [
+        f"OkGen — Total Qty {verb}",
+        f"Result : {summary['fixed']} fixed, {summary['would_fix']} to fix, "
+        f"{summary['ok']} already correct, {summary['no_rows']} with no detail "
+        f"rows, {summary['errors']} errors, {summary['skipped']} skipped "
+        f"({summary['total']} selected)",
+    ]
+    buckets = [
+        ("would_fix", "TO FIX (total does not match its rows)"),
+        ("fixed", "FIXED"),
+        ("no_rows", "NO DETAIL ROWS — total is the quantity, LEFT AS IT IS "
+                    "(largest first; update these yourself if they look wrong)"),
+        ("error", "ERRORS"),
+        ("ok", "ALREADY CORRECT"),
+    ]
+    for status, title in buckets:
+        rows = [r for r in results if r["status"] == status]
+        if not rows:
+            continue
+        lines += ["", title]
+        for r in rows:
+            if status in ("would_fix", "fixed"):
+                lines.append(f"  {r['name']:<40} {r['from']} -> {r['to']}"
+                             f"   ({r['rows']} rows)")
+            elif status == "no_rows":
+                lines.append(f"  {r['name']:<40} {r.get('current')}")
+            elif status == "error":
+                lines.append(f"  {r['name']:<40} {r.get('error')}")
+            else:
+                lines.append(f"  {r['name']:<40} {r.get('current')}")
+    return "\n".join(lines) + "\n"
+
+
+def _write_total_qty_log(report: str) -> Optional[str]:
+    """Write the report beside OkGen. A log we cannot write must never fail the
+    run — the report is returned to the UI either way."""
+    from datetime import datetime
+
+    from okgen.nicelabel_post import default_log_folder
+    try:
+        folder = default_log_folder()
+        fs.mkdir(folder, parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = folder / f"okgen_total_qty_{stamp}.log"
+        fs.write_text(path, report)
+        return str(path)
+    except Exception:
+        return None
+
+
 def clean_files(paths, registry) -> dict:
     """Remove stray trailing blank lines from each selected file (the "Clean up
     files" bulk action).
@@ -2527,6 +2860,7 @@ def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> 
             try:
                 _apply_detail_fill(okf, config)   # keep Preticket-style filler rows
                 _apply_json_empty_rows(okf, config)
+                _apply_rollups(okf, config)     # header totals follow their detail rows
                 _backup_and_save(okf, sp, backup)
                 r["status"] = "changed"
             except (OSError, EditError) as exc:
@@ -2605,6 +2939,7 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
             try:
                 _apply_detail_fill(okf, config)   # keep Preticket-style filler rows
                 _apply_json_empty_rows(okf, config)
+                _apply_rollups(okf, config)     # header totals follow their detail rows
                 _backup_and_save(okf, sp, backup)
                 r["status"] = "changed"
             except (OSError, EditError) as exc:
@@ -3258,6 +3593,7 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
         _generate_one(okf, spec, config, key_field, key_size, k, key_parts=key_parts)
         _apply_detail_fill(okf, config)          # keep Preticket-style filler rows
         _apply_json_empty_rows(okf, config)
+        _apply_rollups(okf, config)     # header totals follow their detail rows
         _assert_layout_stable(okf)          # a random value must never break detection
 
         toks = _tokens_from_okf(okf, config, orig_stem=src.stem, custom={})

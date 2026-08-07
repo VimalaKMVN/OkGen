@@ -22,6 +22,10 @@ function mkEl(tag = "div") {
     get innerHTML() { return this._html || ""; },
     set innerHTML(v) { this._html = v; this.children = []; this.childNodes = []; },
     appendChild(c) { c.parentNode = this; this.children.push(c); this.childNodes.push(c); return c; },
+    // Variadic sibling of appendChild. renderTable builds its row-action cell
+    // with it, so a suite that renders a TABLE section (rather than only a
+    // form) hits this — the reason it was missing is that none used to.
+    append(...cs) { cs.forEach((c) => this.appendChild(c)); },
     insertBefore(c, ref) {
       c.parentNode = this;
       const i = ref ? this.children.indexOf(ref) : -1;
@@ -69,16 +73,57 @@ function mkEl(tag = "div") {
   return el;
 }
 function descendants(root, out = []) {
-  for (const c of root.children) { out.push(c); descendants(c, out); }
+  // A text node (createTextNode) has no children — walking into one used to
+  // throw, which an empty section reaches as soon as it renders placeholder text.
+  for (const c of root.children || []) { out.push(c); descendants(c, out); }
   return out;
 }
+// Attribute value, with data-* resolved through `dataset` exactly as a browser
+// does — `[data-section="0"]` must see `el.dataset.section = 0`.
+function attrValue(el, name) {
+  if (name.startsWith("data-")) {
+    const key = name.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    const v = el.dataset ? el.dataset[key] : undefined;
+    return v === undefined ? null : String(v);
+  }
+  const v = el.getAttribute ? el.getAttribute(name) : null;
+  return v === null || v === undefined ? null : String(v);
+}
+
+// Supports `tag`, `.class`, `#id` and ATTRIBUTE selectors, in combination:
+// `.fval[data-section="0"][data-field="qty"]`. Attributes used to be
+// unsupported, so any such selector matched NOTHING — a live-value lookup came
+// back empty and a suite asserting on it would pass for the wrong reason. That
+// is the same class as the setAttribute no-op this stub already fixed once.
 function matches(el, sel) {
   return String(sel).split(",").map((s) => s.trim()).some((s) => {
     const checked = s.endsWith(":checked");
     if (checked) { s = s.slice(0, -":checked".length); if (!el.checked) return false; }
-    if (s.startsWith(".")) return el.classList.contains(s.slice(1));
-    if (s.startsWith("#")) return el._id === s.slice(1);
-    return el.tagName === s.toUpperCase();
+    // Text nodes live in the tree too and carry none of this — never a match.
+    if (!el || !el.classList) return false;
+    const m = /^([a-zA-Z][\w-]*)?((?:[.#][\w-]+|\[[^\]]*\])*)$/.exec(s);
+    if (!m) return false;
+    if (m[1] && el.tagName !== m[1].toUpperCase()) return false;
+    const parts = (m[2] || "").match(/[.#][\w-]+|\[[^\]]*\]/g) || [];
+    if (!m[1] && !parts.length) return false;
+    for (const p of parts) {
+      if (p[0] === ".") {
+        if (!el.classList.contains(p.slice(1))) return false;
+      } else if (p[0] === "#") {
+        if (el._id !== p.slice(1)) return false;
+      } else {
+        const inner = p.slice(1, -1);
+        const eq = inner.indexOf("=");
+        if (eq < 0) {
+          if (attrValue(el, inner.trim()) === null) return false;
+        } else {
+          const name = inner.slice(0, eq).trim();
+          const want = inner.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
+          if (attrValue(el, name) !== want) return false;
+        }
+      }
+    }
+    return true;
   });
 }
 function install() {
@@ -121,6 +166,9 @@ function install() {
   global.fetch = async () => ({ ok: true, json: async () => ({}) });
   global.setTimeout = global.setTimeout; global.clearTimeout = global.clearTimeout;
   global.confirm = () => true; global.prompt = () => null; global.alert = () => {};
+  // app.js escapes field names before building selectors. Without this the
+  // first such lookup throws ReferenceError and takes the whole suite with it.
+  global.CSS = { escape: (s) => String(s).replace(/([^\w-])/g, "\\$1") };
   return { doc, registry, mkEl, descendants };
 }
 module.exports = { install, mkEl, descendants, matches };

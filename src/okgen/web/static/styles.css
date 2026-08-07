@@ -272,6 +272,21 @@ body {
 }
 .src-tag-assumed { color: #b45309; border-color: #f59e0b; border-style: dashed; }
 
+/* Roll-up total (config/rollup_fields.yaml): does this header field agree with
+   the rows it sums? The no-rows state is deliberately NEUTRAL, not a warning —
+   in the new system an empty size section is a normal file shape, and colouring
+   it like an error trains people to ignore the badge that does mean something. */
+.rollup-badge { display: block; margin-top: 3px; font-size: 10.5px; line-height: 1.3; }
+.rollup-badge:empty { display: none; }
+.rollup-ok   { color: #15803d; }
+.rollup-warn { color: #b45309; font-weight: 700; }
+.rollup-info { color: #6b7280; }
+/* Tree marker for a file whose summed section is empty — quiet by design. */
+.no-rows-tag {
+  margin-left: 4px; font-size: 9px; font-weight: 600; color: #6b7280;
+  border: 1px solid #d1d5db; border-radius: 3px; padding: 0 3px;
+}
+
 /* "Are these SCAN or WMS?" — asked once per unlabelled folder, above the tree */
 .src-ask {
   margin: 0 0 6px; padding: 8px 10px; border-radius: 6px;

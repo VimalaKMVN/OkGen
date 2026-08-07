@@ -150,7 +150,10 @@ class Config:
         freeform_fields: Optional[Dict[str, set]] = None,
         # Declared source per .OK layout (display only) — see layout_source().
         layout_sources: Optional[Dict[str, str]] = None,
+        # {layout: [spec, ...]} header fields summed from a detail section.
+        rollups: Optional[Dict[str, list]] = None,
     ):
+        self._rollups = rollups or {}
         # .OK -> Calgary JSON conversion mapping (ok_to_json.yaml). `config_dir`
         # is kept because the mapping names a TEMPLATE file relative to it.
         self._pad_zero_fields = pad_zero_fields or {}
@@ -536,6 +539,19 @@ class Config:
         write (Preticket's '...VENDORST\\   ' -> '...VENDORST\\')."""
         return bool(layout) and layout in self._trim_trailing
 
+    # ----- roll-up (summed) fields -----
+    def rollups(self, layout: Optional[str]) -> list:
+        """Roll-up specs for this layout (list of dicts), or [].
+
+        Each spec sums ``source`` across every real row of ``section`` into the
+        header's ``field``. See config/rollup_fields.yaml for the contract.
+        """
+        return list(self._rollups.get(layout, [])) if layout else []
+
+    def rollup_for_field(self, layout: Optional[str], field: str) -> Optional[dict]:
+        """The spec whose header field is ``field``, or None."""
+        return next((s for s in self.rollups(layout) if s.get("field") == field), None)
+
     # ----- derived (computed) fields -----
     def derived_fields(self, layout: Optional[str]) -> list:
         """Derived-field specs for this layout (list of dicts), or []."""
@@ -887,6 +903,13 @@ class Config:
             raw = data.get("derived_fields") or {}
             derived_fields = {str(l): list(specs or []) for l, specs in raw.items()}
 
+        rollups: Dict[str, list] = {}
+        rf_path = cdir / "rollup_fields.yaml"
+        if rf_path.is_file():
+            data = yaml.safe_load(rf_path.read_text(encoding="utf-8")) or {}
+            raw = data.get("rollups") or {}
+            rollups = {str(l): list(specs or []) for l, specs in raw.items()}
+
         rename_presets: List[dict] = []
         rp_path = cdir / "rename_presets.yaml"
         if rp_path.is_file():
@@ -961,4 +984,5 @@ class Config:
                    nicelabel_post_error, ok_to_json, str(cdir),
                    pad_zero_fields=pad_zero_fields,
                    freeform_fields=freeform_fields,
-                   layout_sources=layout_sources)
+                   layout_sources=layout_sources,
+                   rollups=rollups)

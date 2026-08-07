@@ -341,6 +341,20 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(service.clean_files(body.get("paths", []), registry))
 
+    @app.post("/api/total-qty/scan")
+    def total_qty_scan():
+        """Preview only — reports what a fix WOULD do and writes nothing."""
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.total_qty_scan(
+            body.get("paths", []), registry, config, apply=False))
+
+    @app.post("/api/total-qty/fix")
+    def total_qty_fix():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.total_qty_scan(
+            body.get("paths", []), registry, config, apply=True,
+            backup=bool(body.get("backup", True))))
+
     @app.post("/api/file/rename")
     def file_rename():
         body = request.get_json(force=True, silent=True) or {}

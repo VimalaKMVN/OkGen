@@ -1,0 +1,36 @@
+# Roll-up fields — a HEADER field whose value is the SUM of one field across
+# every real row of a detail section.
+#
+# Unlike `section_counts.yaml` (which counts ROWS) this sums the rows' VALUES,
+# and unlike `derived_fields.yaml` (which is read-only and never written) a
+# roll-up IS written to the file: the header field is real, and the consuming
+# system reads it.
+#
+# The field stays freely EDITABLE in the editor — the value is enforced on the
+# write path instead of by locking the control (the D51/D56 rule: a lock is a UI
+# hint that the save path never checks, and it blocks legitimate typing). So:
+#
+#   * section has real rows  -> the sum WINS on every write path; whatever the
+#                               user typed is corrected, and the editor warns
+#                               live while they type.
+#   * section has no rows    -> the header field is AUTHORITATIVE (it is the
+#                               real quantity) and is kept byte-for-byte. Only a
+#                               BLANK or ZERO value is seeded, once, with a
+#                               random number from `seed_when_empty`.
+#
+# A sum too wide for the field is REFUSED, never truncated (D40) — writing more
+# would misreport the total rather than fail loudly.
+#
+#   layout -> [ { field, section, source, seed_when_empty: [lo, hi] } ]
+#     field            header field that holds the total
+#     section          detail section whose rows are summed
+#     source           the row field that is summed
+#     seed_when_empty  [lo, hi] inclusive random range used ONLY when the
+#                      section has no rows AND the total is blank/zero.
+#                      Omit to leave a blank total blank.
+rollups:
+  StyleHeader:
+    - field: tot_qty
+      section: Size
+      source: qty
+      seed_when_empty: [5, 10]

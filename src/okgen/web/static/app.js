@@ -164,6 +164,25 @@ function autoCleanEnabled() { return localStorage.getItem("okgen.autoClean") !==
   });
 })();
 
+// ---- auto-fix-Total-Qty-on-open toggle (persisted, default OFF) ----
+// Deliberately the OPPOSITE default to auto-clean. Auto-clean removes junk —
+// blank lines and post-terminator padding, provably not data. This rewrites a
+// FIELD VALUE, so leaving it on by default would mean that merely clicking
+// through a folder silently changes quantities. It is opt-in until the user has
+// run the Total Qty preview over their own files and seen the rule is right.
+function autoFixTotalEnabled() { return localStorage.getItem("okgen.autoTotal") === "1"; }
+(function initAutoTotalToggle() {
+  const chk = $("#autoTotalChk");
+  if (!chk) return;
+  chk.checked = autoFixTotalEnabled();
+  chk.addEventListener("change", () => {
+    localStorage.setItem("okgen.autoTotal", chk.checked ? "1" : "0");
+    setStatus(chk.checked
+      ? "Auto-fix Total Qty ON — opening a file whose total disagrees with its size lines corrects and saves it"
+      : "Auto-fix Total Qty OFF — a mismatch is shown and corrected when you Save", "ok");
+  });
+})();
+
 // ---- folder picker (native OS dialog) ----
 async function browseFolder() {
   const btn = $("#openBtn");
@@ -310,6 +329,16 @@ function renderFileNode(node) {
     row.appendChild(stag);
   }
   row.appendChild(nameEl);
+  // The summed section is empty, so this file's header total is the quantity
+  // itself rather than a sum. Informational, NOT a warning: this is a normal
+  // shape in the new system, and it is the marker that says "if this total is
+  // wrong, only a person can fix it — nothing here can be recomputed".
+  if (node.no_rollup_rows) {
+    const tag = el("span", "no-rows-tag", "no sizes");
+    tag.title = "No detail rows — this file's total quantity is the printed "
+      + "quantity, and is never recalculated. Check it is the value you want.";
+    row.appendChild(tag);
+  }
   if (node.duplicate) {
     const warn = el("span", "dup-warn", "⚠");
     warn.title = `duplicate ${node.key_field || "key"}: ${node.key_value}`;
@@ -1114,8 +1143,41 @@ async function loadFile(path) {
       setStatus(view.roundtrip_ok ? "Loaded (round-trip OK)" : "Loaded (round-trip DIFFERS!)",
                 view.roundtrip_ok ? "ok" : "err");
     }
+    // Last, so its own status line is the one left standing when it acts.
+    await maybeAutoFixTotal(path);
   } catch (e) {
     setStatus("Parse failed: " + e.message, "err");
+  }
+}
+
+// Correct a roll-up mismatch at OPEN — only when the user has opted in.
+// Never fires on a file whose summed section is empty (nothing to sum it
+// against, and that total is the real quantity), nor on one that already
+// agrees, so a correct file is never rewritten and keeps its timestamp.
+async function maybeAutoFixTotal(path) {
+  if (!autoFixTotalEnabled() || !state.view) return;
+  const r = (state.view.rollups || [])[0];
+  if (!r || r.matches || r.error || !r.rows) return;
+  try {
+    const res = await postJSON("/api/total-qty/fix", { paths: [path] });
+    const one = (res.results || [])[0] || {};
+    if (one.status !== "fixed") {
+      setStatus(`${r.field} disagrees with its ${r.section.toLowerCase()} lines `
+                + `(${r.current} vs ${r.expected}) — could not fix automatically`
+                + (one.error ? ` (${one.error})` : "") + "; click Save", "dirty");
+      return;
+    }
+    const view = await getParse(path);       // re-render from what is now on disk
+    state.view = view;
+    state.edits = {};
+    state.ops = [];
+    renderEditor(view);
+    updateSaveButtons();
+    updateDirtyIndicator();
+    setStatus(`Auto-fixed ${one.field}: ${one.from} → ${one.to} `
+              + `(sum of ${one.rows} ${r.section.toLowerCase()} lines) and saved`, "ok");
+  } catch (e) {
+    setStatus(`Could not auto-fix ${r.field} (${e.message}); click Save`, "dirty");
   }
 }
 
@@ -1126,6 +1188,9 @@ function renderEditor(view) {
   host.innerHTML = "";
   view.sections.forEach((sec) => host.appendChild(renderSection(sec)));
   renderRaw(view);
+  // Badge the roll-up total from the file AS OPENED — a mismatch is shown, not
+  // silently corrected: opening a file never writes (the fix lands on save).
+  refreshRollup(false);
   switchTab("rendered");   // always land on the edit view when (re)loading
 }
 
@@ -1350,6 +1415,128 @@ function refreshDerived(si, ri) {
   });
 }
 
+// ----- roll-up totals: mirror config/rollup_fields.yaml (server is the truth) -
+// The header total must equal the sum of a detail section's rows. The control
+// is NEVER locked (D51/D56: a lock is a UI hint the save path doesn't check) —
+// instead the total follows the rows live, and a value the user types that
+// disagrees is badged with what the save will do. When the section has no rows
+// the total IS the quantity, and the badge says so rather than warning.
+function rollupSpec() {
+  const rs = (state.view && state.view.rollups) || [];
+  return rs.length ? rs[0] : null;
+}
+
+function rollupHeaderField() {
+  const spec = rollupSpec();
+  if (!spec || !state.view) return null;
+  const sec = state.view.sections[0];
+  if (!sec) return null;
+  const field = sec.fields.find((f) => f.name === spec.field);
+  return field ? { sec: sec, rec: sec.records[0], field: field, spec: spec } : null;
+}
+
+// Live value of a control, falling back to the parsed record for a field whose
+// input isn't rendered (a collapsed tab renders no DOM).
+function liveValue(si, ri, name, rec) {
+  const c = $("#editor").querySelector(
+    `.fval[data-section="${si}"][data-record="${ri}"][data-field="${CSS.escape(name)}"]`);
+  if (c) return c.value;
+  return rec && rec.values[name] != null ? rec.values[name] : "";
+}
+
+function rowIsBlank(sec, rec) {
+  return sec.fields.every((f) => {
+    if (f.hidden) return true;
+    const v = String(liveValue(sec.index, rec.index, f.name, rec) || "");
+    return v.replace(/[0 ]/g, "") === "";
+  });
+}
+
+// {rows, total, expected, current, matches, authoritative, overflow} — computed
+// from what is on screen RIGHT NOW, so it tracks typing before any save.
+function rollupLive() {
+  const h = rollupHeaderField();
+  if (!h) return null;
+  const src = state.view.sections.find((s) => s.name === h.spec.section);
+  const current = liveValue(h.sec.index, h.rec.index, h.field.name, h.rec);
+  const out = { rows: 0, total: 0, current: current, expected: null,
+                matches: true, authoritative: true, overflow: false,
+                bad: null, size: h.field.size || 0, name: h.field.name,
+                section: h.spec.section };
+  if (!src) return out;
+  const rows = (src.records || []).filter((r) => !rowIsBlank(src, r));
+  out.rows = rows.length;
+  out.authoritative = rows.length === 0;
+  if (!rows.length) return out;
+  let total = 0;
+  for (const r of rows) {
+    const raw = String(liveValue(src.index, r.index, h.spec.source, r) || "").trim();
+    if (raw === "") continue;
+    if (!/^\d+$/.test(raw)) { out.bad = raw; out.matches = false; return out; }
+    total += parseInt(raw, 10);
+  }
+  out.total = total;
+  out.overflow = String(total).length > out.size;
+  out.expected = String(total).padStart(out.size, "0");
+  out.matches = current === out.expected;
+  return out;
+}
+
+// Paint the badge, and push the new total into the input when the ROWS moved.
+// Typing in the total itself never has its own keystrokes overwritten — it is
+// badged with what the save will do instead.
+function refreshRollup(fromRows) {
+  const h = rollupHeaderField();
+  if (!h) return;
+  const badge = $("#editor").querySelector(
+    `.rollup-badge[data-rollup="${CSS.escape(h.field.name)}"]`);
+  const live = rollupLive();
+  if (!live) return;
+  if (fromRows && !live.authoritative && !live.overflow && !live.bad
+      && live.expected != null) {
+    const c = $("#editor").querySelector(
+      `.fval[data-section="${h.sec.index}"][data-record="${h.rec.index}"]`
+      + `[data-field="${CSS.escape(h.field.name)}"]`);
+    if (c && c.value !== live.expected) {
+      c.value = live.expected;
+      const key = editKey(c.dataset.section, c.dataset.record, c.dataset.field);
+      if (c.value !== c.dataset.orig) { state.edits[key] = c.value; c.classList.add("dirty"); }
+      else { delete state.edits[key]; c.classList.remove("dirty"); }
+      updateSaveButtons();
+    }
+    live.current = live.expected;
+    live.matches = true;
+  }
+  if (!badge) return;
+  badge.classList.remove("rollup-ok", "rollup-warn", "rollup-info");
+  const n = live.rows;
+  const lines = `${n} ${live.section.toLowerCase()} line${n === 1 ? "" : "s"}`;
+  if (live.bad != null) {
+    badge.classList.add("rollup-warn");
+    badge.textContent = "⚠ a row quantity is not a number";
+    badge.title = `"${live.bad}" cannot be totalled — the save will refuse it`;
+  } else if (live.authoritative) {
+    badge.classList.add("rollup-info");
+    badge.textContent = `ⓘ no ${live.section.toLowerCase()} lines — this is the quantity`;
+    badge.title = "With no detail rows this total is not a sum: it is the "
+      + "quantity itself, and is saved exactly as you type it.";
+  } else if (live.overflow) {
+    badge.classList.add("rollup-warn");
+    badge.textContent = `⚠ ${live.total} needs ${String(live.total).length} digits`;
+    badge.title = `${live.name} holds ${live.size} — the save will refuse this `
+      + "rather than write a truncated total.";
+  } else if (live.matches) {
+    badge.classList.add("rollup-ok");
+    badge.textContent = `= sum of ${lines}`;
+    badge.title = "This total matches its rows.";
+  } else {
+    badge.classList.add("rollup-warn");
+    badge.textContent = `⚠ will be set to ${live.expected} on save`;
+    badge.title = `The ${lines} total ${live.total}. Saving corrects this field `
+      + "to match them.";
+  }
+}
+
 function optionLabel(label, code) {
   if (code === "") return label;            // the explicit blank choice
   return label === code ? code : `${label} (${code})`;
@@ -1539,6 +1726,14 @@ function renderForm(sec) {
     if (ctl.okgenPicker) f.appendChild(ctl.okgenPicker);
     if (ctl.okgenBadge) f.appendChild(ctl.okgenBadge);
     if (ctl.okgenDatalist) f.appendChild(ctl.okgenDatalist);
+    // Roll-up total: a sibling badge saying whether this agrees with the rows
+    // it sums, or — when there are none — that it is the quantity itself.
+    const rspec = rollupSpec();
+    if (rspec && field.name === rspec.field) {
+      const badge = el("span", "rollup-badge");
+      badge.dataset.rollup = field.name;
+      f.appendChild(badge);
+    }
     grid.appendChild(f);
   });
   return grid;
@@ -1670,6 +1865,16 @@ function onEdit(e) {
     c.classList.remove("dirty");
   }
   refreshDerived(c.dataset.section, c.dataset.record);   // driving field may feed a derived one
+  // A roll-up moves when either side is touched: editing a summed row pushes
+  // the new total into the header field; editing the total itself only re-badges
+  // it, so the user's keystrokes are never overwritten as they type.
+  const rspec = rollupSpec();
+  if (rspec) {
+    const sec = state.view && state.view.sections[Number(c.dataset.section)];
+    const fromRows = !!(sec && sec.name === rspec.section
+                        && c.dataset.field === rspec.source);
+    if (fromRows || c.dataset.field === rspec.field) refreshRollup(fromRows);
+  }
   updateSaveButtons();
 }
 
@@ -1717,7 +1922,14 @@ async function save(targetPath) {
     state.edits = {};  // persisted — clear so refresh isn't treated as dirty
     state.ops = [];
     const changes = res.edits_applied + (res.ops_applied || 0);
+    // A roll-up the save corrected on its own is stated, never silent — the
+    // user typed one value and a different one is now on disk.
+    const rolled = (res.rollups || []).map((r) => r.reason === "seeded"
+      ? `${r.field} set to ${r.to} (no ${r.section.toLowerCase()} lines — a starting quantity)`
+      : `${r.field} corrected ${r.from} → ${r.to} to match ${r.rows} `
+        + `${r.section.toLowerCase()} line(s)`);
     setStatus(`Saved ${changes} change(s) to ${baseName(res.path)}` +
+              (rolled.length ? ` · ${rolled.join("; ")}` : "") +
               (res.roundtrip_ok ? "" : " (round-trip DIFFERS!)"),
               res.roundtrip_ok ? "ok" : "err");
     const openPath = targetPath || state.file;
@@ -1753,6 +1965,7 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Bulk Rename (${count})…` : "Bulk Rename…", () => enterRenameMode());
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   add(count > 1 ? `🧹  Clean up ${count} files` : "🧹  Clean up file", () => cleanUpSelection());
+  add(count > 1 ? `🔢  Total Qty check (${count})…` : "🔢  Total Qty check…", () => totalQtySelection());
   add(count > 1 ? `⇄  Convert ${count} files to JSON…` : "⇄  Convert to JSON…",
       () => convertToJson());
   add(sendMenuLabel(count), () => sendToNiceLabel());
@@ -1893,6 +2106,87 @@ async function cleanUpSelection() {
   } finally {
     state.busy = false;
   }
+}
+
+// ---- Total Qty: inventory a selection, then optionally fix it ----
+// Always PREVIEW first. This is the only bulk action that rewrites field
+// CONTENT rather than junk, so the user sees every old -> new before a byte
+// moves — and, just as importantly, sees the files it will NOT touch: one whose
+// size section is empty has a total that is the quantity itself, and zeroing
+// those would silently destroy the print quantity on the shape the new system
+// produces most.
+async function totalQtySelection() {
+  const paths = [...state.selection];
+  if (!paths.length) return;
+  if (!beginBusy("Checking total quantities…")) {
+    setStatus("Please wait — an operation is already running…", "dirty");
+    return;
+  }
+  let res;
+  try {
+    res = await postJSON("/api/total-qty/scan", { paths });
+  } catch (e) {
+    setStatus("Total Qty check failed: " + e.message, "err");
+    return;
+  } finally {
+    state.busy = false;
+  }
+  showTotalQtyReport(res, paths);
+}
+
+function showTotalQtyReport(res, paths) {
+  const sum = res.summary || {};
+  const applied = !!sum.applied;
+  const ov = el("div", "modal-overlay");
+  const card = el("div", "modal-card modal-wide");
+  card.appendChild(el("h3", "modal-title", applied
+    ? `Total Qty — ${sum.fixed} file(s) fixed`
+    : `Total Qty preview — ${sum.would_fix} to fix, ${sum.no_rows} with no size lines`));
+
+  const body = el("div", "modal-body");
+  card.appendChild(body);
+  body.appendChild(el("div", "modal-dest",
+    `${sum.total} selected  ·  ${sum.ok} already correct  ·  ${sum.skipped} not applicable`
+    + (sum.errors ? `  ·  ${sum.errors} error(s)` : "")));
+  if (!applied && sum.no_rows) {
+    const warn = el("div", "modal-warn");
+    warn.appendChild(el("span", "modal-warn-icon", "ⓘ"));
+    warn.appendChild(el("span", "modal-warn-text",
+      `${sum.no_rows} file(s) have no size lines. Their total IS the quantity to `
+      + `print, so they are listed (largest first) and left untouched — update `
+      + `them yourself with Bulk Edit if a value looks wrong.`));
+    body.appendChild(warn);
+  }
+  const pre = el("pre", "send-report-text");
+  pre.textContent = res.report || "(no report)";
+  body.appendChild(pre);
+  if (res.log) body.appendChild(el("div", "send-report-log", `Also written to: ${res.log}`));
+
+  const acts = el("div", "modal-actions");
+  const close = el("button", "btn", applied ? "Close" : "Cancel");
+  close.addEventListener("click", () => ov.remove());
+  acts.appendChild(close);
+  if (!applied && sum.would_fix) {
+    const go = el("button", "btn btn-primary", `Fix ${sum.would_fix} file(s)`);
+    go.addEventListener("click", async () => {
+      go.disabled = true;
+      try {
+        const done = await postJSON("/api/total-qty/fix", { paths });
+        ov.remove();
+        new Set(paths.map(folderOf)).forEach((f) => refreshFolder(f));
+        showTotalQtyReport(done, paths);
+        if (state.file && paths.includes(state.file)) loadFile(state.file);
+      } catch (e) {
+        setStatus("Total Qty fix failed: " + e.message, "err");
+        ov.remove();
+      }
+    });
+    acts.appendChild(go);
+  }
+  card.appendChild(acts);
+  ov.appendChild(card); document.body.appendChild(ov);
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
+  close.focus();
 }
 
 // ---- Send to NiceLabel ----
@@ -2598,6 +2892,7 @@ function showBulkMenu() {
   add(`Bulk Rename (${n})`, () => enterRenameMode());
   add(`Make keys unique (${n})`, () => makeUniqueSelection());
   add(n === 1 ? "🧹  Clean up file" : `🧹  Clean up ${n} files`, () => cleanUpSelection());
+  add(n === 1 ? "🔢  Total Qty check…" : `🔢  Total Qty check (${n})…`, () => totalQtySelection());
   // Volume generation works from exactly ONE template file.
   add(n === 1 ? "Generate volume files…" : `Generate volume files… (${n} source files)`,
       () => enterGenerateMode());
