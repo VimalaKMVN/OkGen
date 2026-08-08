@@ -73,12 +73,14 @@ scripts:
     workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\REG_JSON_LASER_Compare_TestData.xlsm
     data_sheet: "Laser-SH_PT_CL_DL_Formats"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\REG_JSON_LASER_ExecutionScript.bat
+    results: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\Laser_TestResults
 
   - name: "JSON Regression Thermal"
     applies_to: [json]
     workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\REG_JSON_THERMAL_TestData.xlsm
     data_sheet: "REG_JSON_THERMAL_Compare"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\REG_JSON_THERMAL_ExecutionScript.bat
+    results: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\Thermal_TestResults
 
   # ------------------------------------------------------------ .OK files ----
   - name: "OK Functional Laser"

@@ -160,18 +160,48 @@ def test_service_raises_edit_error_so_the_route_returns_422(tmp_path):
 # --------------------------------------------------------------------------- #
 # The SHIPPED config — the two folders the user has set up
 # --------------------------------------------------------------------------- #
-def test_the_shipped_config_declares_the_two_regression_folders():
-    """Both live beside their own script's .bat. Unquoted in YAML, so every
-    backslash survives — double quotes would break the whole file (and with it
-    every TOSCA script), which is the trap tosca.yaml warns about at the top."""
+def test_the_shipped_config_declares_the_four_regression_folders():
+    """The .OK and JSON regression scripts, each with its own results folder.
+    Unquoted in YAML, so every backslash survives — double quotes would break
+    the whole file (and with it every TOSCA script), the trap tosca.yaml warns
+    about at the top."""
     config = Config.load(Path(__file__).resolve().parents[1] / "config")
     by_name = {f["name"]: f["folder"] for f in tosca.report_folders(config)}
-    assert set(by_name) == {"OK Regression Thermal", "OK Regression Laser"}
+    assert set(by_name) == {"OK Regression Thermal", "OK Regression Laser",
+                            "JSON Regression Thermal", "JSON Regression Laser"}
     assert by_name["OK Regression Thermal"].endswith(
         r"REG_THERMAL_SH_PT_CL_DL_Comparison\Thermal_TestResults")
     assert by_name["OK Regression Laser"].endswith(
         r"REG_LASER_SH_PT_CL_DL_Comparison\Laser_TestResults")
+    assert by_name["JSON Regression Thermal"].endswith(
+        r"REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\Thermal_TestResults")
+    assert by_name["JSON Regression Laser"].endswith(
+        r"REG_JSON_LASER_SH_PT_CL_DL_Comparison\Laser_TestResults")
     assert all("\\" in f for f in by_name.values()), "backslashes must survive YAML"
+
+
+def test_the_ok_and_json_folders_are_distinct_despite_identical_leaf_names():
+    """`Laser_TestResults` names TWO different folders — one under
+    REG_LASER_…, one under REG_JSON_LASER_…. That is exactly why the picker
+    shows the full path beside the script name: the leaf alone is ambiguous, and
+    opening the .OK results when you wanted the JSON ones would look right."""
+    config = Config.load(Path(__file__).resolve().parents[1] / "config")
+    folders = [f["folder"] for f in tosca.report_folders(config)]
+    leaves = [f.rsplit("\\", 1)[-1] for f in folders]
+    assert len(set(leaves)) == 2, "leaf names collide, by design"
+    assert len(set(folders)) == 4, "but the full paths must all differ"
+
+
+def test_every_results_folder_sits_beside_its_own_script():
+    """A results folder belongs to ONE script. Pairing it with the wrong .bat's
+    directory would silently open another suite's reports."""
+    import ntpath
+    config = Config.load(Path(__file__).resolve().parents[1] / "config")
+    for s in config.tosca_scripts():
+        folder = (s.get("results") or "").strip()
+        if not folder:
+            continue
+        assert ntpath.dirname(folder) == ntpath.dirname(s["bat"]), s["name"]
 
 
 def test_declaring_a_results_folder_does_not_disturb_running_that_script():
