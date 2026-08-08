@@ -2782,6 +2782,51 @@ def _bulk_op_eval_raw(sp: Path, layout_name, section_name, op, registry, config)
         okf = parse_okfile(sp, registry=registry)
     except Exception as exc:
         return {"name": name, "status": "error", "error": str(exc)}
+    return _apply_bulk_op(okf, name, layout_name, section_name, op, config)
+
+
+def _apply_bulk_op(okf, name, layout_name, section_name, op, config):
+    """:func:`_apply_bulk_op_raw`, with chain isolation (D9) enforced.
+
+    Checked on the RESULT rather than the input, so it holds for every op type —
+    `set`, `list` (any listed value could be picked), `random` and `unique` can
+    all land on a chain, and enumerating each op's candidates separately is how
+    a gap reopens.
+
+    This closes the FOURTH appearance of the isolation gap. D9 built the rule,
+    D30 wired it into the bulk header path (`_bulk_eval`), D50 fixed the name
+    form — but the panel posts to the bulk *op* route, which never had the
+    check, so `chain` could be set to `05` on an NA file in bulk while the
+    editor and the older route both refused it. Enforcing it HERE means the
+    single-op path and the multi-field path inherit it together, which is D30's
+    own lesson applied to its own defect.
+    """
+    field = op.get("field")
+    before = None
+    if config is not None and field == "chain" and okf.records:
+        try:
+            before = (okf.records[0].get("chain") or "").strip()
+        except Exception:                       # layout has no chain field
+            before = None
+    r = _apply_bulk_op_raw(okf, name, layout_name, section_name, op, config)
+    if before and r.get("status") == "change":
+        after = (okf.records[0].get("chain") or "").strip()
+        if after != before and not config.can_change_chain(before, after):
+            return {"name": name, "status": "error",
+                    "error": (f"chain cannot change from {before} to {after}: "
+                              f"Europe is isolated from the other chains")}
+    return r
+
+
+def _apply_bulk_op_raw(okf, name, layout_name, section_name, op, config):
+    """Apply ONE bulk op to an ALREADY-PARSED file, in memory.
+
+    Split out of :func:`_bulk_op_eval_raw` so several ops can be applied to the
+    same open file — the multi-field bulk edit opens each file once, applies
+    every ticked field to that one copy and saves once, instead of rewriting
+    (and backing up) the file per field. The single-op path is unchanged: it
+    parses, then calls straight through to here.
+    """
     grouped = okf.sections()
     sec = next((s for s in okf.layout.sections if s.name == section_name), None)
     if sec is None:
@@ -3087,6 +3132,92 @@ def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> 
                 _apply_rollups(okf, config)     # header totals follow their detail rows
                 _backup_and_save(okf, sp, backup)
                 r["status"] = "changed"
+            except (OSError, EditError) as exc:
+                r["status"] = "error"
+                r["error"] = str(exc)
+        results.append(r)
+    return {"results": results}
+
+
+def _bulk_multi_eval(sp: Path, layout_name, ops, registry, config):
+    """Evaluate SEVERAL field ops against one file, in memory, all-or-nothing.
+
+    The multi-field Bulk Edit sends every ticked field in one request, so the
+    file is opened ONCE, every op is applied to that single copy, and the caller
+    saves once — 12 files with 3 fields is 12 writes and 12 .bak backups, not 36.
+
+    **All-or-nothing per file.** Every op is applied before anything is written,
+    and a single failure abandons the whole file rather than leaving it carrying
+    some of the changes: a half-updated file is indistinguishable from a correct
+    one by looking at it. Files are independent, so one bad file never blocks
+    the rest of the selection — the same rule ``apply_edits`` already follows for
+    the single-file editor.
+
+    Reports PER FIELD. With one field a summary line was enough; with several,
+    one line cannot say which moved and which was corrected — and a roll-up
+    (D58) silently rewrites what you typed, which is exactly the class of thing
+    v0.78.0 exists to stop hiding.
+    """
+    name = sp.name
+    try:
+        if detect_layout(sp).layout != layout_name:
+            return {"name": name, "status": "skipped", "fields": []}
+        okf = parse_okfile(sp, registry=registry)
+    except Exception as exc:
+        return {"name": name, "status": "error", "error": str(exc), "fields": []}
+
+    fields, failed = [], None
+    for op in ops or []:
+        section = op.get("section")
+        entry = {"section": section, "field": op.get("field")}
+        r = _apply_bulk_op(okf, name, layout_name, section, dict(op), config)
+        status = r.get("status")
+        if status in ("error", "too_wide", "missing_field", "no_section"):
+            entry.update(status=status,
+                         error=r.get("error") or r.get("detail") or status)
+            fields.append(entry)
+            failed = entry
+            break                       # the file is abandoned; stop evaluating
+        entry.update(status=status, detail=r.get("detail"))
+        fields.append(entry)
+
+    if failed is not None:
+        return {"name": name, "status": "error", "fields": fields,
+                "error": f"{failed.get('field')}: {failed.get('error')}"}
+    if not any(f.get("status") == "change" for f in fields):
+        return {"name": name, "status": "unchanged", "fields": fields}
+    return {"name": name, "status": "change", "fields": fields, "okf": okf}
+
+
+def bulk_multi_preview(paths, layout, ops, registry, config) -> dict:
+    results = []
+    for p in paths or []:
+        r = _bulk_multi_eval(Path(p), layout, ops, registry, config)
+        r.pop("okf", None)
+        r["path"] = str(p)
+        results.append(r)
+    return {"results": results}
+
+
+def bulk_multi_apply(paths, layout, ops, registry, config, backup=True) -> dict:
+    results = []
+    for p in paths or []:
+        sp = Path(p)
+        r = _bulk_multi_eval(sp, layout, ops, registry, config)
+        okf = r.pop("okf", None)
+        r["path"] = str(p)
+        if r["status"] == "change" and okf is not None:
+            try:
+                _apply_detail_fill(okf, config)
+                _apply_json_empty_rows(okf, config)
+                # The roll-up runs ONCE for the whole batch, after every field
+                # is in place — so setting a Size qty and the header total in one
+                # apply still ends with the total agreeing with the rows.
+                rolled = _apply_rollups(okf, config)
+                _backup_and_save(okf, sp, backup)
+                r["status"] = "changed"
+                if rolled:
+                    r["rollups"] = rolled
             except (OSError, EditError) as exc:
                 r["status"] = "error"
                 r["error"] = str(exc)

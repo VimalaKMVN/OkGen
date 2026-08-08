@@ -782,3 +782,26 @@ select.fval-pick:hover { color: var(--text); }
   overflow-wrap: anywhere;
 }
 .report-missing { font-size: 10.5px; color: #b45309; font-weight: 600; }
+
+/* Bulk Edit — field values: one row per field, shaped like Volume Generate's
+   picker but with a values box first (a single entry means "set it"). */
+.bulkf-groups { display: flex; flex-direction: column; gap: 14px; margin: 10px 0; }
+.bulkf-group { border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; }
+.bulkf-note { color: var(--text-dim); font-size: 11px; margin: 2px 0 6px; }
+.bulkf-field {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 3px 0; cursor: pointer;
+}
+.bulkf-name { min-width: 170px; }
+.bulkf-vals { width: 260px; }
+.bulkf-min, .bulkf-max { width: 120px; }
+.bulkf-field input[type="text"] {
+  padding: 3px 6px; background: #3c3c3c; color: var(--text);
+  border: 1px solid var(--border); border-radius: 3px;
+}
+.bulkf-field input:disabled { opacity: 0.4; }
+.bulkf-field .bulk-rollup-note { flex-basis: 100%; margin-left: 22px; }
+/* Per-field result lines: what changed stands out, what did not stays quiet. */
+.bulkf-line { line-height: 1.45; }
+.bulkf-quiet { color: var(--text-dim); }
+.bulkf-roll { color: #b45309; }

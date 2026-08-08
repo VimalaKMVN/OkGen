@@ -24,7 +24,7 @@ const src = fs.readFileSync(APP, "utf8");
 
 const run = new Function(
   "document", "window", "localStorage", "Option", "fetch", "confirm", "prompt", "alert",
-  src + "\n;return { renderBulkPanel, renderGeneratePanel, rollupSpecFor, rollupWarning };");
+  src + "\n;return { renderBulkFieldsPanel, renderGeneratePanel, rollupSpecFor, rollupWarning };");
 
 let api;
 try {
@@ -70,7 +70,12 @@ check("a layout with no roll-up configured stays silent",
       !api.rollupSpecFor({}, "Preticket", "tot_qty"));
 
 // --------------------------------------------------------------------------
-// Bulk Edit: the note appears when tot_qty is the selected header field
+// Bulk Edit — FIELD VALUES: the note sits on the roll-up field's own row
+//
+// `tot_qty` is a HEADER field, and header field values moved to the multi-field
+// panel; the rows & sequences panel keeps only unique / add / keep, which are
+// row operations and have no header section at all. So the warning moved with
+// the field — it must be on the tot_qty row here, and nowhere near `dept`.
 // --------------------------------------------------------------------------
 const bulkScope = {
   files: [{ path: "/tmp/SH.OK", name: "SH.OK", layout: "StyleHeader", chain: "03" }],
@@ -87,35 +92,33 @@ const bulkScope = {
 
 const bulkPanel = doc.querySelector("#bulkPanel");
 try {
-  api.renderBulkPanel(bulkScope);
+  api.renderBulkFieldsPanel(bulkScope);
 } catch (e) {
-  console.error("FAIL: renderBulkPanel threw:", e.message);
+  console.error("FAIL: renderBulkFieldsPanel threw:", e.message);
   process.exit(1);
 }
 
-const noteOf = () => descendants(bulkPanel)
-  .filter((e) => e.classList && e.classList.contains("bulk-rollup-note"))[0];
+const rowsOf = () => descendants(bulkPanel)
+  .filter((e) => e.classList && e.classList.contains("bulkf-field"));
+const notesOf = () => descendants(bulkPanel)
+  .filter((e) => e.classList && e.classList.contains("bulk-rollup-note"));
 
-check("Bulk Edit renders a note element", !!noteOf());
-check("...warning as soon as tot_qty is the selected field",
-      noteOf() && /sum of the size lines/i.test(noteOf().textContent));
+check("the field-values panel renders a row per field", rowsOf().length === 3);
+check("exactly ONE roll-up note is rendered", notesOf().length === 1);
+check("...carrying the rule and what to do about it",
+      notesOf()[0] && /sum of the size lines/i.test(notesOf()[0].textContent)
+      && /set Size › qty instead/i.test(notesOf()[0].textContent));
 
-// Switching to a field that is NOT a roll-up must clear it — a warning left
-// standing beside `dept` would be worse than no warning at all.
-const fieldSel = descendants(bulkPanel)
-  .filter((e) => e.classList && e.classList.contains("bulk-field")
-                 && (e.options || []).some((o) => o.value === "tot_qty"))[0];
-check("the header field selector was found", !!fieldSel);
-if (fieldSel) {
-  fieldSel.value = "dept";
-  fieldSel.dispatchEvent({ type: "change" });
-  check("...and it clears when a plain field is selected",
-        noteOf() && noteOf().textContent === "");
-  fieldSel.value = "tot_qty";
-  fieldSel.dispatchEvent({ type: "change" });
-  check("...and comes back when the roll-up field is selected again",
-        noteOf() && /sum of the size lines/i.test(noteOf().textContent));
-}
+const totRow = rowsOf().find((r) => descendants(r).some(
+  (c) => c.dataset && c.dataset.field === "tot_qty"));
+const deptRow = rowsOf().find((r) => descendants(r).some(
+  (c) => c.dataset && c.dataset.field === "dept"));
+check("the note is on the tot_qty row",
+      totRow && descendants(totRow).some(
+        (c) => c.classList && c.classList.contains("bulk-rollup-note")));
+check("...and NOT on a plain field's row",
+      deptRow && !descendants(deptRow).some(
+        (c) => c.classList && c.classList.contains("bulk-rollup-note")));
 
 // --------------------------------------------------------------------------
 // Volume Generate: the note is tied to the field's checkbox

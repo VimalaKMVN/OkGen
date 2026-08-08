@@ -422,8 +422,18 @@ function isRenameOpen() {
   return !$("#renamePanel").classList.contains("hidden");
 }
 
-// ---- bulk edit (B1: Header field, one layout, set value) ----
-async function enterBulkMode() {
+// ---- bulk edit ----
+// TWO panels, because they do genuinely different things:
+//   * FIELD VALUES  — many fields at once, across every section (multi mode).
+//   * ROWS & SEQUENCES — add / keep-first-N / set-unique (single-op mode).
+// They are not two doors to one job: field edits are order-independent (each
+// writes a different field), while row ops are not — "keep 0 rows" then "set
+// qty" writes nothing. Keeping them apart is what lets the field panel drop the
+// Operation dropdown entirely and show every section at once.
+let bulkMode = "fields";               // "fields" | "rows"
+
+async function enterBulkMode(mode) {
+  bulkMode = mode || "fields";
   if (state.selection.size < 1) return;
   if (!confirmDiscardIfDirty()) return;
   closeAllPanels("bulk");        // only one bulk mode open at a time
@@ -440,7 +450,8 @@ async function enterBulkMode() {
   panel.innerHTML = "<div class='bulk-loading'><span class='spinner'></span> Loading selection…</div>";
   try {
     const scope = await postJSON("/api/bulk/scope", { paths: [...state.selection] });
-    renderBulkPanel(scope);
+    if (bulkMode === "fields") renderBulkFieldsPanel(scope);
+    else renderBulkPanel(scope);
   } catch (e) {
     panel.innerHTML = "";
     setStatus("Bulk scope failed: " + e.message, "err");
@@ -480,13 +491,272 @@ function closeAllPanels(keep) {
   if (keep !== "generate") exitGenerateMode();
 }
 
+
+// ---- Bulk Edit: FIELD VALUES (many fields, every section, one apply) --------
+//
+// Shaped like Volume Generate on purpose — the user asked for the same controls
+// — but applied to the SELECTED files instead of generating new ones. Two
+// differences that matter and are stated in the panel, because both are easy to
+// assume the other way round:
+//
+//   * an UNTICKED field keeps each file's OWN value (Generate inherits the
+//     template's); nothing is blanked or made uniform.
+//   * a min/max RANGE varies per file — 12 files get 12 different values. To
+//     make them all the same, give one value, not a range.
+//
+// Every control maps onto a bulk op that already exists, so nothing new can be
+// written: one value or a comma list -> `list`, a range -> `random`, a date
+// range -> `random_date`. Zero-padding, chain isolation, date coercion and the
+// Total Qty roll-up all fire on those ops exactly as they always have.
+//
+// NOTE this picker is a PARALLEL implementation of Generate's, not a shared
+// one — the rows differ (a values box is primary here, and there are no row
+// counts), and parameterising a working panel was the riskier move. They can
+// drift; see PLAN §6.
+function renderBulkFieldsPanel(scope) {
+  const panel = $("#bulkPanel");
+  panel.innerHTML = "";
+  const layouts = Object.keys(scope.layouts || {});
+  if (!layouts.length) {
+    panel.appendChild(el("div", "bulk-note", "No recognised files in the selection."));
+    return;
+  }
+  let selectedLayout = layouts[0];
+
+  panel.appendChild(el("div", "bulk-title", "Bulk Edit — field values"));
+  const scopeBox = el("div", "bulk-scope");
+  scopeBox.appendChild(el("span", "bulk-label",
+    `${(scope.files || []).length} file(s) selected · layout:`));
+  layouts.forEach((name) => {
+    const lbl = el("label", "bulk-layout");
+    const rb = el("input"); rb.type = "radio"; rb.name = "bulkFieldsLayout";
+    if (name === selectedLayout) rb.checked = true;
+    rb.addEventListener("change", () => { selectedLayout = name; build(); });
+    lbl.appendChild(rb);
+    lbl.appendChild(document.createTextNode(` ${name} (${scope.layouts[name]})`));
+    scopeBox.appendChild(lbl);
+  });
+  panel.appendChild(scopeBox);
+
+  panel.appendChild(el("div", "bulk-note",
+    "Tick the fields to change. One value sets it on every file; a comma list "
+    + "gives each file (or row) a random pick; a range varies per file — so for "
+    + "the same value everywhere, give one value, not a range. Fields you leave "
+    + "unticked keep each file's own value."));
+
+  const groups = el("div", "bulkf-groups");
+  panel.appendChild(groups);
+
+  const actions = el("div", "bulk-actions");
+  const previewBtn = el("button", "btn", "Preview");
+  const applyBtn = el("button", "btn btn-primary", "Apply"); applyBtn.disabled = true;
+  actions.appendChild(previewBtn); actions.appendChild(applyBtn);
+  panel.appendChild(actions);
+  const previewBox = el("div", "bulk-preview");
+  const resultsBox = el("div", "bulk-results");
+  panel.appendChild(previewBox); panel.appendChild(resultsBox);
+  const reset = () => { applyBtn.disabled = true; previewBox.innerHTML = ""; resultsBox.innerHTML = ""; };
+
+  // One row per field: tick it, then fill EITHER the values box or the range.
+  function fieldRow(sectionName, f) {
+    const row = el("label", "bulkf-field");
+    const cb = el("input", "bulkf-on"); cb.type = "checkbox";
+    cb.dataset.section = sectionName;
+    cb.dataset.field = f.name;
+    row.appendChild(cb);
+    row.appendChild(el("span", "bulkf-name",
+                       f.date ? `${f.name} (date)` : `${f.name} (${f.size != null ? f.size : "?"})`));
+    const isDate = !!f.date;
+    const vals = el("input", "bulkf-vals"); vals.type = "text";
+    vals.placeholder = isDate ? "2024-06-30  (or a list)"
+                              : "value, or 10,20,30   (' ' = blank)";
+    const mn = el("input", "bulkf-min"); mn.type = "text";
+    const mx = el("input", "bulkf-max"); mx.type = "text";
+    mn.placeholder = isDate ? "from 2024-01-01" : "min";
+    mx.placeholder = isDate ? "to 2024-12-31" : "max";
+    [vals, mn, mx].forEach((i) => { i.disabled = true; });
+    // A field with a known option list still gets a free-text box: bulk has
+    // always accepted a list of allowed values here, and the options are shown
+    // as a datalist so they can be picked without being the only choice.
+    if (f.options) {
+      const dl = el("datalist");
+      const id = `bulkf-opts-${sectionName}-${f.name}`.replace(/[^\w-]/g, "_");
+      dl.id = id;
+      Object.keys(f.options).forEach((code) => {
+        const o = el("option"); o.value = code; dl.appendChild(o);
+      });
+      vals.setAttribute("list", id);
+      row.appendChild(dl);
+    }
+    const sync = () => {
+      [vals, mn, mx].forEach((i) => { i.disabled = !cb.checked; });
+      // A range and a value list are alternatives — filling one greys the other,
+      // so an op can never be ambiguous about which the server should use.
+      if (cb.checked) {
+        const usingVals = vals.value.trim() !== "";
+        mn.disabled = mx.disabled = usingVals;
+        vals.disabled = !usingVals && (mn.value.trim() !== "" || mx.value.trim() !== "");
+      }
+    };
+    cb.addEventListener("change", () => { sync(); reset(); });
+    [vals, mn, mx].forEach((i) => i.addEventListener("input", () => { sync(); reset(); }));
+    row.appendChild(vals); row.appendChild(mn); row.appendChild(mx);
+
+    // A roll-up field is not written as typed — say so here too, in the same
+    // words as the editor badge and the single-op panel.
+    const rspec = rollupSpecFor(scope.rollups, selectedLayout, f.name);
+    if (rspec) row.appendChild(el("div", "bulk-rollup-note", rollupWarning(rspec)));
+    return row;
+  }
+
+  function group(title, sectionName, fields, note) {
+    const box = el("div", "bulkf-group");
+    box.appendChild(el("div", "bulk-label", title));
+    if (note) box.appendChild(el("div", "bulkf-note", note));
+    if (!fields.length) {
+      box.appendChild(el("div", "bulk-note", "No editable fields here."));
+      return box;
+    }
+    fields.forEach((f) => box.appendChild(fieldRow(sectionName, f)));
+    return box;
+  }
+
+  function build() {
+    groups.innerHTML = "";
+    groups.appendChild(group("Header fields", "Header",
+                             scope.header_fields[selectedLayout] || []));
+    (scope.detail_sections[selectedLayout] || []).forEach((d) => {
+      groups.appendChild(group(`“${d.name}” row fields`, d.name, d.fields || [],
+                               "applies to every row"));
+    });
+    reset();
+  }
+  build();
+
+  // Build the op list from the ticked rows. Each control maps onto an op that
+  // already exists — nothing here can write something bulk could not write
+  // before.
+  function buildOps() {
+    const ops = [];
+    descendantsOf(groups, "bulkf-field").forEach((row) => {
+      const cb = row.querySelector(".bulkf-on");
+      if (!cb || !cb.checked) return;
+      const section = cb.dataset.section, field = cb.dataset.field;
+      const vals = (row.querySelector(".bulkf-vals") || {}).value || "";
+      const mn = (row.querySelector(".bulkf-min") || {}).value || "";
+      const mx = (row.querySelector(".bulkf-max") || {}).value || "";
+      const isDate = /\(date\)/.test((row.querySelector(".bulkf-name") || {}).textContent || "");
+      if (vals.trim() !== "") {
+        // A single entry IS "set this value" — the server's list op picks from
+        // a one-item list, so no separate `set` case is needed.
+        ops.push({ section, type: "list", field, values: vals });
+      } else if (mn.trim() !== "" || mx.trim() !== "") {
+        if (isDate) ops.push({ section, type: "random_date", field, from: mn, to: mx });
+        else {
+          const o = { section, type: "random", field };
+          if (mn.trim() !== "") o.min = Number(mn);
+          if (mx.trim() !== "") o.max = Number(mx);
+          ops.push(o);
+        }
+      }
+    });
+    return ops;
+  }
+
+  async function run(url, box, applied) {
+    const ops = buildOps();
+    if (!ops.length) {
+      setStatus("Tick at least one field and give it a value or a range", "dirty");
+      return null;
+    }
+    if (!beginBusy(applied ? "Applying…" : "Previewing…")) {
+      setStatus("Please wait — an operation is already running…", "dirty"); return null;
+    }
+    previewBtn.disabled = true; applyBtn.disabled = true;
+    box.innerHTML = `<div class='bulk-loading'><span class='spinner'></span> ${applied ? "Applying" : "Previewing"}…</div>`;
+    try {
+      return await postJSON(url, { paths: scope.files.map((x) => x.path),
+                                   layout: selectedLayout, ops });
+    } catch (e) {
+      box.innerHTML = "";
+      setStatus((applied ? "Apply" : "Preview") + " failed: " + e.message, "err");
+      return null;
+    } finally {
+      state.busy = false; previewBtn.disabled = false;
+    }
+  }
+
+  previewBtn.addEventListener("click", async () => {
+    resultsBox.innerHTML = "";
+    const res = await run("/api/bulk/multi/preview", previewBox, false);
+    if (!res) return;
+    renderBulkFieldsTable(previewBox, res.results, false);
+    applyBtn.disabled = !res.results.some((r) => r.status === "change");
+  });
+
+  applyBtn.addEventListener("click", async () => {
+    const ops = buildOps();
+    if (!confirm(`Apply ${ops.length} field change(s) to the ${selectedLayout} files?\n`
+                 + "A .bak backup is made for each changed file.")) return;
+    const res = await run("/api/bulk/multi/apply", resultsBox, true);
+    if (!res) return;
+    renderBulkFieldsTable(resultsBox, res.results, true);
+    new Set(res.results.filter((r) => r.status === "changed").map((r) => folderOf(r.path)))
+      .forEach((fp) => refreshFolder(fp));
+    setStatus(`Bulk applied: ${res.results.filter((r) => r.status === "changed").length} changed`, "ok");
+    applyBtn.disabled = true;
+  });
+}
+
+// Elements under `host` carrying `cls` — the stub DOM has no :scope support, so
+// this stays a plain filter rather than a fancy selector.
+function descendantsOf(host, cls) {
+  return Array.prototype.slice.call(host.querySelectorAll("." + cls));
+}
+
+// PER-FIELD reporting. One summary line per file cannot say which field moved
+// and which was corrected — and a roll-up rewrites a typed total on its own
+// (D58), which is exactly the kind of thing v0.78.0 exists to stop hiding.
+function renderBulkFieldsTable(host, results, applied) {
+  host.innerHTML = "";
+  const counts = {};
+  results.forEach((r) => { counts[r.status] = (counts[r.status] || 0) + 1; });
+  host.appendChild(el("div", "bulk-summary", (applied ? "Results:  " : "Preview:  ")
+    + Object.entries(counts).map(([k, v]) => `${v} ${k}`).join("  ·  ")));
+  const table = el("table", "bulk-table");
+  const thead = el("thead"); const htr = el("tr");
+  ["File", "Fields", "Status"].forEach((h) => htr.appendChild(el("th", null, h)));
+  thead.appendChild(htr); table.appendChild(thead);
+  const tbody = el("tbody");
+  results.forEach((r) => {
+    const tr = el("tr", "st-" + r.status);
+    tr.appendChild(el("td", null, r.name));
+    const cell = el("td", "mono");
+    (r.fields || []).forEach((f) => {
+      const line = el("div", "bulkf-line" + (f.status === "change" ? "" : " bulkf-quiet"));
+      line.textContent = `${f.field}: ` + (f.error ? f.error : (f.detail || f.status));
+      cell.appendChild(line);
+    });
+    // What the SAVE corrected on its own, never silent.
+    (r.rollups || []).forEach((x) => {
+      cell.appendChild(el("div", "bulkf-line bulkf-roll",
+        `${x.field} → ${x.to} (sum of ${x.rows} ${String(x.section).toLowerCase()} lines)`));
+    });
+    if (!(r.fields || []).length) cell.textContent = r.error || r.status;
+    tr.appendChild(cell);
+    tr.appendChild(el("td", null, r.status + (r.error && !(r.fields || []).length ? `: ${r.error}` : "")));
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody); host.appendChild(table);
+}
+
 function renderBulkPanel(scope) {
   const panel = $("#bulkPanel");
   panel.innerHTML = "";
   const layoutNames = Object.keys(scope.layouts);
 
   const head = el("div", "bulk-head");
-  head.appendChild(el("h3", null, `Bulk Edit — ${scope.files.length} ${scope.files.length === 1 ? "file" : "files"} selected`));
+  head.appendChild(el("h3", null, `Bulk Edit — rows & sequences — ${scope.files.length} ${scope.files.length === 1 ? "file" : "files"} selected`));
   const close = el("button", "btn", "✕ Close");
   close.addEventListener("click", exitBulkMode);
   head.appendChild(close);
@@ -554,28 +824,25 @@ function renderBulkPanel(scope) {
   panel.appendChild(previewBox); panel.appendChild(resultsBox);
 
   // Sections for the current layout: Header + detail sections.
+  // ROWS & SEQUENCES only. The Header is deliberately absent: unique / add /
+  // keep-first-N are all row operations and none of them exists for a section
+  // that holds a single record. Field VALUES — including header fields — live
+  // in the multi-field panel now.
   function sectionsFor() {
-    const det = (scope.detail_sections[selectedLayout] || []).map((d) => ({ ...d, isHeader: false }));
-    return [{ name: "Header", isHeader: true, fields: scope.header_fields[selectedLayout] || [] }, ...det];
+    return (scope.detail_sections[selectedLayout] || [])
+      .map((d) => ({ ...d, isHeader: false }));
   }
   const curSection = () => sectionsFor().find((s) => s.name === sectionSel.value);
   const reset = () => { applyBtn.disabled = true; previewBox.innerHTML = ""; resultsBox.innerHTML = ""; };
 
+  // The field-VALUE ops (set / list / random / random_date) moved to the
+  // multi-field panel, where several fields are done in one apply. What stays
+  // is what could not move: `unique` numbers each row differently (it has no
+  // equivalent in a "give this field a value" grid), and the row ops change how
+  // many rows there are, where ORDER matters — "keep 0 rows" then "set qty"
+  // writes nothing, which is exactly why they are not mixed into that panel.
   function opsForSection(sec) {
-    if (sec.isHeader) {
-      return [
-        { v: "set", t: "Set value" },
-        { v: "list", t: "Random value from my list (each file)" },
-        ...(hasDateField(sec)
-          ? [{ v: "random_date", t: "Random date/time in a range (each file)" }] : []),
-      ];
-    }
     return [
-      { v: "set", t: "Set value (all rows)" },
-      { v: "list", t: "Random value from my list (each row)" },
-      { v: "random", t: "Set random value (each row)" },
-      ...(hasDateField(sec)
-        ? [{ v: "random_date", t: "Random date/time in a range (each row)" }] : []),
       { v: "unique", t: "Set unique value (each row)" },
       { v: "add", t: "Add rows" },
       { v: "keep", t: "Keep first N rows" },
@@ -2988,7 +3255,8 @@ function showBulkMenu() {
     else it.addEventListener("click", () => { hideCtxMenu(); fn(); });
     menu.appendChild(it);
   };
-  add(`Bulk Edit (${n})`, () => enterBulkMode());
+  add(`Bulk Edit — field values (${n})`, () => enterBulkMode("fields"));
+  add(`Bulk Edit — rows & sequences (${n})`, () => enterBulkMode("rows"));
   add(`Bulk Rename (${n})`, () => enterRenameMode());
   add(`Make keys unique (${n})`, () => makeUniqueSelection());
   add(n === 1 ? "🧹  Clean up file" : `🧹  Clean up ${n} files`, () => cleanUpSelection());

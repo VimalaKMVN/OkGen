@@ -402,6 +402,21 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
             body.get("field"), body.get("value", ""), registry, config,
             backup=body.get("backup", True)))
 
+    @app.post("/api/bulk/multi/preview")
+    def bulk_multi_preview():
+        """Several field ops in one request — see service._bulk_multi_eval."""
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_multi_preview(
+            body.get("paths", []), body.get("layout"), body.get("ops", []),
+            registry, config))
+
+    @app.post("/api/bulk/multi/apply")
+    def bulk_multi_apply():
+        body = request.get_json(force=True, silent=True) or {}
+        return jsonify(service.bulk_multi_apply(
+            body.get("paths", []), body.get("layout"), body.get("ops", []),
+            registry, config))
+
     @app.post("/api/bulk/op/preview")
     def bulk_op_preview():
         body = request.get_json(force=True, silent=True) or {}
