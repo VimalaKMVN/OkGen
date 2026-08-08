@@ -24,7 +24,7 @@ const src = fs.readFileSync(APP, "utf8");
 
 const run = new Function(
   "document", "window", "localStorage", "Option", "fetch", "confirm", "prompt", "alert",
-  src + "\n;return { renderBulkFieldsPanel, renderGeneratePanel, rollupSpecFor, rollupWarning };");
+  src + "\n;return { renderBulkFieldsPanel, renderBulkFieldsTable, renderGeneratePanel, rollupSpecFor, rollupWarning };");
 
 let api;
 try {
@@ -133,6 +133,38 @@ check("the note is on the tot_qty row",
 check("...and NOT on a plain field's row",
       deptRow && !descendants(deptRow).some(
         (c) => c.classList && c.classList.contains("bulk-rollup-note")));
+
+// --------------------------------------------------------------------------
+// The RESULT line: `(sum of N size lines)` is the shipped phrase, identical to
+// the editor badge and the single-op bulk preview. One rule met in three
+// places must not read three different ways — which it did until now.
+// --------------------------------------------------------------------------
+const host = doc.createElement("div");
+api.renderBulkFieldsTable(host, [{
+  name: "SH.OK", status: "change", path: "/tmp/SH.OK",
+  fields: [
+    { section: "Header", field: "tot_qty", status: "change",
+      before: "0000022", after: "0000008", rows: 1, moved: 1, varies: false,
+      rollup: { reason: "sum", rows: 4, section: "Size", typed: "0000500" } },
+    { section: "Size", field: "qty", status: "change",
+      before: "00002", after: "00125", rows: 4, moved: 4, varies: false },
+  ],
+}], false);
+const lineText = descendants(host)
+  .filter((e) => e.classList && e.classList.contains("bulkf-line"))
+  .map((e) => e.textContent);
+
+check("the roll-up line uses the SHIPPED parenthetical",
+      lineText.some((t) => /\(sum of 4 size lines\)/.test(t)));
+check("...and names the value that was discarded",
+      lineText.some((t) => /your 0000500 was not used/.test(t)));
+check("...showing what will really land, not what was typed",
+      lineText.some((t) => /tot_qty: 0000022 → 0000008/.test(t)));
+check("a plain field keeps its transition and row count",
+      lineText.some((t) => /qty: 00002 → 00125/.test(t) && /4\/4 rows/.test(t)));
+check("the roll-up line is marked so it reads as a correction",
+      descendants(host).some((e) => e.classList
+        && e.classList.contains("bulkf-roll")));
 
 // --------------------------------------------------------------------------
 // Volume Generate: the note is tied to the field's checkbox

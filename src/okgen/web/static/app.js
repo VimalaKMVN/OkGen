@@ -739,14 +739,20 @@ function renderBulkFieldsTable(host, results, applied) {
         // ordinary change is the thing v0.78.0 exists to prevent.
         if (f.rollup) {
           line.classList.add("bulkf-roll");
+          // `(sum of N size lines)` is the SHIPPED phrase — identical to the
+          // single-op bulk preview and the editor badge, so one rule reads the
+          // same wherever it is met. The discarded value is named only when
+          // there IS one, since that is the "where did my number go" case.
           const sec = String(f.rollup.section).toLowerCase();
-          line.textContent += `   ← sum of ${f.rollup.rows} ${sec} lines`
-            + (f.rollup.typed ? `; your ${f.rollup.typed} was not used` : "");
+          line.textContent += ` (sum of ${f.rollup.rows} ${sec} lines)`
+            + (f.rollup.typed ? ` — your ${f.rollup.typed} was not used` : "");
         }
       } else if (f.rollup) {
         line.classList.add("bulkf-roll");
-        line.textContent = `${f.field}: kept at ${f.rollup.typed || ""} `
-          + `(already the sum of ${f.rollup.rows} ${String(f.rollup.section).toLowerCase()} lines)`;
+        // Nothing moved: the typed value already equalled the sum. Same
+        // parenthetical as every other surface.
+        line.textContent = `${f.field}: unchanged `
+          + `(sum of ${f.rollup.rows} ${String(f.rollup.section).toLowerCase()} lines)`;
       } else {
         line.textContent = `${f.field}: ${f.detail || f.status}`;
       }
