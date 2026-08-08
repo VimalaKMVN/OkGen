@@ -520,14 +520,110 @@ def open_report_folder(config, script_name: str) -> dict:
 
 
 def _reveal(folder: str) -> None:
-    """Show a folder in the OS file manager. Windows is the real target; the
-    others keep the dev/CI path honest rather than silently doing nothing."""
-    if os.name == "nt":
-        os.startfile(folder)                                  # noqa: S606
-    elif sys.platform == "darwin":
-        subprocess.Popen(["open", folder], start_new_session=True)
-    else:
-        subprocess.Popen(["xdg-open", folder], start_new_session=True)
+    """Show a folder in the OS file manager, IN FRONT of the browser.
+
+    `os.startfile` opens Explorer but does not raise it: OkGen is a background
+    process as far as Win32 is concerned, so the new window can land behind the
+    browser — the same foreground-lock that made the folder chooser look like it
+    had not opened (D24/v0.80.0). On Windows the folder is opened through the
+    shell and then explicitly brought forward; anything that fails falls back to
+    plain `os.startfile`, so the worst case is exactly today's behaviour.
+
+    macOS and Linux need none of this — `open` and `xdg-open` activate the
+    window themselves.
+    """
+    if os.name != "nt":
+        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        subprocess.Popen([opener, folder], start_new_session=True)
+        return
+    try:
+        _reveal_windows_front(folder)
+    except Exception:                                  # noqa: BLE001
+        os.startfile(folder)                           # noqa: S606
+
+
+# Bringing a window to the FRONT is not the same as creating it: a background
+# process cannot take foreground on its own, so we attach to the current
+# foreground window's input queue for the hand-off and detach after. This is
+# the same manoeuvre browse_folder uses for the chooser; it is repeated rather
+# than shared because that code is confirmed working on the user's box and is
+# not worth destabilising for a few lines of P/Invoke (see PLAN §6).
+_REVEAL_PS = r"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class RevealFg {
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern void keybd_event(byte k, byte s, uint f, UIntPtr e);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+  [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+  [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool f);
+}
+"@
+$target = $env:OKGEN_REVEAL_PATH
+$shell = New-Object -ComObject Shell.Application
+
+function Find-Window($path) {
+  foreach ($w in $shell.Windows()) {
+    try {
+      if ($w.Document.Folder.Self.Path -eq $path) { return $w }
+    } catch { }        # a non-folder shell window (IE) has no Document.Folder
+  }
+  return $null
+}
+
+# Reuse a window ALREADY showing this folder rather than stacking duplicates —
+# clicking Reports twice should raise the one window, not open a second.
+$win = Find-Window $target
+if ($win -eq $null) {
+  $shell.Open($target)
+  for ($i = 0; $i -lt 25 -and $win -eq $null; $i++) {
+    Start-Sleep -Milliseconds 120
+    $win = Find-Window $target
+  }
+}
+if ($win -ne $null) {
+  $h = [IntPtr]$win.HWND
+  if ([RevealFg]::IsIconic($h)) { [RevealFg]::ShowWindow($h, 9) | Out-Null }  # SW_RESTORE
+  $fg = [RevealFg]::GetForegroundWindow()
+  $fgTid = [RevealFg]::GetWindowThreadProcessId($fg, [IntPtr]::Zero)
+  $myTid = [RevealFg]::GetCurrentThreadId()
+  $attached = $false
+  if ($fgTid -ne 0 -and $fgTid -ne $myTid) {
+    $attached = [RevealFg]::AttachThreadInput($myTid, $fgTid, $true)
+  }
+  # Tapping Alt releases Windows' foreground lock for this thread.
+  [RevealFg]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
+  [RevealFg]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
+  [RevealFg]::BringWindowToTop($h) | Out-Null
+  [RevealFg]::SetForegroundWindow($h) | Out-Null
+  if ($attached) { [RevealFg]::AttachThreadInput($myTid, $fgTid, $false) | Out-Null }
+} else {
+  # Never leave the user with nothing: if the window could not be located,
+  # open it the ordinary way and let it land where it lands.
+  Start-Process explorer.exe -ArgumentList $target
+}
+"""
+
+
+def _reveal_windows_front(folder: str) -> None:
+    """Open (or raise) an Explorer window for ``folder`` and bring it forward.
+
+    The path is passed through the ENVIRONMENT, not interpolated into the
+    script: a Windows path is full of backslashes and may contain quotes, and
+    building PowerShell by string concatenation is how a path becomes code.
+    """
+    import base64
+
+    env = dict(os.environ, OKGEN_REVEAL_PATH=folder)
+    enc = base64.b64encode(_REVEAL_PS.encode("utf-16-le")).decode("ascii")
+    subprocess.run(["powershell", "-NoProfile", "-STA", "-EncodedCommand", enc],
+                   env=env, capture_output=True, text=True, timeout=30)
 
 
 def scripts_for(paths, registry, config) -> dict:

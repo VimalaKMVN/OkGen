@@ -213,3 +213,68 @@ def test_declaring_a_results_folder_does_not_disturb_running_that_script():
     assert script["workbook"].endswith(".xlsm")
     assert script["bat"].endswith("REG_THERMAL_ExecutionScript.bat")
     assert script["data_sheet"]
+
+
+# --------------------------------------------------------------------------- #
+# Bringing the window to the FRONT
+#
+# `os.startfile` opens Explorer but does not raise it: OkGen is a background
+# process as far as Win32 is concerned, so the window can land behind the
+# browser — the same foreground lock that made the folder chooser look like it
+# had never opened (D24 / v0.80.0), reported here as "the reports folder is not
+# visible sometimes".
+# --------------------------------------------------------------------------- #
+def test_the_windows_script_raises_the_window_rather_than_only_opening_it():
+    ps = tosca._REVEAL_PS
+    for needed in ("SetForegroundWindow", "BringWindowToTop", "AttachThreadInput",
+                   "keybd_event"):
+        assert needed in ps, needed
+
+
+def test_a_minimised_window_is_restored_not_just_raised():
+    """Raising an iconic window shows a taskbar flash and nothing else."""
+    assert "IsIconic" in tosca._REVEAL_PS
+    assert "ShowWindow" in tosca._REVEAL_PS
+
+
+def test_an_already_open_folder_is_reused_not_duplicated():
+    """Clicking Reports twice must raise the one window, not stack copies."""
+    assert "Find-Window" in tosca._REVEAL_PS
+    assert "$shell.Windows()" in tosca._REVEAL_PS
+
+
+def test_the_path_is_passed_by_environment_not_interpolated():
+    """A Windows path is full of backslashes and may contain quotes. Building
+    PowerShell by concatenation is how a path becomes code."""
+    assert "OKGEN_REVEAL_PATH" in tosca._REVEAL_PS
+    assert "{folder}" not in tosca._REVEAL_PS
+
+
+def test_the_script_still_opens_the_folder_if_the_window_is_never_found():
+    """Never leave the user with nothing because the raise failed."""
+    assert "Start-Process explorer.exe" in tosca._REVEAL_PS
+
+
+def test_a_failure_falls_back_to_the_plain_open(monkeypatch):
+    """Worst case must be exactly the previous behaviour, not an error."""
+    seen = []
+    monkeypatch.setattr(tosca.os, "name", "nt", raising=False)
+    monkeypatch.setattr(tosca.os, "startfile", lambda f: seen.append(f), raising=False)
+
+    def boom(_):
+        raise RuntimeError("no powershell")
+
+    monkeypatch.setattr(tosca, "_reveal_windows_front", boom)
+    tosca._reveal(r"D:\ToscaAutomation\x")
+    assert seen == [r"D:\ToscaAutomation\x"]
+
+
+def test_non_windows_opens_without_the_foreground_dance(monkeypatch):
+    """`open` and `xdg-open` activate the window themselves."""
+    seen = []
+    monkeypatch.setattr(tosca.os, "name", "posix", raising=False)
+    monkeypatch.setattr(tosca.subprocess, "Popen",
+                        lambda cmd, **k: seen.append(cmd))
+    tosca._reveal("/tmp/reports")
+    assert seen and seen[0][0] in ("open", "xdg-open")
+    assert seen[0][1] == "/tmp/reports"
