@@ -308,6 +308,20 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except service.EditError as exc:
             return _err(str(exc), 422)
 
+    @app.get("/api/tosca/reports")
+    def tosca_reports():
+        """Scripts that declare a results folder, for the Reports picker."""
+        return jsonify({"folders": service.tosca_report_folders(config)})
+
+    @app.post("/api/tosca/reports/open")
+    def tosca_reports_open():
+        """Open one script's results folder in the OS file manager."""
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.open_tosca_reports(config, body.get("script", "")))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     @app.post("/api/file/copy")
     def file_copy():
         body = request.get_json(force=True, silent=True) or {}

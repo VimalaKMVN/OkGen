@@ -2386,6 +2386,80 @@ async function sendToNiceLabel() {
 // ---- Run TOSCA Script ----
 // Pick a configured script (workbook), then POST the selected files; the server
 // writes one row per unique Chain/Process/Format into that workbook's data sheet.
+// ---- TOSCA Reports: open a script's results folder in the OS file manager ---
+// Deliberately hands off to Explorer instead of listing the files here. Those
+// folders hold Word and Excel documents, which no browser can render without a
+// heavy vendored converter (the D31 trade) — and Explorer already does all of
+// it: thumbnails, sorting, and a double-click that opens each document in its
+// own app. A table imitating Explorer would be more work and permanently worse.
+async function openToscaReports() {
+  let info;
+  try { info = await api("/api/tosca/reports"); }
+  catch (e) { setStatus("Could not load TOSCA report folders: " + e.message, "err"); return; }
+  const folders = info.folders || [];
+  if (!folders.length) {
+    setStatus("No TOSCA script declares a results folder — add a `results:` path "
+              + "in config/tosca.yaml and restart OkGen", "err");
+    return;
+  }
+  const script = await pickReportFolder(folders);
+  if (!script) return;
+  try {
+    const res = await postJSON("/api/tosca/reports/open", { script });
+    // Explorer opens OUTSIDE the browser and can land behind it, so nothing
+    // visibly happens here — say what was opened rather than leaving the click
+    // looking ignored (the folder-chooser lesson).
+    setStatus(`Opened the ${script} results folder in Explorer — ${res.opened}`, "ok");
+  } catch (e) {
+    setStatus(e.message, "err");
+  }
+}
+
+function pickReportFolder(folders) {
+  return new Promise((resolve) => {
+    const ov = el("div", "modal-overlay");
+    const card = el("div", "modal-card");
+    card.appendChild(el("h3", "modal-title", "TOSCA Reports"));
+    card.appendChild(el("div", "modal-dest",
+      "Which script's results? The folder opens in Explorer, where the "
+      + "Word and Excel reports open as usual."));
+    const list = el("div", "tosca-scripts");
+    folders.forEach((f, i) => {
+      const lab = el("label", "tosca-choice");
+      const rb = el("input"); rb.type = "radio"; rb.name = "tosca-reports"; rb.value = f.name;
+      if (i === 0) rb.checked = true;
+      lab.appendChild(rb);
+      const box = el("span", "report-choice-text");
+      box.appendChild(el("span", null, f.name));
+      // The full path, and a plain warning when it is not on THIS machine —
+      // only some of these folders are set up, and an empty Explorer window
+      // would not say why.
+      box.appendChild(el("span", "report-path", f.folder));
+      if (!f.exists) {
+        box.appendChild(el("span", "report-missing",
+                           "not found on this machine — check config/tosca.yaml"));
+      }
+      lab.appendChild(box);
+      list.appendChild(lab);
+    });
+    card.appendChild(list);
+    const acts = el("div", "modal-actions");
+    const cancel = el("button", "btn", "Cancel");
+    const open = el("button", "btn btn-primary", "Open in Explorer");
+    acts.appendChild(cancel); acts.appendChild(open);
+    card.appendChild(acts);
+    ov.appendChild(card); document.body.appendChild(ov);
+    const close = (val) => { ov.remove(); resolve(val); };
+    cancel.addEventListener("click", () => close(null));
+    ov.addEventListener("click", (e) => { if (e.target === ov) close(null); });
+    open.addEventListener("click", () => {
+      const sel = card.querySelector("input[name=tosca-reports]:checked");
+      close(sel ? sel.value : null);
+    });
+    open.focus();
+  });
+}
+
 function pickTosca(scripts, count, warning) {
   return new Promise((resolve) => {
     const ov = el("div", "modal-overlay");
@@ -2899,6 +2973,7 @@ $("#tabRaw").addEventListener("click", () => switchTab("raw"));
 $("#openBtn").addEventListener("click", browseFolder);
 $("#bulkBtn").addEventListener("click", (e) => { e.stopPropagation(); showBulkMenu(); });
 $("#toscaBtn").addEventListener("click", (e) => { e.stopPropagation(); runTosca(); });
+$("#toscaReportsBtn").addEventListener("click", (e) => { e.stopPropagation(); openToscaReports(); });
 
 // Dropdown of bulk actions, anchored under the "Bulk Actions" button —
 // mirrors the right-click menu so both places offer the same options.

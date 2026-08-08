@@ -19,6 +19,11 @@
     <input id="folderPath" class="folder-input" type="text"
            placeholder="Folder path (or click Open Folder to browse)…" />
     <button id="openBtn" class="btn">Open Folder…</button>
+    <!-- ALWAYS visible, unlike Bulk Actions / Run TOSCA, which hide when nothing
+         is selected. A TOSCA run takes time, so its reports are wanted later —
+         often with no folder open and nothing selected at all. -->
+    <button id="toscaReportsBtn" class="btn"
+            title="Open a TOSCA script's test-results folder in Explorer — reports, logs, images, Word and Excel documents.">📄 TOSCA Reports</button>
     <label id="autoCleanLabel" class="auto-clean"
            title="When you open a file that has stray blank lines at the end, remove them and save automatically. Turn off to review and Save yourself.">
       <input id="autoCleanChk" type="checkbox" checked /> Auto-clean blank lines

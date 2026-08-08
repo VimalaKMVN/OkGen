@@ -772,3 +772,13 @@ select.fval-pick:hover { color: var(--text); }
 }
 .src-badge-wms { color: #7ec8e3; border: 1px solid #3d6b80; }
 .src-badge-scan { color: #c3a6e0; border: 1px solid #6a4f85; }
+
+/* TOSCA Reports picker: each choice carries its folder path, and says plainly
+   when that folder is not on THIS machine — only some are set up, and an empty
+   Explorer window would not explain itself. */
+.report-choice-text { display: flex; flex-direction: column; gap: 2px; }
+.report-path {
+  font-family: var(--mono, monospace); font-size: 10.5px; color: #9aa0a6;
+  overflow-wrap: anywhere;
+}
+.report-missing { font-size: 10.5px; color: #b45309; font-weight: 600; }

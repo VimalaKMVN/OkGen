@@ -1952,6 +1952,25 @@ def delete_file(path) -> dict:
     return {"deleted": str(p)}
 
 
+def tosca_report_folders(config: Config) -> list:
+    """Scripts declaring a `results:` folder — the TOSCA Reports picker's list.
+
+    Independent of any selection or run: a TOSCA run takes time, so the reports
+    are wanted later, not the moment the run window closes.
+    """
+    from okgen import tosca
+    return tosca.report_folders(config)
+
+
+def open_tosca_reports(config: Config, script_name: str) -> dict:
+    """Open a script's results folder in the OS file manager."""
+    from okgen import tosca
+    try:
+        return tosca.open_report_folder(config, script_name)
+    except tosca.ToscaError as exc:
+        raise EditError(str(exc))
+
+
 def tosca_scripts(config: Config, paths=None, registry=None) -> dict:
     """The configured TOSCA scripts + the run warning, for the picker.
 

@@ -38,6 +38,13 @@
 #   workbook    full .xlsm path (preferred), or a folder holding exactly one.
 #   data_sheet  the exact sheet/tab name to populate.
 #   bat         full .bat path (preferred — a folder with several is ambiguous).
+#   results     OPTIONAL. The folder this script writes its test results into
+#               (reports, .txt logs, images, Word/Excel docs). The 📄 TOSCA
+#               Reports toolbar button lists every script that declares one and
+#               opens the chosen folder in Windows Explorer, so the documents
+#               open in Word/Excel exactly as they do from Explorer — OkGen does
+#               not try to render them. A script WITHOUT this key simply is not
+#               offered; adding the rest later is a config edit, no code.
 # Optional per script, when a sheet is laid out differently from the defaults
 # further down: `first_data_row`, `columns`, `key_sheet`.
 scripts:
@@ -97,12 +104,14 @@ scripts:
     workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\REG_LASER_Compare_TestData.xlsm
     data_sheet: "Laser-SH_PT_CL_DL_Formats"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\REG_LASER_ExecutionScript.bat
+    results: D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\Laser_TestResults
 
   - name: "OK Regression Thermal"
     applies_to: [ok]
     workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_TestData.xlsm
     data_sheet: "REG_THERMAL_Compare"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_ExecutionScript.bat
+    results: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\Thermal_TestResults
 
 # A TOSCA run stopped part-way leaves the input workbook OPEN in Excel, and that
 # lock outlives the run — so the next attempt fails with "locked". With this on,

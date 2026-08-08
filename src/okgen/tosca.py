@@ -29,6 +29,7 @@ import datetime
 import os
 import re
 import subprocess
+import sys
 import time
 import zipfile
 from pathlib import Path
@@ -466,6 +467,67 @@ def _engine_of(path: Path, registry) -> Optional[str]:
 def list_scripts(config) -> List[dict]:
     return [{"name": s.get("name"), "applies_to": sorted(_script_engines(s))}
             for s in config.tosca_scripts()]
+
+
+def report_folders(config) -> List[dict]:
+    """Scripts that declare a `results:` folder, for the TOSCA Reports picker.
+
+    A script without the key is simply not offered — the other eight are a
+    config edit away, no code. `exists` is checked so a folder that is not set
+    up on THIS machine says so, instead of opening an empty window or failing
+    silently: these paths live on the user's D: drive and only some are wired up.
+    """
+    out = []
+    for s in config.tosca_scripts():
+        folder = (s.get("results") or "").strip()
+        if not folder:
+            continue
+        out.append({"name": s.get("name"), "folder": folder,
+                    "exists": Path(folder).is_dir()})
+    return out
+
+
+def open_report_folder(config, script_name: str) -> dict:
+    """Open one script's results folder in the OS file manager.
+
+    Deliberately hands off to Explorer rather than listing the files in OkGen.
+    The folders hold Word and Excel documents, which no browser can render
+    without a heavy vendored converter (the D31 trade) — and Explorer already
+    does everything wanted here: thumbnails, sorting, and a double-click that
+    opens each document in its own application. Imitating it in a table would be
+    more work and permanently worse.
+
+    NOTE the path is passed RAW. `okgen.paths` prefixes `\\?\` for reads and
+    writes past MAX_PATH (D44), but Explorer does not accept a prefixed path —
+    the same reason `run()` hands `os.startfile` the plain .bat path.
+    """
+    script = next((s for s in config.tosca_scripts()
+                   if s.get("name") == script_name), None)
+    if script is None:
+        raise ToscaError(f"no TOSCA script named {script_name!r}")
+    folder = (script.get("results") or "").strip()
+    if not folder:
+        raise ToscaError(
+            f"{script_name} declares no results folder — add a `results:` path "
+            f"to that script in config/tosca.yaml and restart OkGen")
+    if not Path(folder).is_dir():
+        raise ToscaError(
+            f"the results folder for {script_name} does not exist on this "
+            f"machine:\n{folder}\n\nCheck the `results:` path in "
+            f"config/tosca.yaml, or run the script once to create it.")
+    _reveal(folder)
+    return {"opened": folder, "script": script_name}
+
+
+def _reveal(folder: str) -> None:
+    """Show a folder in the OS file manager. Windows is the real target; the
+    others keep the dev/CI path honest rather than silently doing nothing."""
+    if os.name == "nt":
+        os.startfile(folder)                                  # noqa: S606
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", folder], start_new_session=True)
+    else:
+        subprocess.Popen(["xdg-open", folder], start_new_session=True)
 
 
 def scripts_for(paths, registry, config) -> dict:

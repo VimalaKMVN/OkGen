@@ -111,8 +111,20 @@ function attrValue(el, name) {
     return v === undefined ? null : String(v);
   }
   const v = el.getAttribute ? el.getAttribute(name) : null;
-  return v === null || v === undefined ? null : String(v);
+  if (v !== null && v !== undefined) return String(v);
+  // REFLECTED attributes: a browser keeps these in step with the property, so
+  // `rb.name = "x"` is visible to `[name=x]`. Without this, code that sets the
+  // property (which every radio-group builder does) was invisible to attribute
+  // selectors and `input[name=…]:checked` matched NOTHING — the same silent
+  // class as the setAttribute no-op and the missing attribute selectors before
+  // it: the query returns empty and the assertion fails for the wrong reason.
+  if (REFLECTED.has(name)) {
+    const p = el[name];
+    return p === undefined || p === null || p === "" ? null : String(p);
+  }
+  return null;
 }
+const REFLECTED = new Set(["name", "type", "value", "id", "placeholder", "title"]);
 
 // Supports `tag`, `.class`, `#id` and ATTRIBUTE selectors, in combination:
 // `.fval[data-section="0"][data-field="qty"]`. Attributes used to be
