@@ -131,10 +131,12 @@ def test_make_unique_in_folder(tmp_path, registry, config):
 
 def test_bulk_excludes_key_field(registry, config):
     scope = service.bulk_scope([str(DATA_DIR / "StyleHeader.OK")], registry, config)
-    names = [f["name"] for f in scope["header_fields"]["StyleHeader"]]
-    assert "keytrol" not in names            # key field hidden from bulk set-value
-    assert "indicator" not in names          # detection signature — locked in bulk too
-    assert "dept" in names                   # ordinary fields still offered
+    by = {f["name"]: f for f in scope["header_fields"]["StyleHeader"]}
+    # Shown greyed rather than omitted — see test_signature_field_not_offered_in_bulk.
+    assert by["keytrol"]["editable"] is False        # the key: Make keys unique instead
+    assert "key" in by["keytrol"]["locked_reason"]
+    assert by["indicator"]["editable"] is False      # detection signature
+    assert by["dept"].get("editable", True) is True  # ordinary fields still editable
 
 
 def test_build_tree_is_one_level_lazy(tmp_path, config):
@@ -1167,8 +1169,14 @@ def test_signature_field_not_offered_in_bulk(registry, config, sample, layout, f
     if not (DATA_DIR / sample).exists():
         pytest.skip(f"no sample for {sample}")
     scope = service.bulk_scope([str(DATA_DIR / sample)], registry, config)
-    names = [f["name"] for f in scope["header_fields"][layout]]
-    assert field not in names, f"bulk edit must not offer {layout}.{field}"
+    entry = next((f for f in scope["header_fields"][layout] if f["name"] == field), None)
+    # LISTED but not editable, deliberately. Omitted entirely it reads as a
+    # missing field — a user hunting for DistLabels' `format` cannot tell
+    # "OkGen forgot it" from "you may not change it". The guarantee that
+    # matters is that it cannot be WRITTEN, which the next test pins.
+    assert entry is not None, f"{layout}.{field} must be shown, not hidden"
+    assert entry.get("editable") is False, f"bulk edit must not allow {layout}.{field}"
+    assert entry.get("locked_reason"), "a greyed field must say why"
 
 
 @pytest.mark.parametrize("sample,layout,field", SIGNATURE_FIELDS)

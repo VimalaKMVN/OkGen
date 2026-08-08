@@ -167,3 +167,28 @@ blank_allowed:
                     # spaces and so has always blanked correctly
   DistLabels:
     - ad            # Store-row ad date
+
+# --------------------------------------------------------------------------- #
+# enforce_options — fields whose display.yaml list is the WHOLE truth.
+#
+# A value outside the list is REFUSED on every write path (single edit, both
+# bulk paths, volume generate), with the allowed values named. Without this a
+# ticket format of `8` — which no chain declares — saved cleanly on all nine
+# layouts that expose the field, and only reached NiceLabel to fail there.
+#
+# The list is resolved for the FILE'S OWN CHAIN, because formats are per banner:
+# `X` means Dumbbell Gum Label on Homegoods and Purple Rat Tail on Winners, and
+# a format valid for one chain is not valid for another.
+#
+# Deliberately OPT-IN per field rather than "every field that has options".
+# Some lists are suggestions by design — a `freeform` field's list (D56) is the
+# one word its documents carry, and the user must be able to re-type it in
+# another casing — and enforcing an INCOMPLETE list refuses legitimate values,
+# which is worse than accepting a wrong one. `chain` is likewise governed by
+# isolation (D9) and `type` by the detection guard (D51), not by a list.
+#
+#   layout name -> [output_field_name, ...]   ("*" applies to every layout)
+enforce_options:
+  "*":
+    - format          # every layout's ticket format
+    - ticket_format   # EUCartonLabel's name for the same thing

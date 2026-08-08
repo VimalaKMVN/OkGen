@@ -149,6 +149,7 @@ class Config:
         pad_zero_fields: Optional[Dict[str, set]] = None,
         freeform_fields: Optional[Dict[str, set]] = None,
         blank_allowed_fields: Optional[Dict[str, set]] = None,
+        enforce_options_fields: Optional[Dict[str, set]] = None,
         # Declared source per .OK layout (display only) — see layout_source().
         layout_sources: Optional[Dict[str, str]] = None,
         # {layout: [spec, ...]} header fields summed from a detail section.
@@ -160,6 +161,7 @@ class Config:
         self._pad_zero_fields = pad_zero_fields or {}
         self._freeform_fields = freeform_fields or {}
         self._blank_allowed_fields = blank_allowed_fields or {}
+        self._enforce_options_fields = enforce_options_fields or {}
         self._ok_to_json = ok_to_json or {}
         self._config_dir = config_dir or ""
         # The JSON hand-off (HTTP POST) block — see nicelabel_post.yaml. The
@@ -489,6 +491,25 @@ class Config:
         if layout:
             names |= set(self._blank_allowed_fields.get(layout, set()))
         return names
+
+    def enforce_options_fields(self, layout: Optional[str]) -> set:
+        """Fields whose declared option list is the WHOLE truth, so a value
+        outside it is refused on every write path.
+
+        Deliberately opt-in per field. Most option lists in display.yaml are the
+        whole truth, but some are SUGGESTIONS by design (a `freeform` field's
+        list is one entry the user must be able to re-type in another casing —
+        D56), and enforcing an INCOMPLETE list would refuse a legitimate value,
+        which is worse than accepting a wrong one. So a field earns enforcement
+        by being listed here.
+        """
+        names = set(self._enforce_options_fields.get("*", set()))
+        if layout:
+            names |= set(self._enforce_options_fields.get(layout, set()))
+        return names
+
+    def enforces_options(self, layout: Optional[str], field: Optional[str]) -> bool:
+        return bool(field) and field in self.enforce_options_fields(layout)
 
     def allows_blank(self, layout: Optional[str], field: Optional[str]) -> bool:
         return bool(field) and field in self.blank_allowed_fields(layout)
@@ -863,6 +884,7 @@ class Config:
         pad_zero_fields: Dict[str, set] = {}
         freeform_fields: Dict[str, set] = {}
         blank_allowed_fields: Dict[str, set] = {}
+        enforce_options_fields: Dict[str, set] = {}
         fd_path = cdir / "field_display.yaml"
         if fd_path.is_file():
             data = yaml.safe_load(fd_path.read_text(encoding="utf-8")) or {}
@@ -889,6 +911,10 @@ class Config:
             blank_allowed_fields = {
                 str(l): {str(f) for f in (fs or [])}
                 for l, fs in (data.get("blank_allowed") or {}).items()
+            }
+            enforce_options_fields = {
+                str(l): {str(f) for f in (fs or [])}
+                for l, fs in (data.get("enforce_options") or {}).items()
             }
 
         detail_fill: Dict[str, dict] = {}
@@ -1011,5 +1037,6 @@ class Config:
                    pad_zero_fields=pad_zero_fields,
                    freeform_fields=freeform_fields,
                    blank_allowed_fields=blank_allowed_fields,
+                   enforce_options_fields=enforce_options_fields,
                    layout_sources=layout_sources,
                    rollups=rollups)

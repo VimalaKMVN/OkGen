@@ -563,6 +563,10 @@ function renderBulkFieldsPanel(scope) {
     const cb = el("input", "bulkf-on"); cb.type = "checkbox";
     cb.dataset.section = sectionName;
     cb.dataset.field = f.name;
+    // A locked field is SHOWN, greyed, with the reason — omitting it reads as
+    // "OkGen forgot this field" rather than "you may not change it".
+    const locked = f.editable === false;
+    if (locked) { cb.disabled = true; row.classList.add("bulkf-locked"); }
     row.appendChild(cb);
     row.appendChild(el("span", "bulkf-name",
                        f.date ? `${f.name} (date)` : `${f.name} (${f.size != null ? f.size : "?"})`));
@@ -581,6 +585,7 @@ function renderBulkFieldsPanel(scope) {
     // not another reads as a bug. Plain text everywhere until the lists are
     // worth trusting; the value is validated on the write path regardless.
     const sync = () => {
+      if (locked) { [vals, mn, mx].forEach((i) => { i.disabled = true; }); return; }
       [vals, mn, mx].forEach((i) => { i.disabled = !cb.checked; });
       // A range and a value list are alternatives — filling one greys the other,
       // so an op can never be ambiguous about which the server should use.
@@ -593,6 +598,9 @@ function renderBulkFieldsPanel(scope) {
     cb.addEventListener("change", () => { sync(); reset(); });
     [vals, mn, mx].forEach((i) => i.addEventListener("input", () => { sync(); reset(); }));
     row.appendChild(vals); row.appendChild(mn); row.appendChild(mx);
+    if (locked) {
+      row.appendChild(el("span", "bulkf-lockreason", f.locked_reason || "read-only"));
+    }
 
     // A roll-up field is not written as typed — say so here too, in the same
     // words as the editor badge and the single-op panel.
@@ -632,7 +640,7 @@ function renderBulkFieldsPanel(scope) {
     const ops = [];
     descendantsOf(groups, "bulkf-field").forEach((row) => {
       const cb = row.querySelector(".bulkf-on");
-      if (!cb || !cb.checked) return;
+      if (!cb || !cb.checked || cb.disabled) return;
       const section = cb.dataset.section, field = cb.dataset.field;
       const vals = (row.querySelector(".bulkf-vals") || {}).value || "";
       const mn = (row.querySelector(".bulkf-min") || {}).value || "";
@@ -885,7 +893,8 @@ function renderBulkPanel(scope) {
       const fieldSel = el("select", "bulk-field");
       // A date range applies only to the temporal fields; every other op keeps
       // the full list.
-      (op === "random_date" ? sec.fields.filter((f) => f.date) : sec.fields)
+      const pickable = (sec.fields || []).filter((f) => f.editable !== false);
+      (op === "random_date" ? pickable.filter((f) => f.date) : pickable)
         .forEach((f) => fieldSel.appendChild(
           new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
       row2.appendChild(el("span", "bulk-label", "Field:"));

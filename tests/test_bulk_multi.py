@@ -25,6 +25,7 @@ from pathlib import Path
 import pytest
 
 from okgen.api import service
+from okgen.api.service import EditError
 from okgen.config import Config
 from okgen.layout.registry import LayoutRegistry
 from okgen.okfile import parse_okfile
@@ -448,3 +449,136 @@ def test_setting_a_field_to_its_current_value_is_unchanged(files, registry, conf
                              backup=True)
     assert p.read_bytes() == before
     assert not list(p.parent.glob("*.bak")), "an unchanged file must not be rewritten"
+
+
+# --------------------------------------------------------------------------- #
+# FORMAT validation — `enforce_options` in field_display.yaml
+#
+# A ticket format of `8` — which no chain declares — saved cleanly on all nine
+# layouts that expose the field, and only failed later at NiceLabel. The list
+# lives in display.yaml already; enforcement makes it the whole truth.
+#
+# The hazard is the opposite one: enforcing an INCOMPLETE list refuses a
+# legitimate value, which is worse than accepting a wrong one. That is why it
+# is opt-in per field, and why the tests below check both directions.
+# --------------------------------------------------------------------------- #
+SHIPPED = Path(__file__).resolve().parents[1] / "config"
+
+
+@pytest.fixture(scope="module")
+def shipped_config():
+    return Config.load(SHIPPED)
+
+
+def _fmt_field(layout):
+    return "ticket_format" if layout == "EUCartonLabel" else "format"
+
+
+OK_LAYOUTS = [("StyleHeader.OK", "StyleHeader"), ("Preticket.OK", "Preticket"),
+              ("CartonLabel.OK", "CartonLabel"), ("EUStyleHeader.OK", "EUStyleHeader"),
+              ("EUCartonLabel.OK", "EUCartonLabel"), ("EUPreticket.OK", "EUPreticket")]
+
+
+@pytest.mark.parametrize("sample,layout", OK_LAYOUTS)
+def test_an_undeclared_format_is_refused(tmp_path, registry, shipped_config,
+                                         sample, layout):
+    src = DATA_DIR / sample
+    if not src.exists():
+        pytest.skip(f"no sample for {sample}")
+    p = tmp_path / sample
+    shutil.copy(src, p)
+    before = p.read_bytes()
+    field = _fmt_field(layout)
+    res = service.bulk_multi_apply(
+        [str(p)], layout,
+        [{"section": "Header", "type": "list", "field": field, "values": "8"}],
+        registry, shipped_config, backup=False)["results"][0]
+    assert res["status"] == "error"
+    assert "not valid for this file" in res["error"]
+    assert p.read_bytes() == before
+
+
+@pytest.mark.parametrize("sample,layout", OK_LAYOUTS)
+def test_every_declared_format_still_saves(tmp_path, registry, shipped_config,
+                                           sample, layout):
+    """The hazard direction: a list narrower than reality would block real work.
+    Every format the shipped config declares for this file must save."""
+    src = DATA_DIR / sample
+    if not src.exists():
+        pytest.skip(f"no sample for {sample}")
+    view = service.parse_file_view(src, registry, shipped_config)
+    field = _fmt_field(layout)
+    entry = next((f for f in view["sections"][0]["fields"] if f["name"] == field), None)
+    assert entry and entry.get("options"), f"{layout}.{field} declares no options"
+    for code in entry["options"]:
+        p = tmp_path / sample
+        shutil.copy(src, p)
+        res = service.bulk_multi_apply(
+            [str(p)], layout,
+            [{"section": "Header", "type": "list", "field": field, "values": code}],
+            registry, shipped_config, backup=False)["results"][0]
+        assert res["status"] in ("changed", "unchanged"), (code, res.get("error"))
+
+
+def test_the_error_names_the_allowed_values(tmp_path, registry, shipped_config):
+    """A refusal must be diagnosable: if a real format is missing from config,
+    the message is what tells you so."""
+    p = tmp_path / "SH.OK"
+    shutil.copy(DATA_DIR / "StyleHeader.OK", p)
+    res = service.bulk_multi_apply(
+        [str(p)], "StyleHeader",
+        [{"section": "Header", "type": "list", "field": "format", "values": "8"}],
+        registry, shipped_config, backup=False)["results"][0]
+    assert "allowed:" in res["error"]
+    assert "A" in res["error"] and "B" in res["error"]
+
+
+def test_a_list_is_checked_before_it_is_picked_from(tmp_path, registry, shipped_config):
+    """A `list` op picks at random, so validating the RESULT would pass or fail
+    by luck. One bad entry must refuse the whole op, every time."""
+    p = tmp_path / "SH.OK"
+    shutil.copy(DATA_DIR / "StyleHeader.OK", p)
+    before = p.read_bytes()
+    for _ in range(12):
+        res = service.bulk_multi_apply(
+            [str(p)], "StyleHeader",
+            [{"section": "Header", "type": "list", "field": "format",
+              "values": "A,B,8"}], registry, shipped_config, backup=False)["results"][0]
+        assert res["status"] == "error"
+    assert p.read_bytes() == before
+
+
+def test_generate_cannot_create_a_file_with_an_invalid_format(tmp_path, registry,
+                                                              shipped_config):
+    """Generation is the path most able to produce a wrong value with nobody
+    typing it: a numeric RANGE on `format` emitted 3, 3, 7 on a layout whose
+    formats are letters."""
+    p = tmp_path / "SH.OK"
+    shutil.copy(DATA_DIR / "StyleHeader.OK", p)
+    with pytest.raises(Exception) as exc:
+        service.generate_preview([str(p)], {
+            "count": 3,
+            "header_fields": [{"name": "format", "mode": "random", "min": 1, "max": 9}],
+        }, registry, shipped_config, sample=3)
+    assert "not valid" in str(exc.value)
+
+
+def test_the_single_file_editor_refuses_it_too(tmp_path, registry, shipped_config):
+    p = tmp_path / "SH.OK"
+    shutil.copy(DATA_DIR / "StyleHeader.OK", p)
+    before = p.read_bytes()
+    with pytest.raises(EditError):
+        service.apply_edits(str(p), [{"section_index": 0, "record_index": 0,
+                                      "field": "format", "value": "8"}],
+                            registry, config=shipped_config, backup=False)
+    assert p.read_bytes() == before
+
+
+def test_fields_that_are_NOT_enforced_stay_permissive(shipped_config):
+    """`chain` and `type` are governed by isolation and the detection guard, and
+    their lists are suggestions (D56) — enforcing them by list would refuse a
+    legitimate re-casing."""
+    assert shipped_config.enforces_options("StyleHeader", "format") is True
+    assert shipped_config.enforces_options("CalgaryStyleHeader", "chain") is False
+    assert shipped_config.enforces_options("CalgaryStyleHeader", "type") is False
+    assert shipped_config.enforces_options("CalgaryStyleHeader", "compareAtUp") is False

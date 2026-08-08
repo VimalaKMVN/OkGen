@@ -810,3 +810,9 @@ select.fval-pick:hover { color: var(--text); }
 .bulkf-line { line-height: 1.45; }
 .bulkf-quiet { color: var(--text-dim); }
 .bulkf-roll { color: #b45309; }
+
+/* A locked field is shown so it cannot read as missing, but plainly not
+   editable — and it says why, since "greyed out" alone invites a bug report. */
+.bulkf-locked { opacity: 0.55; cursor: default; }
+.bulkf-locked input { cursor: default; }
+.bulkf-lockreason { font-size: 10.5px; color: var(--text-dim); }

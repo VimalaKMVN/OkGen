@@ -807,6 +807,16 @@ def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
                           f"field '{e['field']}' is not present in this record — "
                           f"the line ends before it, so it cannot be edited"),
             })
+        # A field whose option list is the whole truth (config enforce_options)
+        # refuses a value outside it — checked here, beside chain isolation, so
+        # the editor and both bulk paths police the same rule.
+        try:
+            _assert_option_allowed(
+                okf, okf.layout.name,
+                getattr(getattr(rec, "section", None), "name", None),
+                e["field"], e["value"], config)
+        except EditError as exc:
+            errors.append({"edit": e, "error": str(exc)})
         # Chain edits cannot cross an isolation boundary (e.g. Europe <-> NA).
         if config is not None and e["field"] == "chain":
             old = (rec.get("chain") or "").strip()
@@ -1053,6 +1063,38 @@ def _op_move(okf: OkFile, record_index, direction) -> None:
     if j < 0 or j >= len(recs) or recs[j].section is not target.section:
         raise EditError("row is already at the edge of its section")
     recs[idx], recs[j] = recs[j], recs[idx]
+
+
+def _assert_option_allowed(okf, layout_name, section_name, field, value, config):
+    """Refuse a value outside an enforced field's declared list.
+
+    Resolved for the FILE'S OWN CHAIN: ticket formats are per banner (`X` is a
+    Dumbbell Gum Label on Homegoods and a Purple Rat Tail on Winners), so a
+    global list would accept a format that is wrong for this file. A blank is
+    left alone — emptying a field is a different question, governed by
+    `blank_allowed` — and a field with no resolvable list is not enforced,
+    since refusing everything is not the same as refusing what is wrong.
+    """
+    if config is None or not config.enforces_options(layout_name, field):
+        return
+    val = (value or "").strip()
+    if not val:
+        return
+    chain = None
+    if okf.records:
+        try:
+            chain = (okf.records[0].get("chain") or "").strip() or None
+        except Exception:                        # layout carries no chain
+            chain = None
+    opts = config.options(field, layout=layout_name, section=section_name,
+                          chain=chain)
+    if not opts:
+        return
+    if val in opts:
+        return
+    allowed = ", ".join(sorted(opts))
+    raise EditError(
+        f"{field} '{val}' is not valid for this file — allowed: {allowed}")
 
 
 def _assert_layout_stable(okf: OkFile) -> None:
@@ -2683,12 +2725,24 @@ def _header_fields_for_layout(layout, config: Config) -> List[dict]:
         # `readonly` may come from config OR from the layout spec itself (the
         # Calgary JSON `type`). Both must keep a field out of bulk — that is
         # the D12 rule, and `type` is a detection signature.
-        if f.name == key or f.name in locked or getattr(f, "readonly", False):
-            continue
+        # A locked field is LISTED but not editable, rather than omitted. Left
+        # out entirely it looks MISSING — a user hunting for DistLabels' format
+        # cannot tell "OkGen forgot it" from "you may not change it". Shown
+        # greyed out, with the reason, the answer is on screen. It still cannot
+        # be written: the panel disables it, and `_bulk_op_eval`'s guards plus
+        # `_assert_layout_stable` refuse it whatever the client sends (D12).
+        blocked = None
+        if f.name == key:
+            blocked = "the unique key — use Make keys unique"
+        elif f.name in locked or getattr(f, "readonly", False):
+            blocked = "read-only — it identifies the layout"
         opts = config.options(f.name, layout=layout.name,
                               section=layout.sections[0].name)
         entry = {"name": f.name, "size": f.size, "type": f.field_type,
                  "options": opts or None}
+        if blocked:
+            entry["editable"] = False
+            entry["locked_reason"] = blocked
         if config.date_format(layout.name, f.name):
             entry["date"] = True        # offer a date range, not a numeric one
         out.append(entry)
@@ -2740,8 +2794,10 @@ def _detail_sections_for_layout(layout, config: Config) -> List[dict]:
             "options": config.options(f.name, layout=layout.name,
                                       section=sec.name) or None,
             **({"date": True} if config.date_format(layout.name, f.name) else {}),
-        } for f in sec.fields
-            if f.name not in locked and not getattr(f, "readonly", False)]
+            **({"editable": False,
+                "locked_reason": "read-only — it identifies the layout"}
+               if (f.name in locked or getattr(f, "readonly", False)) else {}),
+        } for f in sec.fields]
         out.append({
             "name": sec.name,
             "fields": fields,
@@ -2802,6 +2858,22 @@ def _apply_bulk_op(okf, name, layout_name, section_name, op, config):
     own lesson applied to its own defect.
     """
     field = op.get("field")
+    # An enforced option list is checked BEFORE the op runs, on every value it
+    # could write: a `list` op picks one at random, so validating the result
+    # would pass or fail by luck. Covers the single-op and multi-field paths
+    # together, which is the whole point of them sharing this wrapper.
+    if config is not None and config.enforces_options(layout_name, field):
+        candidates = []
+        if op.get("type") == "set":
+            candidates = [op.get("value", "")]
+        elif op.get("type") == "list":
+            candidates = _clean_values(op.get("values"))
+        for cand in candidates:
+            try:
+                _assert_option_allowed(okf, layout_name, section_name, field,
+                                       cand, config)
+            except EditError as exc:
+                return {"name": name, "status": "error", "error": str(exc)}
     before = None
     if config is not None and field == "chain" and okf.records:
         try:
@@ -3998,6 +4070,13 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         # user LISTED arrives exactly as typed — so `202` reached a JSON store
         # unpadded. Pad here, like every other write path (D34).
         val = _pad_zero_value(val, okf.layout.name, hf["name"], f.size, config)
+        # An enforced option list holds here too. Generation is the path most
+        # able to produce a wrong value without anyone typing it: a numeric
+        # RANGE on `format` happily emitted 3, 3, 7 on a layout whose formats
+        # are letters, and a listed `8` sailed through — files created invalid,
+        # in bulk, which is worse than one edited wrong.
+        _assert_option_allowed(okf, okf.layout.name, okf.layout.sections[0].name,
+                               hf["name"], val, config)
         base = config is not None and config.is_literal(okf.layout.name, hf["name"])
         header.set(hf["name"], val,                              # blank/spaced -> spaces
                    literal=base or val != val.strip() or val == "")

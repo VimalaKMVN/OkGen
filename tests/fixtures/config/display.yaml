@@ -4,8 +4,15 @@ rules:
   - match: {field: indicator}
     values: {Y: "Yes", N: "No"}
 
+  # Q / W / X are the v0.75.0 ticket formats the new-format tests write. They
+  # belong here now that `format` is ENFORCED against this list (config
+  # field_display.yaml `enforce_options`): a fixture list narrower than what the
+  # tests legitimately write would refuse them — the same way a production list
+  # missing a real format would block a real user. That is the hazard of
+  # enforcement, and it shows up first in the fixtures.
   - match: {layout: StyleHeader, field: format}
-    values: {A: "Format A", B: "Format B"}
+    values: {A: "Format A", B: "Format B", Q: "Two Part Tag",
+             W: "Purple Tuff Tag", X: "Dumbbell Gum Label"}
 
   - match: {chain: "03", layout: StyleHeader, format: A, field: format}
     values: {A: "Regular Tag (Homegoods)"}
