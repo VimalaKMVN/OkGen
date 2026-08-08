@@ -3455,6 +3455,11 @@ function renderGeneratePanel(panel, paths, scope) {
       const cb = el("input", "gen-on"); cb.type = "checkbox";
       cb.dataset.field = f.name; cb.dataset.size = f.size;
       if (f.date) cb.dataset.date = "1";
+      // Locked fields are shown greyed rather than omitted — omitted they read
+      // as missing. Same treatment as Bulk Edit; the reason comes from the
+      // server, since only it knows WHY (signature, key, or derived).
+      const genLocked = f.editable === false;
+      if (genLocked) { cb.disabled = true; row.classList.add("gen-locked"); }
       // A temporal field (config/date_fields.yaml) takes a DATE range instead
       // of a numeric one — each generated file (or row) gets its own instant.
       const isDate = !!f.date;
@@ -3480,6 +3485,11 @@ function renderGeneratePanel(panel, paths, scope) {
       const note = rspec ? el("div", "gen-rollup-note", rollupWarning(rspec)) : null;
       if (note) note.style.display = "none";
       const syncRange = () => {
+        if (genLocked) {
+          min.disabled = max.disabled = list.disabled = true;
+          if (note) note.style.display = "none";
+          return;
+        }
         const usingList = list.value.trim() !== "";
         min.disabled = max.disabled = !cb.checked || usingList;
         list.disabled = !cb.checked;
@@ -3499,6 +3509,9 @@ function renderGeneratePanel(panel, paths, scope) {
       row.appendChild(el("span", "gen-name",
                          isDate ? `${f.name} (date)` : `${f.name} (${f.size})`));
       row.appendChild(min); row.appendChild(max); row.appendChild(list);
+      if (genLocked) {
+        row.appendChild(el("span", "gen-lockreason", f.locked_reason || "read-only"));
+      }
       box.appendChild(row);
       if (note) box.appendChild(note);
     });
@@ -3607,6 +3620,7 @@ function renderGeneratePanel(panel, paths, scope) {
       return cb.dataset.date === "1" ? { from: lo, to: hi } : { min: lo, max: hi };
     };
     headerBox.querySelectorAll(".gen-on:checked").forEach((cb) => {
+      if (cb.disabled) return;          // locked: never sent, whatever the DOM says
       const row = cb.closest(".gen-field");
       spec.header_fields.push({
         name: cb.dataset.field,
@@ -3617,6 +3631,7 @@ function renderGeneratePanel(panel, paths, scope) {
     panel.querySelectorAll(".gen-detail").forEach((box) => {
       const section = box.dataset.section;
       box.querySelectorAll(".gen-on:checked").forEach((cb) => {
+        if (cb.disabled) return;        // locked: never sent
         const row = cb.closest(".gen-field");
         spec.detail_fields.push({
           section, name: cb.dataset.field,

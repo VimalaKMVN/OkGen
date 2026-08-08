@@ -816,3 +816,9 @@ select.fval-pick:hover { color: var(--text); }
 .bulkf-locked { opacity: 0.55; cursor: default; }
 .bulkf-locked input { cursor: default; }
 .bulkf-lockreason { font-size: 10.5px; color: var(--text-dim); }
+
+/* Volume Generate: same treatment as Bulk Edit for a field that cannot be
+   varied — shown so it cannot read as missing, greyed, and saying why. */
+.gen-locked { opacity: 0.55; cursor: default; }
+.gen-locked input { cursor: default; }
+.gen-lockreason { font-size: 10.5px; color: var(--text-dim); }

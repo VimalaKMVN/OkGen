@@ -690,8 +690,24 @@ def test_generate_will_not_randomize_an_isolated_chain(tmp_path, registry, confi
     p.write_bytes(src.read_bytes())
 
     scope = service.generate_scope([str(p)], registry, config)
-    assert "chain" not in [f["name"] for f in scope["header_fields"]], \
+    chain = next((f for f in scope["header_fields"] if f["name"] == "chain"), None)
+    # LISTED but not editable. Omitting it entirely was the earlier fix and it
+    # read as "OkGen has no chain field", which is its own confusion — the panel
+    # greys it and says WHY, and the reason must be the real one: isolation, not
+    # "it identifies the layout".
+    assert chain is not None, "the field should be shown, not hidden"
+    assert chain["editable"] is False, \
         "an isolation-locked chain must not be offered for randomizing"
+    assert "isolated" in chain["locked_reason"]
+
+    # The guarantee that actually matters: even asked to, generation does not
+    # move it. This is what D9/D30/v0.40.1 are for.
+    pv = service.generate_preview(
+        [str(p)], {"count": 3,
+                   "header_fields": [{"name": "chain", "mode": "random",
+                                      "min": 1, "max": 99}]},
+        registry, config, sample=3)
+    assert {r["values"].get("chain") for r in pv["sample"]} == {"05"}
 
 
 @pytest.mark.parametrize("layout", ["StyleHeader", "Preticket", "CartonLabel",
@@ -705,7 +721,8 @@ def test_a_freely_changeable_chain_is_still_offered(tmp_path, registry, config,
     p = tmp_path / f"{layout}.OK"
     p.write_bytes(src.read_bytes())
     scope = service.generate_scope([str(p)], registry, config)
-    assert "chain" in [f["name"] for f in scope["header_fields"]]
+    chain = next((f for f in scope["header_fields"] if f["name"] == "chain"), None)
+    assert chain is not None and chain.get("editable", True) is True
 
 
 # --------------------------------------------------------------------------- #

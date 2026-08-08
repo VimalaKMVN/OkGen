@@ -1523,10 +1523,14 @@ def test_staged_add_then_edit_new_row_every_layout(tmp_path, registry, config, s
 # --------------------------------------------------------------------------- #
 def _gen_spec(scope, count, with_rows=True):
     sec = next((s for s in scope["sections"] if s["fields"]), None)
+    # Locked fields are LISTED in the scope now (greyed in the panel), so pick
+    # the first EDITABLE one — exactly what the client does. Taking [0] blindly
+    # asked to randomize a detection signature on the EU layouts.
+    editable = [f for f in scope["header_fields"] if f.get("editable", True)]
     spec = {
         "count": count,
-        "header_fields": ([{"name": scope["header_fields"][0]["name"], "min": 1, "max": 99}]
-                          if scope["header_fields"] else []),
+        "header_fields": ([{"name": editable[0]["name"], "min": 1, "max": 99}]
+                          if editable else []),
         "name_parts": [{"type": "token", "name": "layout"},
                        {"type": "token", "name": "key"},
                        {"type": "token", "name": "seq"}],
@@ -1542,10 +1546,14 @@ def _gen_spec(scope, count, with_rows=True):
 
 def test_generate_scope_excludes_key_and_locked_fields(registry, config):
     scope = service.generate_scope(DATA_DIR / "StyleHeader.OK", registry, config)
-    names = [f["name"] for f in scope["header_fields"]]
+    by = {f["name"]: f for f in scope["header_fields"]}
     assert scope["key_field"] == "keytrol"
-    assert "keytrol" not in names          # the key is assigned, never randomized
-    assert "indicator" not in names        # detection signature stays locked
+    # Listed but not editable, rather than omitted — a field left out reads as
+    # missing, and a user cannot tell that from "you may not vary this".
+    assert by["keytrol"]["editable"] is False       # assigned, never randomized
+    assert "unique key" in by["keytrol"]["locked_reason"]
+    assert by["indicator"]["editable"] is False     # detection signature
+    assert by["dept"].get("editable", True) is True
     assert scope["max_count"] == service.GENERATE_MAX
 
 

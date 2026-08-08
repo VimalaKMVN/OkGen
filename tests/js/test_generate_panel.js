@@ -48,7 +48,11 @@ const scope = {
   path: "/tmp/StyleHeader.OK", name: "StyleHeader.OK", layout: "StyleHeader",
   key_field: "keytrol", key_size: 6, max_count: 5000,
   header_fields: [{ name: "dept", size: 2 }, { name: "date", size: 8 },
-                  { name: "timestamp", size: null, date: true }],
+                  { name: "timestamp", size: null, date: true },
+                  // Locked fields are LISTED now, greyed — the panel must show
+                  // them without ever letting them into the spec.
+                  { name: "keytrol", size: 6, editable: false,
+                    locked_reason: "assigned automatically — every file gets a unique key" }],
   sections: [
     { name: "Lane", rows: 10, max_records: 10, fields: [{ name: "lane1", size: 4 }] },
     { name: "Size", rows: 4, max_records: null, fields: [{ name: "qty", size: 5 }] },
@@ -84,6 +88,17 @@ const checks = [
   ["build marker present", all.some((e) => /build v/.test(e.textContent))],
   ["a section with no numeric fields still gets .gen-detail",
     all.filter((e) => e.classList.contains("gen-detail")).length === 3],
+  // A locked field is shown so it cannot read as missing, greyed, saying why —
+  // and its checkbox is disabled so it can never reach the spec.
+  ["a locked field is shown, not omitted",
+    all.some((e) => e.dataset && e.dataset.field === "keytrol")],
+  ["...with its checkbox disabled",
+    all.some((e) => e.dataset && e.dataset.field === "keytrol" && e.disabled)],
+  ["...marked so it reads as unavailable",
+    all.some((e) => e.classList && e.classList.contains("gen-locked"))],
+  ["...and saying WHY it cannot be varied",
+    all.some((e) => e.classList && e.classList.contains("gen-lockreason")
+                    && /unique key/.test(e.textContent))],
 ];
 
 let bad = 0;

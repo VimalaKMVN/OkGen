@@ -455,10 +455,17 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
                 # offer only chains the current one may become; lock it when the
                 # only option is itself.
                 value_forms = None
+                lock_reason = None
                 if f.name == "chain" and opts:
                     opts = {c: n for c, n in opts.items() if config.can_change_chain(chain, c)}
                     if len(opts) <= 1:
                         editable = False
+                        # WHY it is locked, not just that it is. "read-only —
+                        # it identifies the layout" would be plainly wrong here:
+                        # the chain is fixed because Europe is isolated (D9),
+                        # and a wrong reason is worse than none.
+                        lock_reason = ("this chain is isolated — it cannot be "
+                                       "changed to another group")
                     # A chain may be written as a CODE (`04`) or as a brand NAME
                     # (`Winners`) — D41, and both are offered. Which form a file
                     # actually carries is invisible in the editor otherwise: the
@@ -486,6 +493,7 @@ def _build_file_view(okf: OkFile, path, config: Config, disk_bytes: bytes = None
                     "options": opts or None,
                     "hidden": f.name in hidden,
                     "editable": editable,
+                    **({"locked_reason": lock_reason} if lock_reason else {}),
                     # Literal fields are shown padded exactly as stored, so the
                     # user can see and keep their spaces (the editor strips pad
                     # spaces from ordinary fields for comfortable typing).
@@ -3839,16 +3847,31 @@ def generate_scope(paths, registry: LayoutRegistry, config: Config,
         """
         out = []
         for f in fields:
-            if f.get("derived") or f["name"] in locked or f["name"] == key_field:
-                continue
-            if f.get("editable") is False:      # spec-level readonly (JSON `type`)
-                continue
             dfmt = config.date_format(layout_name, f["name"])
+            # A field with no width and no date format has no value to generate
+            # — there is nothing to show, so it stays out entirely.
             if not f.get("size") and not dfmt:
                 continue
+            # Locked fields are LISTED and greyed, not omitted, for the same
+            # reason as Bulk Edit: left out they read as MISSING, and a user
+            # hunting for DistLabels' `format` cannot tell "OkGen forgot it"
+            # from "you may not vary it". The key is a distinct case — it is not
+            # read-only, it is ASSIGNED, uniquely, per generated file.
+            blocked = None
+            if f["name"] == key_field:
+                blocked = "assigned automatically — every file gets a unique key"
+            elif f.get("locked_reason"):
+                blocked = f["locked_reason"]          # the view knows a specific why
+            elif f["name"] in locked or f.get("editable") is False:
+                blocked = "read-only — it identifies the layout"
+            elif f.get("derived"):
+                blocked = "derived — computed from other fields"
             entry = {"name": f["name"], "size": f["size"]}
             if dfmt:
                 entry["date"] = True
+            if blocked:
+                entry["editable"] = False
+                entry["locked_reason"] = blocked
             out.append(entry)
         return out
 
@@ -4060,9 +4083,15 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
     # 3. user-chosen header fields — one value per FILE
     for hf in spec.get("header_fields") or []:
         f = _header_field(okf.layout, hf["name"])
+        # A field this layout does not HAVE was silently skipped, and the
+        # preview then blew up reading it back — a raw KeyError, so the user got
+        # a 500 and "Generate failed" with a Python repr. Silently ignoring it
+        # would be worse: you asked to vary a field and nothing would.
+        if f is None:
+            raise EditError(f"no field '{hf.get('name')}' on {okf.layout.name}")
         dfmt = config.date_format(okf.layout.name, hf["name"]) if config else None
         # A temporal field need not declare a size — its format sets the length.
-        if f is None or header is None or (not f.size and not dfmt):
+        if header is None or (not f.size and not dfmt):
             continue
         val = _spec_value(hf, f.size, hf["name"], dfmt,
                           chains=chain_choices if hf["name"] == "chain" else None)
@@ -4077,6 +4106,20 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         # in bulk, which is worse than one edited wrong.
         _assert_option_allowed(okf, okf.layout.name, okf.layout.sections[0].name,
                                hf["name"], val, config)
+        # Chain isolation (D9) holds here too. Random generation already picks
+        # from the template's OWN group (D30) and an isolation-locked chain is
+        # not offered (v0.40.1) — but an explicit value LIST bypassed both, so
+        # `05` could be written onto a North America template and the generated
+        # batch shipped as Europe. Fifth appearance of this class, and the first
+        # in a path that CREATES files rather than editing them.
+        if config is not None and hf["name"] == "chain":
+            cur = (header.get("chain") or "").strip()
+            new_chain = (val or "").strip()
+            if cur and new_chain and new_chain != cur \
+                    and not config.can_change_chain(cur, new_chain):
+                raise EditError(
+                    f"chain cannot change from {cur} to {new_chain}: "
+                    f"Europe is isolated from the other chains")
         base = config is not None and config.is_literal(okf.layout.name, hf["name"])
         header.set(hf["name"], val,                              # blank/spaced -> spaces
                    literal=base or val != val.strip() or val == "")
