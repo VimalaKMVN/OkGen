@@ -230,3 +230,31 @@ def test_a_chain_inside_the_group_is_still_allowed(files, registry, config, chai
                                 registry, config, backup=False)["results"][0]
     assert res["status"] in ("changed", "unchanged")
     assert _hdr(p, registry, "chain") == chain
+
+
+def test_the_guard_matches_the_editor_on_a_CLEARED_chain(tmp_path, registry, config):
+    """Clearing a chain is a different question from moving it across the
+    boundary. The editor and the older bulk route both test `old and new` — a
+    guard that also refused an empty value would make bulk stricter than the
+    editor, which is a fix changing more than the defect."""
+    p = tmp_path / "EU.OK"
+    shutil.copy(DATA_DIR / "EUStyleHeader.OK", p)
+    res = service.bulk_op_apply([str(p)], "EUStyleHeader", "Header",
+                                {"type": "set", "field": "chain", "value": "' '"},
+                                registry, config, backup=False)["results"][0]
+    assert res["status"] == "changed"
+
+
+@pytest.mark.parametrize("value", ["AB", "7", ""])
+def test_a_europe_file_cannot_take_a_non_europe_chain(tmp_path, registry, config, value):
+    """The other half of the hole: bulk used to write 'AB', '07' and even '00'
+    straight onto a Europe file's chain. Each leaves the isolated group."""
+    p = tmp_path / "EU.OK"
+    shutil.copy(DATA_DIR / "EUStyleHeader.OK", p)
+    before = p.read_bytes()
+    res = service.bulk_op_apply([str(p)], "EUStyleHeader", "Header",
+                                {"type": "set", "field": "chain", "value": value},
+                                registry, config, backup=False)["results"][0]
+    assert res["status"] == "error"
+    assert "isolated" in res["error"]
+    assert p.read_bytes() == before

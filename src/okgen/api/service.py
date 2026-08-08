@@ -2811,7 +2811,12 @@ def _apply_bulk_op(okf, name, layout_name, section_name, op, config):
     r = _apply_bulk_op_raw(okf, name, layout_name, section_name, op, config)
     if before and r.get("status") == "change":
         after = (okf.records[0].get("chain") or "").strip()
-        if after != before and not config.can_change_chain(before, after):
+        # Both sides must be non-empty, exactly as the editor and the older bulk
+        # route test it (`if old and new and ...`). Clearing a chain is a
+        # different question from moving it across the boundary, and answering
+        # it here would make bulk stricter than the editor — a fix that changes
+        # more than the defect is its own kind of surprise.
+        if after and after != before and not config.can_change_chain(before, after):
             return {"name": name, "status": "error",
                     "error": (f"chain cannot change from {before} to {after}: "
                               f"Europe is isolated from the other chains")}
