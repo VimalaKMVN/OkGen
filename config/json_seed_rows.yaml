@@ -115,7 +115,7 @@ seed_rows:
       numberOfPacks: null
       adDate: ""
       suppress: null
-      qtyToPrint: "600"
+      qtyToPrint: "10"
       puertoRicoStoreSeq: null
       puertoRicoStore: null
 

@@ -90,7 +90,7 @@ def test_declared_seed_values_are_used(tmp_path, registry, config):
     assert row["store"] == "0115"
     assert row["units"] == "20"
     assert row["storeQuantity"] == "5"
-    assert row["qtyToPrint"] == "600"
+    assert row["qtyToPrint"] == "10"
 
 
 def test_a_seeded_row_looks_like_a_real_row(tmp_path, registry, config):
