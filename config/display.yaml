@@ -136,21 +136,38 @@ rules:
   # ---- Calgary JSON: the compare-at-up flag ----
   #
   # Every key here is QUOTED deliberately: YAML 1.1 reads bare true/false/Yes/
-  # No/Y/N as BOOLEANS, so unquoted they would load as Python True/False and
-  # the option list would come out as "True"/"False" — not what the file holds.
-  # Blank is a real, allowed value (it is not "false"), so it is offered too.
+  # No/Y/N — and TRUE/FALSE/YES/NO/y/n — as BOOLEANS, so unquoted they would
+  # load as Python True/False and the option list would come out as "True"/
+  # "False", not what the file holds. Quoting is why 12 near-identical-looking
+  # entries can coexist at all: unquoted, six of them would collapse onto two.
+  # Blank is a real, allowed value (it is not "false"), so it is offered first.
+  #
+  # Every casing the documents use is listed rather than a canonical few: the
+  # field accepts any of them, so a list that offered only some would make the
+  # rest unreachable from the editor — the `type` dropdown problem (D56), where
+  # a correct value could not be selected. Ordered blank, then upper, then
+  # lower, so the list scans instead of alternating case.
+  #
+  # `FALSE` is 5 characters and the field holds 5, so every entry fits: a
+  # dropdown offering a value too long to SAVE is the D48 defect.
   - match:
       layout: CalgaryStyleHeader
       section: Details
       field: compareAtUp
     values:
       "": "(blank)"
-      "true": "true"
-      "false": "false"
-      "Yes": "Yes"
-      "No": "No"
+      "TRUE": "TRUE"
+      "FALSE": "FALSE"
+      "YES": "YES"
+      "NO": "NO"
       "Y": "Y"
       "N": "N"
+      "true": "true"
+      "false": "false"
+      "yes": "yes"
+      "no": "no"
+      "y": "y"
+      "n": "n"
 
   - match: {layout: StyleHeader, field: indicator}
     values:

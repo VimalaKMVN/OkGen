@@ -49,15 +49,24 @@ rules:
 
   # Keys QUOTED deliberately: YAML 1.1 reads bare true/false/Yes/No/Y/N as
   # booleans. Blank is a real allowed value, not the same thing as "false".
+  # Every casing the documents use, blank first then upper then lower. Keys are
+  # QUOTED because YAML 1.1 reads all of these as booleans unquoted — which is
+  # also why six of the twelve would silently collapse onto two without quotes.
   - match: {layout: CalgaryStyleHeader, section: Details, field: compareAtUp}
     values:
       "": "(blank)"
-      "true": "true"
-      "false": "false"
-      "Yes": "Yes"
-      "No": "No"
+      "TRUE": "TRUE"
+      "FALSE": "FALSE"
+      "YES": "YES"
+      "NO": "NO"
       "Y": "Y"
       "N": "N"
+      "true": "true"
+      "false": "false"
+      "yes": "yes"
+      "no": "no"
+      "y": "y"
+      "n": "n"
   # ...and the DETAIL row's coded type, which must resolve independently of the
   # header rule above. In production this comes from the generic `field: type`
   # rule; pinned explicitly here so section scoping is proven in both directions.

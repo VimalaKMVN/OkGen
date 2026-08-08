@@ -98,21 +98,63 @@ def test_compare_at_up_accepts_its_allowed_values(tmp_path, registry, config, va
                  "styleheader_fmtB.json", "Details", "compareAtUp", value) == value
 
 
+EXPECTED_COMPARE_AT_UP = ["", "TRUE", "FALSE", "YES", "NO", "Y", "N",
+                          "true", "false", "yes", "no", "y", "n"]
+
+
 def test_compare_at_up_offers_blank_as_a_real_choice(registry, config):
     opts = config.options("compareAtUp", layout="CalgaryStyleHeader",
                           section="Details")
     assert "" in opts, "blank must be selectable, not just typeable"
-    assert set(opts) == {"", "true", "false", "Yes", "No", "Y", "N"}
+    assert set(opts) == set(EXPECTED_COMPARE_AT_UP)
+
+
+def test_compare_at_up_offers_every_casing_the_documents_use(registry, config):
+    """The field accepts all of these, so the dropdown must offer all of them.
+
+    A list that carried only some casings left the rest unreachable from the
+    editor — the `type` problem (D56), where a value the save would accept
+    could not be selected. This is a DROPDOWN, so what is listed is exactly
+    what can be picked.
+    """
+    opts = config.options("compareAtUp", layout="CalgaryStyleHeader",
+                          section="Details")
+    assert list(opts) == EXPECTED_COMPARE_AT_UP, "order matters: blank, upper, lower"
+
+
+def test_every_offered_compare_at_up_value_fits_the_field(registry, config):
+    """A dropdown may not offer a value too long to SAVE (D48). `FALSE` is 5
+    characters and the field holds exactly 5 — there is no spare room."""
+    layout = registry["CalgaryStyleHeader"]
+    sec = next(s for s in layout.sections if s.name == "Details")
+    field = next(f for f in sec.fields if f.name == "compareAtUp")
+    for value in config.options("compareAtUp", layout="CalgaryStyleHeader",
+                                section="Details"):
+        assert len(value) <= field.size, f"{value!r} exceeds size {field.size}"
+
+
+@pytest.mark.parametrize("value", EXPECTED_COMPARE_AT_UP)
+def test_every_offered_value_actually_saves(tmp_path, registry, config, value):
+    """Offering it and accepting it must not drift apart — the whole reason the
+    list can be widened without touching the write path."""
+    assert _edit(tmp_path, registry, config,
+                 "styleheader_fmtB.json", "Details", "compareAtUp", value) == value
 
 
 def test_compare_at_up_options_are_strings_not_yaml_booleans(config):
-    """YAML 1.1 reads bare true/false/Yes/No/Y/N as booleans. Unquoted, the list
-    would load as Python True/False and offer "True"/"False" — values no Calgary
-    file contains."""
+    """YAML 1.1 reads bare true/false/Yes/No/Y/N — and TRUE/FALSE/YES/NO/y/n —
+    as booleans. Unquoted, the list would load as Python True/False and offer
+    "True"/"False", values no Calgary file contains.
+
+    Quoting is also what lets twelve near-identical entries coexist: unquoted,
+    six of them would collapse onto the other two and the list would silently
+    lose half its options.
+    """
     opts = config.options("compareAtUp", layout="CalgaryStyleHeader",
                           section="Details")
     assert all(isinstance(k, str) and isinstance(v, str) for k, v in opts.items())
     assert "True" not in opts and "False" not in opts
+    assert len(opts) == 13, "a collapsed casing means a key lost its quotes"
 
 
 # --------------------------------------------------------------------------- #
