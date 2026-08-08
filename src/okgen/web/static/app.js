@@ -575,19 +575,11 @@ function renderBulkFieldsPanel(scope) {
     mn.placeholder = isDate ? "from 2024-01-01" : "min";
     mx.placeholder = isDate ? "to 2024-12-31" : "max";
     [vals, mn, mx].forEach((i) => { i.disabled = true; });
-    // A field with a known option list still gets a free-text box: bulk has
-    // always accepted a list of allowed values here, and the options are shown
-    // as a datalist so they can be picked without being the only choice.
-    if (f.options) {
-      const dl = el("datalist");
-      const id = `bulkf-opts-${sectionName}-${f.name}`.replace(/[^\w-]/g, "_");
-      dl.id = id;
-      Object.keys(f.options).forEach((code) => {
-        const o = el("option"); o.value = code; dl.appendChild(o);
-      });
-      vals.setAttribute("list", id);
-      row.appendChild(dl);
-    }
+    // NO option list here, deliberately. Volume Generate offers none either, and
+    // a field's known values are inconsistent across layouts today (some lists
+    // are the whole truth, some are suggestions) — so a picker in one place and
+    // not another reads as a bug. Plain text everywhere until the lists are
+    // worth trusting; the value is validated on the write path regardless.
     const sync = () => {
       [vals, mn, mx].forEach((i) => { i.disabled = !cb.checked; });
       // A range and a value list are alternatives — filling one greys the other,

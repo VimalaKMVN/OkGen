@@ -81,7 +81,10 @@ const bulkScope = {
   files: [{ path: "/tmp/SH.OK", name: "SH.OK", layout: "StyleHeader", chain: "03" }],
   layouts: { StyleHeader: 1 },
   header_fields: {
-    StyleHeader: [{ name: "tot_qty", size: 7 }, { name: "dept", size: 2 }],
+    // `chain` carries an option map on purpose: the panel must NOT turn it
+    // into a picker, and a fixture without options could not prove that.
+    StyleHeader: [{ name: "tot_qty", size: 7 }, { name: "dept", size: 2 },
+                  { name: "chain", size: 2, options: { "01": "TJMAXX", "03": "Homegoods" } }],
   },
   detail_sections: {
     StyleHeader: [{ name: "Size", fields: [{ name: "qty", size: 5 }],
@@ -103,7 +106,18 @@ const rowsOf = () => descendants(bulkPanel)
 const notesOf = () => descendants(bulkPanel)
   .filter((e) => e.classList && e.classList.contains("bulk-rollup-note"));
 
-check("the field-values panel renders a row per field", rowsOf().length === 3);
+check("the field-values panel renders a row per field", rowsOf().length === 4);
+
+// NO pickers here, deliberately. Volume Generate offers none either, and the
+// known-value lists are inconsistent across layouts today — a picker on one
+// panel and not the other reads as a bug rather than a feature.
+const panelKids = descendants(bulkPanel);
+check("no <select> anywhere in the field-values panel",
+      !panelKids.some((e) => e.tagName === "SELECT"));
+check("no <datalist> suggestions either",
+      !panelKids.some((e) => e.tagName === "DATALIST"));
+check("...and no value input carries a `list` attribute",
+      !panelKids.some((e) => e.getAttribute && e.getAttribute("list")));
 check("exactly ONE roll-up note is rendered", notesOf().length === 1);
 check("...carrying the rule and what to do about it",
       notesOf()[0] && /sum of the size lines/i.test(notesOf()[0].textContent)
