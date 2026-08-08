@@ -386,3 +386,65 @@ def test_a_file_with_no_size_lines_keeps_the_typed_total(tmp_path, registry, con
     service.bulk_multi_apply([str(ns)], "StyleHeader", ops, registry, config,
                              backup=False)
     assert _hdr(ns, registry, "tot_qty") == "0000500"
+
+
+# --------------------------------------------------------------------------- #
+# What the user READS when something is wrong
+#
+# A status token is a value the code branches on, not a sentence. Two of them
+# were reaching the screen verbatim (`missing_field`, `no_section`), which tells
+# a user nothing about what to do.
+# --------------------------------------------------------------------------- #
+STATUS_TOKENS = {"missing_field", "no_section", "too_wide", "error", "skipped",
+                 "change", "unchanged"}
+
+
+def test_no_raw_status_token_is_shown_as_an_error(files, registry, config):
+    """Whatever goes wrong, the message must be a sentence."""
+    for ops in ([{"section": "Header", "type": "list", "field": "nope", "values": "1"}],
+                [{"section": "Nope", "type": "list", "field": "dept", "values": "1"}],
+                [{"section": "Header", "type": "list", "field": "dept", "values": ""}]):
+        res = _preview([files[0]], ops, registry, config)
+        for f in res["fields"]:
+            if f.get("error"):
+                assert f["error"] not in STATUS_TOKENS, f["error"]
+                assert len(f["error"].split()) > 2, f["error"]
+
+
+def test_a_field_not_in_the_section_names_the_field_and_section(files, registry, config):
+    res = _preview([files[0]], [{"section": "Header", "type": "list",
+                                 "field": "nope", "values": "1"}], registry, config)
+    assert "no field 'nope' in Header" in res["fields"][0]["error"]
+
+
+def test_a_section_with_no_rows_skips_that_FIELD_not_the_file(files, registry, config):
+    """One store-less file in a selection must not block its own header edits.
+    A section this file does not have is a field that does not apply, not a
+    failure — abandoning the file for it is too harsh."""
+    ops = [{"section": "Header", "type": "list", "field": "dept", "values": "42"},
+           {"section": "Nope", "type": "list", "field": "dept", "values": "9"}]
+    res = _preview([files[0]], ops, registry, config)
+    assert res["status"] == "change"
+    by = {(f["section"], f["field"]): f for f in res["fields"]}
+    assert by[("Header", "dept")]["status"] == "change"
+    assert by[("Nope", "dept")]["status"] == "skipped"
+    assert "skipped" in by[("Nope", "dept")]["error"]
+    _apply([files[0]], ops, registry, config)
+    assert _hdr(files[0], registry, "dept") == "42", "the header edit still lands"
+
+
+def test_setting_a_field_to_its_current_value_is_unchanged(files, registry, config):
+    """The `list` op reports `change` without comparing, so this used to preview
+    as a change and rewrite the file — and its .bak — for nothing. The single-op
+    `set` path returns `unchanged`; the two must agree."""
+    p = files[0]
+    current = _hdr(p, registry, "chain")
+    before = p.read_bytes()
+    ops = [{"section": "Header", "type": "list", "field": "chain", "values": current}]
+    pv = _preview([p], ops, registry, config)
+    assert pv["status"] == "unchanged"
+    assert pv["fields"][0]["status"] == "unchanged", "the field must agree with the file"
+    service.bulk_multi_apply([str(p)], "StyleHeader", ops, registry, config,
+                             backup=True)
+    assert p.read_bytes() == before
+    assert not list(p.parent.glob("*.bak")), "an unchanged file must not be rewritten"

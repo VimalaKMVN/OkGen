@@ -3187,6 +3187,13 @@ def _bulk_multi_eval(sp: Path, layout_name, ops, registry, config):
     except Exception as exc:
         return {"name": name, "status": "error", "error": str(exc), "fields": []}
 
+    # Exact "did anything actually change" test. Comparing the file's BYTES is
+    # stronger than comparing field values: a write that only re-pads a field
+    # still changes the file, and a `list` op reports `change` without ever
+    # comparing, so setting a field to the value it already holds used to
+    # preview as a change and rewrite the file (and its .bak) for nothing. The
+    # single-op `set` path returns `unchanged` there; this makes them agree.
+    before_bytes = okf.to_bytes()
     fields, failed = [], None
     for op in ops or []:
         section = op.get("section")
@@ -3209,12 +3216,30 @@ def _bulk_multi_eval(sp: Path, layout_name, ops, registry, config):
             # every row took the same value.
             entry["varies"] = len({b for _, b in moved}) > 1
         status = r.get("status")
-        if status in ("error", "too_wide", "missing_field", "no_section"):
-            entry.update(status=status,
-                         error=r.get("error") or r.get("detail") or status)
+        # A section this file does not HAVE (or has no rows in) is not a
+        # failure — it is a field that does not apply here. Abandoning the whole
+        # file for it would mean one store-less file in a selection blocked its
+        # own header edits too. Reported per field, and the batch carries on.
+        if status == "no_section":
+            entry.update(status="skipped",
+                         error=f"no {section} rows in this file — field skipped")
+            fields.append(entry)
+            continue
+        if status in ("error", "too_wide", "missing_field"):
+            detail = r.get("error") or r.get("detail")
+            if not detail:
+                detail = (f"no field '{op.get('field')}' in {section}"
+                          if status == "missing_field" else status)
+            entry.update(status=status, error=detail)
             fields.append(entry)
             failed = entry
             break                       # the file is abandoned; stop evaluating
+        # A field that did not actually MOVE is not a change, whatever the op
+        # reported: `list` returns `change` without comparing, so setting a
+        # field to the value it already holds said "change" beside a file that
+        # said "unchanged". The snapshot above is the authority.
+        if status == "change" and not moved:
+            status = "unchanged"
         entry.update(status=status, detail=r.get("detail"))
         fields.append(entry)
 
@@ -3229,7 +3254,7 @@ def _bulk_multi_eval(sp: Path, layout_name, ops, registry, config):
     # nobody asked for, on the way to a save nobody requested. D58's rule is
     # that opening or previewing never writes; the correction rides on a save
     # that was going to happen anyway.
-    if not any(f.get("status") == "change" for f in fields):
+    if okf.to_bytes() == before_bytes:
         return {"name": name, "status": "unchanged", "fields": fields}
 
     # ROLL-UPS, resolved ONCE after every op — the same moment apply runs them,
