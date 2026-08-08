@@ -214,6 +214,11 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except OSError as exc:
             return _err(str(exc), 500)
 
+    @app.post("/api/browse-folder/cancel")
+    def browse_folder_cancel():
+        """Abandon a chooser that never became usable, releasing the lock."""
+        return jsonify(service.cancel_browse())
+
     @app.post("/api/browse-folder")
     def browse_folder():
         body = request.get_json(force=True, silent=True) or {}

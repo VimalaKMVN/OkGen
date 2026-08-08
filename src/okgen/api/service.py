@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import errno
 import os
+import platform
 import random
 import re
 import shutil
+import subprocess
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
@@ -1670,6 +1673,53 @@ import threading
 # pile of them that then linger and re-surface one after another. The client
 # also guards the button, but this is the server-side backstop.
 _BROWSE_LOCK = threading.Lock()
+# The running chooser, so a launch that never became visible can be abandoned.
+# Without this the lock was held for the full 120s timeout and every further
+# click answered "already open — look behind this window", which is exactly the
+# wrong advice when nothing ever appeared.
+_BROWSE_STATE: dict = {"proc": None, "started": None, "killed": False}
+
+
+def _run_dialog(cmd, timeout: int = 120):
+    """Run a dialog command, keeping its handle so it can be cancelled."""
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                         text=True)
+    _BROWSE_STATE["proc"] = p
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.communicate()
+        raise
+    finally:
+        _BROWSE_STATE["proc"] = None
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
+def browse_running_seconds() -> Optional[float]:
+    """How long the open chooser has been running, or None if none is."""
+    started = _BROWSE_STATE.get("started")
+    if started is None or _BROWSE_STATE.get("proc") is None:
+        return None
+    return max(0.0, time.time() - started)
+
+
+def cancel_browse() -> dict:
+    """Abandon a chooser that never became usable.
+
+    Killing the process is what releases the lock early; the launch itself is
+    then reported as a CANCEL rather than a failure, because the user asked for
+    it — logging it as a failure would bury the real ones.
+    """
+    p = _BROWSE_STATE.get("proc")
+    if p is None or p.poll() is not None:
+        return {"cancelled": False, "reason": "no folder chooser is running"}
+    _BROWSE_STATE["killed"] = True
+    try:
+        p.kill()
+    except Exception as exc:                     # pragma: no cover - OS specific
+        return {"cancelled": False, "reason": str(exc)}
+    return {"cancelled": True}
 
 
 def browse_folder(initial: Optional[str] = None) -> dict:
@@ -1684,22 +1734,20 @@ def browse_folder(initial: Optional[str] = None) -> dict:
     Refused (``already_open``) if a dialog is already open — never launches a
     second one.
     """
-    import platform
-    import subprocess
-
     if not _BROWSE_LOCK.acquire(blocking=False):
+        running = browse_running_seconds()
         return {"path": None, "already_open": True,
+                "running_seconds": running,
                 "error": "a folder chooser is already open"}
 
     system = platform.system()
+    _BROWSE_STATE["started"] = time.time()
+    _BROWSE_STATE["killed"] = False
     try:
         if system == "Darwin":
             prompt = "Select the folder with your OK files"
             script = f'POSIX path of (choose folder with prompt "{prompt}")'
-            proc = subprocess.run(
-                ["osascript", "-e", script],
-                capture_output=True, text=True, timeout=120,
-            )
+            proc = _run_dialog(["osascript", "-e", script])
         elif system == "Windows":
             import base64
 
@@ -1742,8 +1790,18 @@ $o.TopMost = $true
 $o.ShowInTaskbar = $false
 $o.FormBorderStyle = 'None'
 $o.Width = 1; $o.Height = 1
+$o.Opacity = 0
 $o.StartPosition = 'Manual'
-$o.Left = -32000; $o.Top = -32000
+# ON-SCREEN, centred on the monitor that currently has focus. A common dialog
+# is placed relative to its OWNER, and this owner used to sit at (-32000,
+# -32000) — so the chooser could open off-screen entirely: not behind the
+# browser, not in the taskbar (ShowInTaskbar is false), simply unreachable.
+# That is the "it does not show up at all, not even behind the window" report.
+# Opacity 0 keeps it invisible without moving it out of the desktop.
+$scr = [System.Windows.Forms.Screen]::FromHandle([Fg]::GetForegroundWindow())
+if ($scr -eq $null) {{ $scr = [System.Windows.Forms.Screen]::PrimaryScreen }}
+$o.Left = [int]($scr.WorkingArea.Left + $scr.WorkingArea.Width / 2)
+$o.Top  = [int]($scr.WorkingArea.Top + $scr.WorkingArea.Height / 2)
 $o.Show()
 $fg = [Fg]::GetForegroundWindow()
 $fgTid = [Fg]::GetWindowThreadProcessId($fg, [IntPtr]::Zero)
@@ -1770,26 +1828,105 @@ $o.Close()
 if ($r -eq [System.Windows.Forms.DialogResult]::OK) {{ [Console]::Out.Write([System.IO.Path]::GetDirectoryName($d.FileName)) }}
 '''
             enc = base64.b64encode(ps.encode("utf-16-le")).decode("ascii")
-            proc = subprocess.run(
-                ["powershell", "-NoProfile", "-STA", "-EncodedCommand", enc],
-                capture_output=True, text=True, timeout=120,
-            )
+            proc = _run_dialog(
+                ["powershell", "-NoProfile", "-STA", "-EncodedCommand", enc])
         else:
-            proc = subprocess.run(
+            proc = _run_dialog(
                 ["zenity", "--file-selection", "--directory",
-                 "--title=Select the folder with your OK files"],
-                capture_output=True, text=True, timeout=120,
-            )
+                 "--title=Select the folder with your OK files"])
         chosen = (proc.stdout or "").strip()
-        return {"path": chosen or None}
+        if chosen:
+            return {"path": chosen}
+        # NO PATH is two very different events, and they used to be one. An empty
+        # stdout was always reported as "no folder selected" — identical to the
+        # user pressing Cancel — so a dialog that never opened (PowerShell blocked
+        # by execution policy, no interactive desktop after an RDP reconnect, a
+        # .NET assembly that would not load) looked like an ordinary cancel and
+        # left no trace anywhere. That is why repeated reports of "it did not
+        # show up" arrived with nothing to diagnose from.
+        if _BROWSE_STATE.get("killed"):
+            # The user abandoned it from the UI — their own action, not a fault.
+            return {"path": None, "cancelled": True, "abandoned": True}
+        if _dialog_was_cancelled(system, proc):
+            return {"path": None, "cancelled": True}
+        detail = (proc.stderr or "").strip() or "(no error output)"
+        return {"path": None, "failed": True,
+                "error": _browse_failure_message(system, proc.returncode, detail),
+                "log": _write_browse_log(system, proc.returncode, detail)}
     except subprocess.TimeoutExpired:
-        return {"path": None, "error": "folder chooser timed out — please try again"}
+        return {"path": None, "failed": True,
+                "error": "the folder chooser did not return within 2 minutes — it may "
+                         "have opened off-screen or on another desktop; please try again",
+                "log": _write_browse_log(system, None, "timed out after 120s")}
     except FileNotFoundError:
-        return {"path": None, "error": "no native folder dialog available on this system"}
+        return {"path": None, "failed": True,
+                "error": "no native folder dialog available on this system — "
+                         "paste a path instead",
+                "log": _write_browse_log(system, None, "dialog program not found")}
     except Exception as exc:  # pragma: no cover - depends on desktop session
-        return {"path": None, "error": str(exc)}
+        return {"path": None, "failed": True, "error": str(exc),
+                "log": _write_browse_log(system, None, repr(exc))}
     finally:
         _BROWSE_LOCK.release()
+
+
+def _dialog_was_cancelled(system: str, proc) -> bool:
+    """Did the user dismiss the dialog, as opposed to it failing to run?
+
+    Each platform says so differently, and getting this wrong in either
+    direction is bad: a failure reported as a cancel is invisible (the bug this
+    fixes), and a cancel reported as a failure cries wolf on the commonest
+    action there is.
+    """
+    rc = proc.returncode
+    if rc == 0:
+        # The dialog program ran to completion and returned no path. That is a
+        # dismissal on every platform (a Windows OpenFileDialog exits 0 when
+        # cancelled); a launch that FAILED cannot also exit cleanly.
+        return True
+    if system == "Windows":
+        return False
+    if system == "Darwin":
+        # `choose folder` raises "User canceled. (-128)" and exits non-zero.
+        err = (proc.stderr or "").lower()
+        return rc != 0 and ("-128" in err or "cancel" in err)
+    # zenity: 1 = dismissed, anything higher is a real error.
+    return rc == 1
+
+
+def _browse_failure_message(system: str, rc, detail: str) -> str:
+    first = detail.splitlines()[0][:200] if detail else "(no error output)"
+    return (f"the folder chooser could not be opened ({system}, exit {rc}): "
+            f"{first} — paste a path instead")
+
+
+def _write_browse_log(system: str, rc, detail: str) -> Optional[str]:
+    """Record a FAILED launch beside OkGen, like the Send and Total Qty runs.
+
+    Only failures are logged — a cancel is an ordinary action, not an event. A
+    log that cannot be written must never turn into a second error on top of
+    the first, so this returns None instead of raising.
+    """
+    from datetime import datetime
+
+    from okgen.nicelabel_post import default_log_folder
+    try:
+        folder = default_log_folder()
+        fs.mkdir(folder, parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = folder / f"okgen_folder_dialog_{stamp}.log"
+        fs.write_text(path, "\n".join([
+            "OkGen — native folder chooser FAILED to open",
+            f"When    : {datetime.now().isoformat(timespec='seconds')}",
+            f"Platform: {system}",
+            f"Exit    : {rc}",
+            "",
+            "Output / error:",
+            detail or "(none)",
+        ]) + "\n")
+        return str(path)
+    except Exception:
+        return None
 
 
 # --------------------------------------------------------------------------- #

@@ -179,22 +179,40 @@ async function browseFolder() {
   // behind the browser, so a click can look like "nothing happened"); without
   // this guard, repeated clicks stack up hidden dialogs that then re-surface one
   // after another. Re-clicking now just re-nudges the reminder instead.
+  // Clicking again while one is open used to repeat "look behind this window"
+  // for the full two-minute timeout — advice that is actively wrong when the
+  // dialog never appeared at all. Offer the way out instead.
   if (state.browsing) {
-    setStatus("Folder chooser is already open — look behind this window", "dirty");
+    const secs = Math.round((Date.now() - (state.browsingSince || Date.now())) / 1000);
+    if (confirm(`A folder chooser has been open for ${secs}s.\n\n`
+                + "If you cannot see it (check other monitors and behind this "
+                + "window), click OK to abandon it so you can try again.")) {
+      try { await postJSON("/api/browse-folder/cancel", {}); } catch (e) { /* it may have just closed */ }
+      setStatus("Abandoned the folder chooser — click Open Folder to try again, "
+                + "or paste a path", "dirty");
+    }
     return;
   }
   state.browsing = true;
-  btn.disabled = true;
-  setStatus("Opening folder chooser… (if you don't see it, check behind this window)", "dirty");
+  state.browsingSince = Date.now();
+  btn.disabled = false;   // stays clickable ON PURPOSE — see the guard above
+  setStatus("Opening folder chooser… (if you don't see it, check behind this window "
+            + "and on your other monitors)", "dirty");
   try {
     const res = await postJSON("/api/browse-folder", {});
     if (res.path) { const fp = $("#folderPath"); fp.value = res.path; fp.title = res.path; openFolder(res.path); }
     else if (res.already_open) setStatus("Folder chooser is already open — look behind this window", "dirty");
+    // A launch that FAILED is no longer indistinguishable from a cancel: say
+    // what went wrong and where the log is, so the next report carries evidence.
+    else if (res.failed) {
+      setStatus(res.error + (res.log ? `  ·  logged to ${res.log}` : ""), "err");
+    } else if (res.abandoned) { /* the message is already on screen */ }
     else setStatus("No folder selected");
   } catch (e) {
     setStatus("Native dialog unavailable — paste a path instead", "err");
   } finally {
     state.browsing = false;
+    state.browsingSince = null;
     btn.disabled = false;
   }
 }

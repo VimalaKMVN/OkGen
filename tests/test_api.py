@@ -39,7 +39,6 @@ def test_browse_folder_refuses_second_dialog(monkeypatch):
     """The native folder chooser is a blocking dialog; a second request while one
     is open must be refused (never launch a second dialog that would linger and
     re-surface). The client also guards the button; this is the server backstop."""
-    import subprocess
     import threading
 
     inside = threading.Event()
@@ -47,6 +46,7 @@ def test_browse_folder_refuses_second_dialog(monkeypatch):
 
     class _Proc:
         stdout = ""
+        stderr = ""
         returncode = 0
 
     def fake_run(*args, **kwargs):
@@ -54,7 +54,10 @@ def test_browse_folder_refuses_second_dialog(monkeypatch):
         release.wait(3)       # hold it open until the test lets go
         return _Proc()
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    # Patch the DIALOG LAUNCHER, not subprocess.run: the chooser is started via
+    # Popen so it can be cancelled mid-flight, and a test that patches the wrong
+    # seam silently launches the machine's REAL dialog and waits out the timeout.
+    monkeypatch.setattr(service, "_run_dialog", fake_run)
 
     out = {}
     first = threading.Thread(target=lambda: out.__setitem__("first", service.browse_folder()))
@@ -782,18 +785,23 @@ def test_bulk_set_on_empty_section_is_noop(tmp_path, registry, config):
 
 
 def test_browse_folder_parses_dialog_output(monkeypatch):
-    # Mock the native dialog so the test never opens a real GUI.
-    import subprocess
-
+    # Mock the native dialog so the test never opens a real GUI. Patch
+    # `_run_dialog`, which is the seam every platform branch goes through.
     class FakeProc:
-        def __init__(self, out):
+        def __init__(self, out, rc=0, err=""):
             self.stdout = out
+            self.returncode = rc
+            self.stderr = err
 
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeProc("/picked/folder\n"))
+    monkeypatch.setattr(service, "_run_dialog", lambda *a, **k: FakeProc("/picked/folder\n"))
     assert service.browse_folder()["path"] == "/picked/folder"
 
-    monkeypatch.setattr(subprocess, "run", lambda *a, **k: FakeProc(""))  # cancelled
-    assert service.browse_folder()["path"] is None
+    # Cancelled: no path, and explicitly NOT a failure — see test_browse_folder.py
+    # for why those two must stay distinguishable.
+    monkeypatch.setattr(service, "_run_dialog", lambda *a, **k: FakeProc(""))
+    cancelled = service.browse_folder()
+    assert cancelled["path"] is None
+    assert cancelled.get("cancelled") is True and not cancelled.get("failed")
 
 
 def test_eu_raw_view_hides_bom_but_bytes_untouched(registry, config):
