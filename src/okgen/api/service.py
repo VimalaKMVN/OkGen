@@ -2543,14 +2543,22 @@ def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
             layouts[layout] = layouts.get(layout, 0) + 1
     header_fields = {}
     detail_sections = {}
+    rollups = {}
     for name in layouts:
         lay = registry.get(name)
         if lay:
             header_fields[name] = _header_fields_for_layout(lay, config)
             detail_sections[name] = _detail_sections_for_layout(lay, config)
+            # Which header fields are roll-ups (config/rollup_fields.yaml), so
+            # the panel can warn the moment one is picked rather than after the
+            # user has built the whole operation. Nothing else can tell it: a
+            # roll-up field looks like any other editable header field.
+            if config is not None and config.rollups(name):
+                rollups[name] = config.rollups(name)
     return {
         "files": files, "layouts": layouts,
         "header_fields": header_fields, "detail_sections": detail_sections,
+        "rollups": rollups,
     }
 
 
@@ -2592,9 +2600,13 @@ def _sync_count(okf, layout_name, section_name, count, config):
         header.set(cf, val)
 
 
-def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
+def _bulk_op_eval_raw(sp: Path, layout_name, section_name, op, registry, config):
     """Evaluate a detail/header bulk op on one file (no write). Carries 'okf'
-    on a real change so apply can save it."""
+    on a real change so apply can save it.
+
+    Call :func:`_bulk_op_eval` instead — it wraps this to resolve roll-up
+    totals, which are not written as typed.
+    """
     name = sp.name
     try:
         if detect_layout(sp).layout != layout_name:
@@ -2839,6 +2851,50 @@ def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
     return {"name": name, "status": "error", "error": f"unknown op '{t}'"}
 
 
+def _bulk_op_eval(sp: Path, layout_name, section_name, op, registry, config):
+    """:func:`_bulk_op_eval_raw`, with roll-up totals (D58) resolved.
+
+    A roll-up is not written as typed: with detail rows present the SUM wins on
+    the write path, so a bulk set of the header total is discarded on exactly
+    those files. The raw evaluation reports what it wrote into the record, which
+    for a roll-up field is not what reaches the disk — so the preview and the
+    result both promised a number the save never wrote. That is the D28/D43/D47
+    "reports one thing, writes another" class arriving through the bulk path,
+    and it is fixed HERE rather than at the op branches so every op type (set,
+    list, random, unique, date) is covered by one rule.
+
+    Read-only: it resolves what :func:`_apply_rollups` WILL do at save time and
+    annotates the result. Nothing about what gets written changes.
+    """
+    r = _bulk_op_eval_raw(sp, layout_name, section_name, op, registry, config)
+    okf = r.get("okf")
+    if okf is None or config is None or r.get("status") != "change":
+        return r
+    field = op.get("field")
+    for st in rollup_state(okf, config):
+        touched_total = (section_name == okf.layout.sections[0].name
+                         and field == st["field"])
+        touched_rows = (section_name == st["section"] and field == st["source"])
+        if not (touched_total or touched_rows):
+            continue
+        if st.get("error"):        # non-numeric row qty, or a sum too wide (D40)
+            return {"name": r["name"], "status": "error", "error": st["error"]}
+        r["rollup"] = {"field": st["field"], "section": st["section"],
+                       "rows": st["rows"], "value": st["expected"] or st["current"],
+                       "reason": "sum" if st["rows"] else "no_rows"}
+        if touched_total and st["rows"]:
+            # The typed total is about to be overwritten by the sum. Say what
+            # will really land, and where it came from.
+            r["detail"] = (f"{st['field']} → {st['expected']} "
+                           f"(sum of {st['rows']} {st['section'].lower()} lines)")
+        elif touched_rows and st["rows"]:
+            # The useful direction: editing the rows MOVES the total, which is
+            # how a bulk total change is actually done.
+            r["detail"] = f"{r.get('detail', '')} · {st['field']} → {st['expected']}"
+        break
+    return r
+
+
 def bulk_op_preview(paths, layout, section, op, registry, config) -> dict:
     results = []
     for p in paths or []:
@@ -2915,7 +2971,30 @@ def _bulk_eval(sp: Path, layout_name: str, field: str, value: str, registry,
     except EditError as exc:
         return {"name": name, "status": "error", "current": current, "new": new,
                 "error": str(exc)}
-    return {"name": name, "status": "change", "current": current, "new": new, "okf": okf}
+    # A ROLL-UP field is not written as typed: with detail rows present the sum
+    # wins on the write path (D58), so the value the user asked for is discarded
+    # on exactly those files. Resolve it HERE, read-only, or the preview and the
+    # result both promise a number the save never writes — the D28/D43/D47
+    # "reports one thing, writes another" class, arriving through the bulk path.
+    rollup = None
+    if config is not None and config.rollup_for_field(okf.layout.name, field):
+        st = next((s for s in rollup_state(okf, config) if s["field"] == field), None)
+        if st is not None:
+            if st.get("error"):     # non-numeric row, or a sum too wide (D40)
+                return {"name": name, "status": "error", "current": current,
+                        "new": new, "error": st["error"]}
+            rollup = {"rows": st["rows"], "section": st["section"],
+                      "requested": new,
+                      "reason": "sum" if st["rows"] else "no_rows"}
+            if st["rows"]:
+                new = st["expected"]        # what will REALLY be on disk
+    if new == current:
+        # The roll-up puts the value straight back: nothing to write, so say so
+        # rather than rewriting the file with identical bytes.
+        return {"name": name, "status": "unchanged", "current": current,
+                "new": new, **({"rollup": rollup} if rollup else {})}
+    return {"name": name, "status": "change", "current": current, "new": new,
+            "okf": okf, **({"rollup": rollup} if rollup else {})}
 
 
 def bulk_preview(paths, layout_name, field, value, registry, config) -> dict:
@@ -3320,6 +3399,9 @@ def generate_scope(paths, registry: LayoutRegistry, config: Config,
         "palette": rename_scope([str(sp)], registry, config)["palette"],
         "max_count": GENERATE_MAX,
         "default_folder": str(_generate_folder(tpaths, 0, layout_name, dry=True)),
+        # Roll-up header fields, so the panel can warn when one is varied — a
+        # generated value is discarded on any template that HAS detail rows.
+        "rollups": config.rollups(layout_name) if config is not None else [],
     }
 
 
@@ -3633,8 +3715,20 @@ def generate_preview(paths, spec, registry: LayoutRegistry, config: Config,
                 shown[hf["name"]] = (header.get(hf["name"]) or "").strip()
         counts = {s.name: sum(1 for r in okf.records if r.section is s)
                   for s in okf.layout.sections[1:]}
+        # A roll-up header field the spec varies is DISCARDED on any template
+        # that has detail rows — the shown value is already the sum, so mark it
+        # or a correct preview reads as a glitch.
+        rollup = None
+        asked = {hf.get("name") for hf in (spec.get("header_fields") or [])}
+        for st in rollup_state(okf, config):
+            if st["field"] in asked:
+                rollup = {"field": st["field"], "rows": st["rows"],
+                          "section": st["section"],
+                          "reason": "sum" if st["rows"] else "no_rows"}
+                break
         rows.append({"name": name, "key": note["key"], "values": shown,
-                     "rows": counts, "template": note.get("template")})
+                     "rows": counts, "template": note.get("template"),
+                     **({"rollup": rollup} if rollup else {})})
 
     return {
         "count": count,

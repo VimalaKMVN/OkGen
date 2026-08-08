@@ -520,6 +520,22 @@ function renderBulkPanel(scope) {
   const row2 = el("div", "bulk-edit-row");
   panel.appendChild(row2);
 
+  // A roll-up header field (config/rollup_fields.yaml) is not written as typed:
+  // where the detail section HAS rows the sum wins, so the value only lands on
+  // files with no rows. Say so the moment the field is picked, rather than
+  // letting the user build the whole operation and find out from the preview.
+  const rollupNote = el("div", "bulk-rollup-note");
+  panel.appendChild(rollupNote);
+  function updateRollupNote() {
+    rollupNote.textContent = "";
+    const sec = curSection();
+    if (!sec || !sec.isHeader) return;
+    const fieldSel = row2.querySelector("select.bulk-field");
+    if (!fieldSel) return;
+    const spec = rollupSpecFor(scope.rollups, selectedLayout, fieldSel.value);
+    if (spec) rollupNote.textContent = rollupWarning(spec);
+  }
+
   const actions = el("div", "bulk-actions");
   const previewBtn = el("button", "btn", "Preview");
   const applyBtn = el("button", "btn btn-primary", "Apply"); applyBtn.disabled = true;
@@ -579,6 +595,10 @@ function renderBulkPanel(scope) {
           new Option(`${f.name} (${f.size != null ? f.size : "?"})`, f.name)));
       row2.appendChild(el("span", "bulk-label", "Field:"));
       row2.appendChild(fieldSel);
+      // Bound to the control itself, not delegated from the row: every branch
+      // below adds its own `change` listener, and the note must refresh on all
+      // of them.
+      fieldSel.addEventListener("change", updateRollupNote);
 
       if (op === "set") {
         const valueHolder = el("span", "bulk-value-holder");
@@ -650,6 +670,7 @@ function renderBulkPanel(scope) {
       }
       if (sec.count_field) row2.appendChild(el("span", "bulk-section", `· header ${sec.count_field} kept in sync`));
     }
+    updateRollupNote();
     reset();
   }
 
@@ -1426,6 +1447,29 @@ function rollupSpec() {
   return rs.length ? rs[0] : null;
 }
 
+// ---- shared roll-up wording for the BULK paths --------------------------- //
+// Bulk Edit and Volume Generate meet the same rule at a different moment: the
+// value is typed once and applied to a whole selection, so the warning has to
+// come up front. Both read the spec the server sends with their scope — the
+// client must never assume which field is a roll-up.
+
+// The spec for `field` on `layout`. `rollups` is Bulk's {layout: [spec]} map or
+// Generate's plain [spec] list for its single layout.
+function rollupSpecFor(rollups, layout, field) {
+  if (!rollups || !field) return null;
+  const list = Array.isArray(rollups) ? rollups : (rollups[layout] || []);
+  return list.find((s) => s.field === field) || null;
+}
+
+// One sentence, every word from config so a future roll-up words itself: the
+// rule, then the control that actually changes the value.
+function rollupWarning(spec) {
+  const lines = `${String(spec.section).toLowerCase()} lines`;
+  return `⚠ ${spec.field} is the sum of the ${lines}. Only files with no `
+    + `${lines} take this value — for the rest, set ${spec.section} › `
+    + `${spec.source} instead.`;
+}
+
 function rollupHeaderField() {
   const spec = rollupSpec();
   if (!spec || !state.view) return null;
@@ -1531,9 +1575,16 @@ function refreshRollup(fromRows) {
     badge.title = "This total matches its rows.";
   } else {
     badge.classList.add("rollup-warn");
-    badge.textContent = `⚠ will be set to ${live.expected} on save`;
-    badge.title = `The ${lines} total ${live.total}. Saving corrects this field `
-      + "to match them.";
+    // Say WHERE the value comes from and how to change it — the rule (rows
+    // drive the total) was only ever in the hover tooltip, which nobody hovers,
+    // so "it is not taking my value" read as a bug rather than a rule. One
+    // wording for both flavours of mismatch (typed by the user, or the file's
+    // own): naming the typed number back would only restate what is on screen.
+    const secLines = `${live.section.toLowerCase()} lines`;
+    badge.textContent = `⚠ will be set to the sum of the ${secLines} `
+      + `(${live.expected}) on save — to change ${live.name}, edit the ${secLines}`;
+    badge.title = `The ${lines} total ${live.total}. This field always follows `
+      + "them, so change the row quantities to change the total.";
   }
 }
 
@@ -3075,10 +3126,17 @@ function renderGeneratePanel(panel, paths, scope) {
       list.disabled = true;
       list.title = "Comma-separated. When filled, values are picked from this "
                  + "list instead of the min/max range. Use ' ' for a blank value.";
+      // A roll-up field's generated value is DISCARDED on any template that has
+      // detail rows (the sum wins), so warn as soon as it is ticked rather than
+      // letting the user read the sum in the preview and think it a glitch.
+      const rspec = rollupSpecFor(scope.rollups, scope.layout, f.name);
+      const note = rspec ? el("div", "gen-rollup-note", rollupWarning(rspec)) : null;
+      if (note) note.style.display = "none";
       const syncRange = () => {
         const usingList = list.value.trim() !== "";
         min.disabled = max.disabled = !cb.checked || usingList;
         list.disabled = !cb.checked;
+        if (note) note.style.display = cb.checked ? "" : "none";
       };
       cb.addEventListener("change", () => {
         if (cb.checked && min.value === "" && list.value.trim() === "" && !isDate) {
@@ -3095,6 +3153,7 @@ function renderGeneratePanel(panel, paths, scope) {
                          isDate ? `${f.name} (date)` : `${f.name} (${f.size})`));
       row.appendChild(min); row.appendChild(max); row.appendChild(list);
       box.appendChild(row);
+      if (note) box.appendChild(note);
     });
     box.classList.add(hostClass);
     return box;

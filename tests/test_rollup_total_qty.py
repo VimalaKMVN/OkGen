@@ -380,3 +380,117 @@ def test_bulk_keep_zero_leaves_the_total_standing(sh, registry, config):
                           backup=False)
     assert _size_rows(sh, registry) == []
     assert _total(sh, registry) == "0000008"
+
+
+# --------------------------------------------------------------------------- #
+# What the BULK paths REPORT — the preview must equal what lands on disk
+#
+# A roll-up is not written as typed, so a bulk set of the total is discarded on
+# exactly the files that have rows. Reporting the typed value is the D28/D43/D47
+# "reports one thing, writes another" class arriving through the bulk path, and
+# it is worse here than in the editor: one apply covers a whole selection and
+# nothing on screen contradicts it.
+# --------------------------------------------------------------------------- #
+def _no_sizes(tmp_path, name="NS.OK"):
+    """A StyleHeader with its Size section removed (tot_qty authoritative)."""
+    raw = SAMPLE.read_bytes()
+    body = b"".join(l + b"\r\n" for l in raw.split(b"\r\n")
+                    if l and not l.startswith(b"&"))
+    p = tmp_path / name
+    p.write_bytes(body)
+    return p
+
+
+def _set_total(paths, registry, config, value="0000500", apply=False):
+    op = {"type": "set", "field": "tot_qty", "value": value}
+    fn = service.bulk_op_apply if apply else service.bulk_op_preview
+    kw = {"backup": False} if apply else {}
+    return fn([str(p) for p in paths], "StyleHeader", "Header", op,
+              registry, config, **kw)["results"]
+
+
+def test_bulk_preview_reports_the_sum_not_the_typed_total(sh, registry, config):
+    """With rows present the sum wins, so the preview must SAY 0000008."""
+    r = _set_total([sh], registry, config)[0]
+    assert "0000008" in r["detail"]
+    assert "0000500" not in r["detail"]
+    assert r["rollup"]["reason"] == "sum"
+    assert r["rollup"]["rows"] == 4
+
+
+def test_bulk_preview_matches_what_lands_on_disk(sh, registry, config):
+    """The promise and the bytes agree — the whole point of the fix."""
+    promised = _set_total([sh], registry, config)[0]["detail"]
+    _set_total([sh], registry, config, apply=True)
+    assert _total(sh, registry) == "0000008"
+    assert "0000008" in promised
+
+
+def test_a_file_with_no_size_lines_does_take_the_typed_total(tmp_path, registry, config):
+    """The other half of the rule: no rows means the field is authoritative."""
+    ns = _no_sizes(tmp_path)
+    r = _set_total([ns], registry, config)[0]
+    assert "0000500" in r["detail"]
+    assert r["rollup"]["reason"] == "no_rows"
+    _set_total([ns], registry, config, apply=True)
+    assert _total(ns, registry) == "0000500"
+
+
+def test_a_mixed_selection_reports_each_file_its_own_way(tmp_path, sh, registry, config):
+    """The case the warning exists for: one apply, two outcomes."""
+    ns = _no_sizes(tmp_path)
+    by_name = {r["name"]: r for r in _set_total([sh, ns], registry, config)}
+    assert by_name["SH.OK"]["rollup"]["reason"] == "sum"
+    assert by_name["NS.OK"]["rollup"]["reason"] == "no_rows"
+    _set_total([sh, ns], registry, config, apply=True)
+    assert _total(sh, registry) == "0000008"
+    assert _total(ns, registry) == "0000500"
+
+
+def test_editing_the_rows_reports_the_total_it_moves(sh, registry, config):
+    """The direction that WORKS — setting qty is how a bulk total is changed,
+    so the report names the total it produced."""
+    op = {"type": "set", "field": "qty", "value": "125"}
+    r = service.bulk_op_preview([str(sh)], "StyleHeader", "Size", op,
+                                registry, config)["results"][0]
+    assert "tot_qty → 0000500" in r["detail"]
+    service.bulk_op_apply([str(sh)], "StyleHeader", "Size", op, registry,
+                          config, backup=False)
+    assert _total(sh, registry) == "0000500"
+
+
+def test_an_unfittable_sum_is_an_error_in_the_preview(tmp_path, registry, config):
+    """A sum too wide is refused at save (D40) — the preview must not offer it
+    as a change the user can apply."""
+    # tot_qty holds 7 digits and a row qty holds 5, so it takes 101 full rows
+    # to overflow the total — the ceiling is far higher than any real file.
+    big = _sized(tmp_path, "BIG.OK", [99999] * 101)
+    r = _set_total([big], registry, config)[0]
+    assert r["status"] == "error"
+    assert "digits" in r["error"]
+
+
+def test_a_non_rollup_field_is_untouched_by_the_wrapper(sh, registry, config):
+    """The roll-up resolution must not reach fields it has nothing to do with."""
+    op = {"type": "set", "field": "chain", "value": "03"}
+    r = service.bulk_op_preview([str(sh)], "StyleHeader", "Header", op,
+                                registry, config)["results"][0]
+    assert "rollup" not in r
+
+
+def test_bulk_scope_tells_the_client_which_fields_are_rollups(sh, registry, config):
+    """The panel cannot warn about a field it has no way to recognise."""
+    scope = service.bulk_scope([str(sh)], registry, config)
+    assert scope["rollups"]["StyleHeader"][0]["field"] == "tot_qty"
+    assert scope["rollups"]["StyleHeader"][0]["source"] == "qty"
+
+
+def test_generate_scope_and_preview_carry_the_rollup(sh, registry, config):
+    """Generate shows the sum already; it must also say WHY."""
+    scope = service.generate_scope([str(sh)], registry, config)
+    assert scope["rollups"][0]["field"] == "tot_qty"
+    spec = {"count": 1,
+            "header_fields": [{"name": "tot_qty", "mode": "set", "value": "0000500"}]}
+    row = service.generate_preview([str(sh)], spec, registry, config, sample=1)["sample"][0]
+    assert row["values"]["tot_qty"] == "0000008"
+    assert row["rollup"]["reason"] == "sum"

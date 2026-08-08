@@ -21,7 +21,21 @@ function mkEl(tag = "div") {
     set textContent(v) { this._text = String(v); },
     get innerHTML() { return this._html || ""; },
     set innerHTML(v) { this._html = v; this.children = []; this.childNodes = []; },
-    appendChild(c) { c.parentNode = this; this.children.push(c); this.childNodes.push(c); return c; },
+    appendChild(c) {
+      c.parentNode = this; this.children.push(c); this.childNodes.push(c);
+      // A real <select> adopts its FIRST option's value automatically. Without
+      // this the stub left `value` as "" after a panel populated a dropdown, so
+      // any code that reads the current selection right after building it (the
+      // bulk panel's Section/Operation chain) saw nothing selected and threw —
+      // a failure that exists only in the stub, which is the worst kind.
+      if (this.tagName === "SELECT" && c.tagName === "OPTION"
+          && this.children.filter((x) => x.tagName === "OPTION").length === 1) {
+        this.value = c.value;
+      }
+      return c;
+    },
+    // The options of a <select>, as a browser exposes them.
+    get options() { return this.children.filter((c) => c.tagName === "OPTION"); },
     // Variadic sibling of appendChild. renderTable builds its row-action cell
     // with it, so a suite that renders a TABLE section (rather than only a
     // form) hits this — the reason it was missing is that none used to.
@@ -36,6 +50,16 @@ function mkEl(tag = "div") {
     addEventListener(ev, fn) { (this._handlers[ev] ||= []).push(fn); },
     removeEventListener() {},
     click() { (this._handlers.click || []).forEach((f) => f({ preventDefault() {}, stopPropagation() {} })); },
+    // Fire a handler registered on THIS element. Note the stub does not bubble,
+    // so a suite can only exercise a listener bound to the element itself —
+    // which is the reason app.js binds `change` to the control rather than
+    // relying on delegation from its row.
+    dispatchEvent(e) {
+      const type = e && e.type;
+      (this._handlers[type] || []).forEach((f) =>
+        f({ type, target: this, preventDefault() {}, stopPropagation() {} }));
+      return true;
+    },
     getBoundingClientRect() { return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }; },
     // Returns the first real match, else a detached element. innerHTML is not
     // parsed by this stub, so code that writes markup then queries into it

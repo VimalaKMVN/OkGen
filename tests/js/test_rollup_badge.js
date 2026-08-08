@@ -109,6 +109,12 @@ check("its tooltip explains where that came from",
       badge && /size line/i.test(badge.title || ""));
 check("opening does NOT rewrite the control",
       ctlOf(host, 0, 0, "tot_qty").value === "0000022");
+// The badge must say WHERE that value comes from and what to do about it —
+// "will be set to 0000008" alone reads as the editor refusing to take a value.
+check("...and says the value is the sum of the size lines",
+      badge && /sum of the size lines/i.test(badge.textContent));
+check("...and points at the control that actually changes it",
+      badge && /to change tot_qty, edit the size lines/i.test(badge.textContent));
 
 // --------------------------------------------------------------------------
 // Agreement is quiet, not silent
@@ -148,6 +154,11 @@ check("but it is badged as one the save will correct",
       (badgeOf(host).className || "").includes("rollup-warn"));
 check("...naming the sum that will win",
       badgeOf(host).textContent.includes("0000008"));
+// A value the user TYPED gets the same explanation as a mismatch the file
+// arrived with — one wording, because the point is the rule, not their number.
+check("...and explains the rule rather than echoing what they typed",
+      /sum of the size lines/i.test(badgeOf(host).textContent)
+      && /to change tot_qty, edit the size lines/i.test(badgeOf(host).textContent));
 
 // --------------------------------------------------------------------------
 // No rows: the total is the quantity, and that is INFORMATIONAL

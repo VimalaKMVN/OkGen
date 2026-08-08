@@ -281,6 +281,14 @@ body {
 .rollup-ok   { color: #15803d; }
 .rollup-warn { color: #b45309; font-weight: 700; }
 .rollup-info { color: #6b7280; }
+/* Bulk Edit / Volume Generate: the roll-up rule, stated the moment the field is
+   picked. Amber like the editor's badge — same rule, same colour, earlier. */
+.bulk-rollup-note, .gen-rollup-note {
+  color: #b45309; font-size: 11px; line-height: 1.35; margin: 4px 0 0;
+}
+.bulk-rollup-note:empty { display: none; }
+.gen-rollup-note { margin: 2px 0 6px 22px; }
+
 /* Tree marker for a file whose summed section is empty — quiet by design. */
 .no-rows-tag {
   margin-left: 4px; font-size: 9px; font-weight: 600; color: #6b7280;
