@@ -148,6 +148,7 @@ class Config:
         config_dir: Optional[str] = None,
         pad_zero_fields: Optional[Dict[str, set]] = None,
         freeform_fields: Optional[Dict[str, set]] = None,
+        blank_allowed_fields: Optional[Dict[str, set]] = None,
         # Declared source per .OK layout (display only) — see layout_source().
         layout_sources: Optional[Dict[str, str]] = None,
         # {layout: [spec, ...]} header fields summed from a detail section.
@@ -158,6 +159,7 @@ class Config:
         # is kept because the mapping names a TEMPLATE file relative to it.
         self._pad_zero_fields = pad_zero_fields or {}
         self._freeform_fields = freeform_fields or {}
+        self._blank_allowed_fields = blank_allowed_fields or {}
         self._ok_to_json = ok_to_json or {}
         self._config_dir = config_dir or ""
         # The JSON hand-off (HTTP POST) block — see nicelabel_post.yaml. The
@@ -471,6 +473,25 @@ class Config:
         if layout:
             names |= set(self._freeform_fields.get(layout, set()))
         return names
+
+    def blank_allowed_fields(self, layout: Optional[str]) -> set:
+        """Fields a CLEARED editor box blanks, instead of zero-padding.
+
+        A field whose sample value looks like a zero-padded number is written
+        right-justified and '0'-filled, which is right for a value and wrong for
+        an absence: clearing the box produced ``0000``, and only typing exactly
+        the field's width in spaces produced a blank. Listed fields treat an
+        empty (or all-space) entry as "blank this field" instead.
+
+        Same ``"*"``-plus-layout merge as ``literal``/``freeform``.
+        """
+        names = set(self._blank_allowed_fields.get("*", set()))
+        if layout:
+            names |= set(self._blank_allowed_fields.get(layout, set()))
+        return names
+
+    def allows_blank(self, layout: Optional[str], field: Optional[str]) -> bool:
+        return bool(field) and field in self.blank_allowed_fields(layout)
 
     def is_freeform(self, layout: Optional[str], field: Optional[str]) -> bool:
         return bool(field) and field in self.freeform_fields(layout)
@@ -841,6 +862,7 @@ class Config:
         literal_fields: Dict[str, set] = {}
         pad_zero_fields: Dict[str, set] = {}
         freeform_fields: Dict[str, set] = {}
+        blank_allowed_fields: Dict[str, set] = {}
         fd_path = cdir / "field_display.yaml"
         if fd_path.is_file():
             data = yaml.safe_load(fd_path.read_text(encoding="utf-8")) or {}
@@ -863,6 +885,10 @@ class Config:
             freeform_fields = {
                 str(l): {str(f) for f in (fs or [])}
                 for l, fs in (data.get("freeform") or {}).items()
+            }
+            blank_allowed_fields = {
+                str(l): {str(f) for f in (fs or [])}
+                for l, fs in (data.get("blank_allowed") or {}).items()
             }
 
         detail_fill: Dict[str, dict] = {}
@@ -984,5 +1010,6 @@ class Config:
                    nicelabel_post_error, ok_to_json, str(cdir),
                    pad_zero_fields=pad_zero_fields,
                    freeform_fields=freeform_fields,
+                   blank_allowed_fields=blank_allowed_fields,
                    layout_sources=layout_sources,
                    rollups=rollups)

@@ -132,3 +132,38 @@ pad_zeros:
     - store
   CalgaryCartonLabel:
     - store
+
+# --------------------------------------------------------------------------- #
+# blank_allowed — fields a CLEARED editor box actually blanks.
+#
+# A fixed-width field is written using the justification inferred from its
+# SAMPLE value, and a sample like `0000` makes the field right-justified and
+# '0'-filled. That is right for a value and wrong for an absence:
+#
+#     ""   -> "0000"      (you cleared the box; OkGen wrote a number)
+#     "  " -> "00  "      (you typed two spaces)
+#     "    " -> "    "    (only the field's EXACT width worked)
+#
+# So the only way to blank one was to type precisely 4 spaces, which nobody
+# guesses. A listed field treats an empty or all-space entry as "blank this
+# field" — the full width written as spaces, keeping the record's exact length.
+#
+# A REAL value is unaffected and still zero-pads: `531` -> `0531`.
+#
+# Deliberately a LIST, not a global rule. Making every zero-padded field behave
+# this way is arguably more correct (writing 0000 for an absent value is the
+# absent-vs-zero collapse D39 settled from the conversion side), but it would
+# change behaviour on every such field across all 12 layouts. These are the two
+# the user actually hit; add a name when another one turns up.
+#
+# Bulk Edit and Volume Generate are NOT affected and need nothing here: they
+# already have an explicit quoted-blank token (`' '`), advertised in the panel,
+# which writes literal spaces on any field.
+#
+#   layout name -> [output_field_name, ...]   ("*" would apply to every layout)
+blank_allowed:
+  CartonLabel:
+    - dad_date      # store-row ad date; the header's own `ad_date` samples
+                    # spaces and so has always blanked correctly
+  DistLabels:
+    - ad            # Store-row ad date

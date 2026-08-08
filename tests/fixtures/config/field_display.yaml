@@ -132,3 +132,12 @@ pad_zeros:
     - store
   CalgaryCartonLabel:
     - store
+
+# Fields a CLEARED editor box blanks instead of zero-padding — see the comment
+# in config/field_display.yaml. Kept in step with the shipped config on purpose:
+# these two are the user-reported ad-date fields.
+blank_allowed:
+  CartonLabel:
+    - dad_date
+  DistLabels:
+    - ad

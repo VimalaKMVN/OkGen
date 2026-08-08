@@ -821,6 +821,18 @@ def _apply_edits_to_okf(okf, edits: List[dict], config: Config = None) -> None:
         raise EditError(str(errors))
     for e in edits:
         rec = by_index[e["record_index"]]
+        # A field declared `blank_allowed` (field_display.yaml) treats a CLEARED
+        # box as blank instead of padding it. Its sample looks like a zero-padded
+        # number, so the field is written right-justified and '0'-filled — right
+        # for a value, wrong for an absence: clearing it wrote `0000`, and only
+        # typing the field's EXACT width in spaces produced a blank. Reuses the
+        # existing blank-token path rather than adding a second spelling of
+        # "write spaces". A real value is untouched and still pads (531 -> 0531).
+        if (config is not None and not e.get("_blank")
+                and config.allows_blank(okf.layout.name, e["field"])
+                and not (e.get("value") or "").strip()):
+            e["_blank"] = True
+            e["value"] = ""
         # An explicit blank token writes spaces (a visually blank field) on ANY
         # field, numeric included — the user typed spaces and asked for blank.
         literal = e.get("_blank") or (config is not None
