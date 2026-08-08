@@ -164,24 +164,13 @@ function autoCleanEnabled() { return localStorage.getItem("okgen.autoClean") !==
   });
 })();
 
-// ---- auto-fix-Total-Qty-on-open toggle (persisted, default OFF) ----
-// Deliberately the OPPOSITE default to auto-clean. Auto-clean removes junk —
-// blank lines and post-terminator padding, provably not data. This rewrites a
-// FIELD VALUE, so leaving it on by default would mean that merely clicking
-// through a folder silently changes quantities. It is opt-in until the user has
-// run the Total Qty preview over their own files and seen the rule is right.
-function autoFixTotalEnabled() { return localStorage.getItem("okgen.autoTotal") === "1"; }
-(function initAutoTotalToggle() {
-  const chk = $("#autoTotalChk");
-  if (!chk) return;
-  chk.checked = autoFixTotalEnabled();
-  chk.addEventListener("change", () => {
-    localStorage.setItem("okgen.autoTotal", chk.checked ? "1" : "0");
-    setStatus(chk.checked
-      ? "Auto-fix Total Qty ON — opening a file whose total disagrees with its size lines corrects and saves it"
-      : "Auto-fix Total Qty OFF — a mismatch is shown and corrected when you Save", "ok");
-  });
-})();
+// NOTE: there is deliberately NO auto-fix-Total-Qty-on-open toggle.
+// One shipped in v0.77.0 (default OFF) and was withdrawn: a single global
+// browser setting cannot mean "my files but not someone else's", and opening a
+// file is the one action that must never rewrite a FIELD VALUE — auto-clean may
+// default ON precisely because junk is not data, which is the distinction that
+// does not survive here. The backlog goes through the Total Qty check sweep
+// instead, which previews before it writes.
 
 // ---- folder picker (native OS dialog) ----
 async function browseFolder() {
@@ -1164,41 +1153,8 @@ async function loadFile(path) {
       setStatus(view.roundtrip_ok ? "Loaded (round-trip OK)" : "Loaded (round-trip DIFFERS!)",
                 view.roundtrip_ok ? "ok" : "err");
     }
-    // Last, so its own status line is the one left standing when it acts.
-    await maybeAutoFixTotal(path);
   } catch (e) {
     setStatus("Parse failed: " + e.message, "err");
-  }
-}
-
-// Correct a roll-up mismatch at OPEN — only when the user has opted in.
-// Never fires on a file whose summed section is empty (nothing to sum it
-// against, and that total is the real quantity), nor on one that already
-// agrees, so a correct file is never rewritten and keeps its timestamp.
-async function maybeAutoFixTotal(path) {
-  if (!autoFixTotalEnabled() || !state.view) return;
-  const r = (state.view.rollups || [])[0];
-  if (!r || r.matches || r.error || !r.rows) return;
-  try {
-    const res = await postJSON("/api/total-qty/fix", { paths: [path] });
-    const one = (res.results || [])[0] || {};
-    if (one.status !== "fixed") {
-      setStatus(`${r.field} disagrees with its ${r.section.toLowerCase()} lines `
-                + `(${r.current} vs ${r.expected}) — could not fix automatically`
-                + (one.error ? ` (${one.error})` : "") + "; click Save", "dirty");
-      return;
-    }
-    const view = await getParse(path);       // re-render from what is now on disk
-    state.view = view;
-    state.edits = {};
-    state.ops = [];
-    renderEditor(view);
-    updateSaveButtons();
-    updateDirtyIndicator();
-    setStatus(`Auto-fixed ${one.field}: ${one.from} → ${one.to} `
-              + `(sum of ${one.rows} ${r.section.toLowerCase()} lines) and saved`, "ok");
-  } catch (e) {
-    setStatus(`Could not auto-fix ${r.field} (${e.message}); click Save`, "dirty");
   }
 }
 
