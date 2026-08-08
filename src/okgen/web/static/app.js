@@ -734,6 +734,19 @@ function renderBulkFieldsTable(host, results, applied) {
       } else if (f.before !== undefined) {
         const rows = f.rows > 1 ? `  (${f.moved}/${f.rows} rows${f.varies ? ", varies" : ""})` : "";
         line.textContent = `${f.field}: ${f.before} → ${f.after}${rows}`;
+        // A roll-up is not written as typed (D58). Say where the value came
+        // from AND what was discarded — a corrected total that looks like an
+        // ordinary change is the thing v0.78.0 exists to prevent.
+        if (f.rollup) {
+          line.classList.add("bulkf-roll");
+          const sec = String(f.rollup.section).toLowerCase();
+          line.textContent += `   ← sum of ${f.rollup.rows} ${sec} lines`
+            + (f.rollup.typed ? `; your ${f.rollup.typed} was not used` : "");
+        }
+      } else if (f.rollup) {
+        line.classList.add("bulkf-roll");
+        line.textContent = `${f.field}: kept at ${f.rollup.typed || ""} `
+          + `(already the sum of ${f.rollup.rows} ${String(f.rollup.section).toLowerCase()} lines)`;
       } else {
         line.textContent = `${f.field}: ${f.detail || f.status}`;
       }

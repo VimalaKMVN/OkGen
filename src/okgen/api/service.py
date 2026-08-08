@@ -3221,8 +3221,52 @@ def _bulk_multi_eval(sp: Path, layout_name, ops, registry, config):
     if failed is not None:
         return {"name": name, "status": "error", "fields": fields,
                 "error": f"{failed.get('field')}: {failed.get('error')}"}
+
+    # Nothing was applied -> nothing will be written, so there is no roll-up to
+    # resolve either. Without this guard a batch of ZERO ops reported a change
+    # on any file whose stale total disagrees with its rows (the reference
+    # sample declares 22 against rows totalling 8) — a preview claiming a change
+    # nobody asked for, on the way to a save nobody requested. D58's rule is
+    # that opening or previewing never writes; the correction rides on a save
+    # that was going to happen anyway.
     if not any(f.get("status") == "change" for f in fields):
         return {"name": name, "status": "unchanged", "fields": fields}
+
+    # ROLL-UPS, resolved ONCE after every op — the same moment apply runs them,
+    # so the preview and the write agree. Without this the multi-field path
+    # promised the typed total (`0000022 -> 0000500`) while the save wrote the
+    # sum (`0000008`): the D28/D43/D47 "reports one thing, writes another" class
+    # that v0.78.0 fixed on the single-op route, reappearing because this path
+    # calls `_apply_bulk_op` directly and never went through `_bulk_op_eval`'s
+    # wrapper. That is D30 — a rule enforced in one path and skipped by the
+    # parallel one — arriving through a NEW path rather than an old one.
+    if config is not None:
+        for st in rollup_state(okf, config):
+            if st.get("error"):        # non-numeric row, or a sum too wide (D40)
+                return {"name": name, "status": "error", "fields": fields,
+                        "error": st["error"]}
+            if not st["rows"] or st["matches"]:
+                continue
+            note = {"reason": "sum", "rows": st["rows"], "section": st["section"]}
+            entry = next((f for f in fields if f.get("field") == st["field"]), None)
+            if entry is not None:
+                # The user typed a total; the sum wins. Say what will really
+                # land AND what was discarded, or the correction is invisible.
+                note["typed"] = entry.get("after", st["current"])
+                entry["after"] = st["expected"]
+                entry["rollup"] = note
+                if entry.get("before") == entry["after"]:
+                    entry.pop("before", None)      # nothing actually moves
+                    entry.pop("after", None)
+            else:
+                # Only the summed ROWS were edited, so the total follows on its
+                # own — a change the user did not ask for and must still see.
+                fields.append({"section": okf.layout.sections[0].name,
+                               "field": st["field"], "status": "change",
+                               "before": st["current"], "after": st["expected"],
+                               "rows": 1, "moved": 1, "varies": False,
+                               "rollup": note})
+
     return {"name": name, "status": "change", "fields": fields, "okf": okf}
 
 

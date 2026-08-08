@@ -159,8 +159,11 @@ def test_the_preview_reports_each_field_separately(files, registry, config):
         {"section": "Header", "type": "list", "field": "dept", "values": "42"},
         {"section": "Size", "type": "list", "field": "qty", "values": "125"},
     ], registry, config)["results"][0]
-    assert [f["field"] for f in res["fields"]] == ["dept", "qty"]
+    # `tot_qty` joins them un-asked: editing the Size rows moves the total, and
+    # a correction the user did not request is exactly what must be visible.
+    assert [f["field"] for f in res["fields"]] == ["dept", "qty", "tot_qty"]
     assert all(f["status"] == "change" for f in res["fields"])
+    assert res["fields"][2]["rollup"]["reason"] == "sum"
 
 
 def test_no_ops_changes_nothing(files, registry, config):
@@ -312,3 +315,74 @@ def test_the_transition_survives_apply(files, registry, config):
                               "field": "dept", "values": "42"}], registry, config)[0]
     assert (ap["fields"][0]["before"], ap["fields"][0]["after"]) == (pv["before"], pv["after"])
     assert _hdr(files[0], registry, "dept") == ap["fields"][0]["after"]
+
+
+# --------------------------------------------------------------------------- #
+# ROLL-UPS in the multi-field report — v0.78.0's rule, on the new path
+#
+# `bulk_multi_*` calls `_apply_bulk_op` directly and never goes through
+# `_bulk_op_eval`'s roll-up wrapper, so the preview promised the TYPED total
+# while the save wrote the sum: the same "reports one thing, writes another"
+# defect v0.78.0 fixed on the single-op route, reappearing through a parallel
+# path (D30) that happened to be new rather than old.
+# --------------------------------------------------------------------------- #
+def _preview(paths, ops, registry, config):
+    return service.bulk_multi_preview([str(p) for p in paths], "StyleHeader",
+                                      ops, registry, config)["results"][0]
+
+
+def test_a_typed_total_previews_as_the_sum_not_as_typed(files, registry, config):
+    ops = [{"section": "Header", "type": "list", "field": "tot_qty", "values": "0000500"}]
+    pv = _preview([files[0]], ops, registry, config)
+    f = next(x for x in pv["fields"] if x["field"] == "tot_qty")
+    assert f["after"] == "0000008", "the preview must show what will really land"
+    assert f["rollup"]["typed"] == "0000500", "and what was discarded"
+    assert f["rollup"]["rows"] == 4
+
+
+def test_the_previewed_total_is_what_lands_on_disk(files, registry, config):
+    ops = [{"section": "Header", "type": "list", "field": "tot_qty", "values": "0000500"}]
+    promised = next(x for x in _preview([files[0]], ops, registry, config)["fields"]
+                    if x["field"] == "tot_qty")["after"]
+    _apply([files[0]], ops, registry, config)
+    assert _hdr(files[0], registry, "tot_qty") == promised
+
+
+def test_editing_the_rows_previews_the_total_it_moves(files, registry, config):
+    """The total follows the rows on its own — a change the user did not ask
+    for, so it must appear in the preview rather than only after the fact."""
+    pv = _preview([files[0]], [{"section": "Size", "type": "list",
+                                "field": "qty", "values": "125"}], registry, config)
+    tot = next((x for x in pv["fields"] if x["field"] == "tot_qty"), None)
+    assert tot is not None and tot["after"] == "0000500"
+    assert tot["rollup"]["reason"] == "sum"
+
+
+def test_an_unfittable_total_is_an_error_in_the_multi_preview(tmp_path, registry, config):
+    """Refused at save (D40), so it must not preview as an applicable change."""
+    raw = SAMPLE.read_bytes()
+    body = b"".join(l + b"\r\n" for l in raw.split(b"\r\n")
+                    if l and not l.startswith(b"&"))
+    rows = b"".join(b"&XL    " + b"99999" + b"\\\r\n" for _ in range(101))
+    big = tmp_path / "BIG.OK"
+    big.write_bytes(body + rows)
+    pv = _preview([big], [{"section": "Header", "type": "list",
+                           "field": "dept", "values": "42"}], registry, config)
+    assert pv["status"] == "error"
+    assert "digits" in pv["error"]
+
+
+def test_a_file_with_no_size_lines_keeps_the_typed_total(tmp_path, registry, config):
+    """The other half of D58: with no rows the header field IS the quantity."""
+    raw = SAMPLE.read_bytes()
+    body = b"".join(l + b"\r\n" for l in raw.split(b"\r\n")
+                    if l and not l.startswith(b"&"))
+    ns = tmp_path / "NS.OK"
+    ns.write_bytes(body)
+    ops = [{"section": "Header", "type": "list", "field": "tot_qty", "values": "0000500"}]
+    pv = _preview([ns], ops, registry, config)
+    f = next(x for x in pv["fields"] if x["field"] == "tot_qty")
+    assert f["after"] == "0000500" and "rollup" not in f
+    service.bulk_multi_apply([str(ns)], "StyleHeader", ops, registry, config,
+                             backup=False)
+    assert _hdr(ns, registry, "tot_qty") == "0000500"
