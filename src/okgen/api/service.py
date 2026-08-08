@@ -3144,6 +3144,22 @@ def bulk_op_apply(paths, layout, section, op, registry, config, backup=True) -> 
     return {"results": results}
 
 
+def _field_values(okf, section_name, field):
+    """Every record's value for one field in one section, in order.
+
+    Read-only snapshot used to report what a bulk op actually moved. A missing
+    field or section gives an empty list rather than raising — the op itself
+    reports that case properly, and this must never be the thing that fails.
+    """
+    if not field or not section_name:
+        return []
+    try:
+        recs = okf.sections().get(section_name, [])
+        return [r.get(field) for r in recs]
+    except Exception:                            # noqa: BLE001 - reporting only
+        return []
+
+
 def _bulk_multi_eval(sp: Path, layout_name, ops, registry, config):
     """Evaluate SEVERAL field ops against one file, in memory, all-or-nothing.
 
@@ -3175,7 +3191,23 @@ def _bulk_multi_eval(sp: Path, layout_name, ops, registry, config):
     for op in ops or []:
         section = op.get("section")
         entry = {"section": section, "field": op.get("field")}
+        # What the field held BEFORE and AFTER this op, so the report can say
+        # `format: A -> B` rather than only "changed". The single-op `set` path
+        # produced that line for a one-record section and nothing else did, so
+        # capturing it here gives every op type — set, list, random, date — the
+        # same before/after, on detail sections too.
+        was = _field_values(okf, section, op.get("field"))
         r = _apply_bulk_op(okf, name, layout_name, section, dict(op), config)
+        now = _field_values(okf, section, op.get("field"))
+        moved = [(a, b) for a, b in zip(was, now) if a != b]
+        if moved:
+            entry["before"], entry["after"] = moved[0]
+            entry["rows"] = len(was)
+            entry["moved"] = len(moved)
+            # A range or a multi-value list gives each row its own value, so one
+            # pair would misrepresent the rest — say so instead of implying
+            # every row took the same value.
+            entry["varies"] = len({b for _, b in moved}) > 1
         status = r.get("status")
         if status in ("error", "too_wide", "missing_field", "no_section"):
             entry.update(status=status,

@@ -734,7 +734,17 @@ function renderBulkFieldsTable(host, results, applied) {
     const cell = el("td", "mono");
     (r.fields || []).forEach((f) => {
       const line = el("div", "bulkf-line" + (f.status === "change" ? "" : " bulkf-quiet"));
-      line.textContent = `${f.field}: ` + (f.error ? f.error : (f.detail || f.status));
+      // `format: A → B` is what the single-field panel used to say and what
+      // people read the preview FOR — "changed" alone does not let you check
+      // the change before applying it to a whole selection.
+      if (f.error) {
+        line.textContent = `${f.field}: ${f.error}`;
+      } else if (f.before !== undefined) {
+        const rows = f.rows > 1 ? `  (${f.moved}/${f.rows} rows${f.varies ? ", varies" : ""})` : "";
+        line.textContent = `${f.field}: ${f.before} → ${f.after}${rows}`;
+      } else {
+        line.textContent = `${f.field}: ${f.detail || f.status}`;
+      }
       cell.appendChild(line);
     });
     // What the SAVE corrected on its own, never silent.

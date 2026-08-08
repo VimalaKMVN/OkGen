@@ -258,3 +258,57 @@ def test_a_europe_file_cannot_take_a_non_europe_chain(tmp_path, registry, config
     assert res["status"] == "error"
     assert "isolated" in res["error"]
     assert p.read_bytes() == before
+
+
+# --------------------------------------------------------------------------- #
+# What the report SAYS — `format: A -> B`, not just "changed"
+#
+# The single-field panel used to show the transition, and that is what a preview
+# is read FOR: checking the change before it lands on a whole selection. Only
+# the `set` op produced that line, and only for a one-record section, so the
+# before/after is captured here instead — every op type, detail sections too.
+# --------------------------------------------------------------------------- #
+def test_a_header_field_reports_its_transition(files, registry, config):
+    res = service.bulk_multi_preview([str(files[0])], "StyleHeader", [
+        {"section": "Header", "type": "list", "field": "chain", "values": "04"},
+    ], registry, config)["results"][0]
+    f = res["fields"][0]
+    assert (f["before"], f["after"]) == ("03", "04")
+    assert f["rows"] == 1 and f["moved"] == 1 and f["varies"] is False
+
+
+def test_a_detail_field_reports_the_transition_and_the_row_count(files, registry, config):
+    res = service.bulk_multi_preview([str(files[0])], "StyleHeader", [
+        {"section": "Size", "type": "list", "field": "qty", "values": "125"},
+    ], registry, config)["results"][0]
+    f = res["fields"][0]
+    assert (f["before"], f["after"]) == ("00002", "00125")
+    assert f["rows"] == 4 and f["moved"] == 4
+    assert f["varies"] is False, "one value on every row does not vary"
+
+
+def test_a_range_is_flagged_as_varying(files, registry, config):
+    """One before/after pair would misrepresent the other rows."""
+    res = service.bulk_multi_preview([str(files[0])], "StyleHeader", [
+        {"section": "Size", "type": "random", "field": "qty", "min": 100, "max": 999},
+    ], registry, config)["results"][0]
+    assert res["fields"][0]["varies"] is True
+
+
+def test_a_field_that_did_not_move_carries_no_transition(files, registry, config):
+    """Setting a field to what it already holds must not claim a change."""
+    res = service.bulk_multi_preview([str(files[0])], "StyleHeader", [
+        {"section": "Header", "type": "list", "field": "chain", "values": "03"},
+    ], registry, config)["results"][0]
+    assert "before" not in res["fields"][0]
+
+
+def test_the_transition_survives_apply(files, registry, config):
+    """The preview's promise and the applied result must say the same thing."""
+    pv = service.bulk_multi_preview([str(files[0])], "StyleHeader", [
+        {"section": "Header", "type": "list", "field": "dept", "values": "42"},
+    ], registry, config)["results"][0]["fields"][0]
+    ap = _apply([files[0]], [{"section": "Header", "type": "list",
+                              "field": "dept", "values": "42"}], registry, config)[0]
+    assert (ap["fields"][0]["before"], ap["fields"][0]["after"]) == (pv["before"], pv["after"])
+    assert _hdr(files[0], registry, "dept") == ap["fields"][0]["after"]

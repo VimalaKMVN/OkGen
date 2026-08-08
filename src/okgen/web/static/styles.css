@@ -785,8 +785,13 @@ select.fval-pick:hover { color: var(--text); }
 
 /* Bulk Edit — field values: one row per field, shaped like Volume Generate's
    picker but with a values box first (a single entry means "set it"). */
-.bulkf-groups { display: flex; flex-direction: column; gap: 14px; margin: 10px 0; }
-.bulkf-group { border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; }
+/* Side by side, like Volume Generate's .gen-cols — every section visible at
+   once, wrapping to a new line when the window is too narrow. */
+.bulkf-groups { display: flex; flex-wrap: wrap; gap: 16px; margin: 10px 0; align-items: flex-start; }
+.bulkf-group {
+  min-width: 430px; flex: 1 1 430px; max-height: 300px; overflow-y: auto;
+  border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px;
+}
 .bulkf-note { color: var(--text-dim); font-size: 11px; margin: 2px 0 6px; }
 .bulkf-field {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
