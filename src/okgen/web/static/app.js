@@ -341,7 +341,7 @@ function renderFileNode(node) {
   // shape in the new system, and it is the marker that says "if this total is
   // wrong, only a person can fix it — nothing here can be recomputed".
   if (node.no_rollup_rows) {
-    const tag = el("span", "no-rows-tag", "no sizes");
+    const tag = el("span", "no-rows-tag", "NoSzLines");
     tag.title = "No detail rows — this file's total quantity is the printed "
       + "quantity, and is never recalculated. Check it is the value you want.";
     row.appendChild(tag);

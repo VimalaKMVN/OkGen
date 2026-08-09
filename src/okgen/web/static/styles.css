@@ -289,10 +289,24 @@ body {
 .bulk-rollup-note:empty { display: none; }
 .gen-rollup-note { margin: 2px 0 6px 22px; }
 
-/* Tree marker for a file whose summed section is empty — quiet by design. */
+/* Tree marker for a file whose summed section is empty ("NoSzLines").
+   User-reported as not clearly visible. Measured, the fault was the TEXT, not
+   the outline: 9px #6b7280 grey on the #1e1e1e page is 3.45:1, below the 4.5:1
+   floor for small text, sitting inside a loud near-white #d1d5db border (11.31:1)
+   — so the chip announced itself as a shape while the word inside it could not
+   be read. A light-theme palette that had never been re-checked on the dark one.
+   Now a FILLED chip in the app's own accent family: the label is 5.82:1 against
+   its own background and the border 5.95:1 against the page. Deliberately NOT
+   the amber of the duplicate-key warning — an empty size section is a normal
+   shape in the new system, not a fault — and filled rather than outlined so it
+   cannot read as a third SCAN/WMS badge, which are outlined-transparent on
+   purpose. */
 .no-rows-tag {
-  margin-left: 4px; font-size: 9px; font-weight: 600; color: #6b7280;
-  border: 1px solid #d1d5db; border-radius: 3px; padding: 0 3px;
+  display: inline-flex; align-items: center; flex: 0 0 auto;
+  margin-left: 5px; height: 15px; padding: 0 5px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px;
+  color: #eaf6ff; background: var(--accent); border: 1px solid #3ba3e0;
+  border-radius: 3px; cursor: help; white-space: nowrap;
 }
 
 /* "Are these SCAN or WMS?" — asked once per unlabelled folder, above the tree */
