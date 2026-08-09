@@ -143,7 +143,8 @@ def _has_real_rows(rows: List[dict]) -> bool:
     return any(any(_trim(v) for v in row.values()) for row in rows)
 
 
-def _empty_row(placeholder: list, mapped_fields, nullable, empty_rows, arr_name):
+def _empty_row(placeholder: list, mapped_fields, nullable, empty_rows, arr_name,
+               declared_row=None, sections=None, date_formats=None, note=None):
     """One row carrying a section's TAGS and no values.
 
     Keys come from the template's own row when it has one, so the shape matches
@@ -152,11 +153,54 @@ def _empty_row(placeholder: list, mapped_fields, nullable, empty_rows, arr_name)
     ``json_empty_rows.yaml`` (so a field declared as "" writes "") — the same
     source the JSON engine uses when a bulk op empties a section, which is what
     keeps the two paths from drifting.
+
+    ``declared_row`` is the array's own ``empty_row:`` block in
+    ``ok_to_json.yaml``, applied LAST so it wins over the shared default. It
+    exists because one field of an emptied section is not absent at all: a
+    StyleHeader with no size lines still has a printed quantity, and it is
+    `tot_qty` — the same rule D58 settled for the .OK side, where an empty Size
+    section makes the header total authoritative rather than derived. Leaving it
+    null loses the file's only quantity.
+
+    The rules are the ordinary ones (``from``/``transform``/``raw``, or an
+    outright ``value``) plus ``from_section`` (default ``Header``), since by
+    definition the value cannot come from this section's own rows — there are
+    none. That is also why it is declared per array in the conversion config and
+    NOT in json_empty_rows.yaml: the JSON engine's own emptying has no `.OK`
+    header to read, so this is one place the two paths legitimately differ.
     """
     keys = list(placeholder[0]) if placeholder and isinstance(placeholder[0], dict) \
         else list(dict.fromkeys(list(mapped_fields) + list(nullable)))
     declared = (empty_rows or {}).get(arr_name) or {}
-    return {k: declared.get(k) for k in keys}
+    row = {k: declared.get(k) for k in keys}
+    for field, rule in (declared_row or {}).items():
+        if field not in row:
+            raise ConvertError(
+                f"empty_row declares {arr_name}[].{field}, which is not a field "
+                f"of that section — check config/ok_to_json.yaml")
+        if "value" in rule:
+            row[field], prov = _generated(rule, date_formats or {}, field)
+            src = "declared in config"
+        else:
+            sec = rule.get("from_section") or "Header"
+            name = rule.get("from")
+            rows = (sections or {}).get(sec) or []
+            if not rows or name not in rows[0]:
+                raise ConvertError(
+                    f"empty_row {arr_name}[].{field} reads {name!r} from section "
+                    f"{sec!r}, which the .OK does not have — check "
+                    f"config/ok_to_json.yaml")
+            # Deliberately NO blank check. The user's call: tot_qty is copied
+            # through whatever it says, so a zero total converts to "0" rather
+            # than reverting to null. The populated-row path judges blankness
+            # before its transform; here the value IS the answer, and a file
+            # with no size lines and no total has nothing better to offer.
+            row[field], prov = _apply(rule, rows[0][name])
+            src = f"{sec}.{name}"
+        if note:
+            note(f"{arr_name}[].{field}", prov, row[field],
+                 f"no rows in .OK — taken from {src}")
+    return row
 
 
 def _generated(rule: dict, date_formats: Dict[str, str], field: str):
@@ -267,8 +311,16 @@ def convert(okf, layout, spec: dict, template: dict,
             # section, so the two paths agree.
             placeholder = header.get(arr_name)
             if isinstance(placeholder, list):
+                # `empty_row:` may read another section (in practice the header,
+                # for a total that survives its own rows) — resolved here rather
+                # than up front, since only an EMPTY array ever consults it.
+                declared_row = arr_spec.get("empty_row") or {}
+                sections = ({s.name: _section_values(okf, layout, s.name)
+                             for s in layout.sections} if declared_row else {})
                 header[arr_name] = [_empty_row(placeholder, mapped_fields,
-                                               nullable, empty_rows, arr_name)]
+                                               nullable, empty_rows, arr_name,
+                                               declared_row, sections,
+                                               date_formats, note)]
                 emptied_arrays.add(arr_name)
                 note(f"{arr_name}[]", "empty", "1 empty row",
                      "no rows in .OK — template rows are another order's data")

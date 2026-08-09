@@ -72,6 +72,10 @@ conversions:
         fields:
           size:     { from: size, transform: blank_to_null }
           quantity: { from: qty, transform: strip_zeros }
+        # No size lines -> the header total IS the printed quantity (D58).
+        # Mirrors the shipped config; `size` stays null deliberately.
+        empty_row:
+          quantity: { from: tot_qty, from_section: Header, transform: strip_zeros }
       # A StyleHeader .OK has NO store section, so the template placeholder row
       # stands — but these three must read as present-and-empty (JSON null)
       # rather than carry values borrowed from an unrelated order.

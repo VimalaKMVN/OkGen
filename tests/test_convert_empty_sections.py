@@ -319,3 +319,168 @@ def test_a_generated_field_is_reported_as_generated(tmp_path, registry, config):
 
     assert row["provenance"] == "generated"
     assert row["source"] == "declared in config"
+
+
+# --------------------------------------------------------------------------- #
+# A StyleHeader with NO size lines: the empty size row carries `tot_qty`
+# --------------------------------------------------------------------------- #
+# User-reported. The empty-row rule above is right about not borrowing another
+# order's data, but on this one field "no rows" does not mean "no value": a
+# StyleHeader with no size lines still has a printed quantity, and it is
+# `tot_qty`. That is the same thing D58 settled on the .OK side — with no rows
+# the header total is AUTHORITATIVE rather than a sum of rows that do not exist
+# — so writing null here threw away the file's only quantity.
+#
+# Declared as `empty_row:` on the `sizes` array in ok_to_json.yaml, so it is
+# per layout and per field: `size` stays null (there is no size to name), and
+# DistLabel/CartonLabel declare nothing and are untouched.
+def _stripped_size_rows(tmp_path, name, registry, config):
+    """Delete every Size row, save, convert — the user's exact flow."""
+    p = tmp_path / name
+    shutil.copy2(DATA_DIR / name, p)
+    res = service.bulk_op_apply([str(p)], "StyleHeader", "Size",
+                                {"type": "keep", "count": 0},
+                                registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+    return p
+
+
+def _ok_header_value(path, registry, config, field):
+    view = service.parse_file_view(path, registry, config)
+    return view["sections"][0]["records"][0]["values"][field]
+
+
+def test_an_empty_size_section_carries_the_total_quantity(tmp_path, registry, config):
+    p = _stripped_size_rows(tmp_path, "StyleHeader.OK", registry, config)
+    # D58: deleting the last Size row KEEPS the total byte-for-byte.
+    assert _ok_header_value(p, registry, config, "tot_qty") == "0000022"
+
+    cres = service.convert_apply([str(p)], registry, config)
+    assert cres["errors"] == [], cres["errors"]
+    h = json.loads(sorted(Path(cres["folder"]).glob("*.json"))[0]
+                   .read_text(encoding="utf-8"))["data"]["header"]
+
+    assert h["sizes"] == [{"size": None, "quantity": "22"}]
+    # The same string form a populated row writes — not the raw padded value.
+    assert h["totalQuantity"] == "22"
+
+
+def test_the_size_itself_stays_null(tmp_path, registry, config):
+    """Only the quantity is recoverable. A size the .OK never carried would be
+    invented, which is the one thing conversion may not do (D33)."""
+    p = _stripped_size_rows(tmp_path, "StyleHeader.OK", registry, config)
+    h = json.loads(sorted(Path(service.convert_apply([str(p)], registry, config)["folder"])
+                          .glob("*.json"))[0].read_text(encoding="utf-8"))["data"]["header"]
+    assert h["sizes"][0]["size"] is None
+
+
+def _force_total(path, registry, total):
+    """Write `tot_qty` STRAIGHT to the bytes, bypassing the save path.
+
+    Deliberate: D58 seeds a blank or zero total with a random 5-10 whenever a
+    no-size-lines file is saved, so OkGen's own editor can never leave a
+    `0000000` on disk. A file that arrives carrying one (PLAN section 6's open
+    thread) still converts, and that is the case under test — going through
+    apply_edits would silently test the seed instead.
+    """
+    okf = service.parse_okfile(path, registry=registry)
+    okf.records[0].set("tot_qty", total)
+    path.write_bytes(okf.to_bytes())
+
+
+@pytest.mark.parametrize("total,expected", [
+    ("0000022", "22"), ("0000500", "500"),
+    # The user's explicit call: a zero or blank total is copied through as "0"
+    # rather than reverting to null, so the rule has no exception to remember.
+    ("0000000", "0"), ("       ", "0"),
+])
+def test_whatever_tot_qty_says_the_size_row_says(tmp_path, registry, config,
+                                                 total, expected):
+    p = _stripped_size_rows(tmp_path, "StyleHeader.OK", registry, config)
+    _force_total(p, registry, total)
+    assert _ok_header_value(p, registry, config, "tot_qty") == total
+
+    h = json.loads(sorted(Path(service.convert_apply([str(p)], registry, config)["folder"])
+                          .glob("*.json"))[0].read_text(encoding="utf-8"))["data"]["header"]
+    assert h["sizes"] == [{"size": None, "quantity": expected}]
+
+
+def test_saving_a_zero_total_seeds_it_rather_than_converting_a_zero(
+        tmp_path, registry, config):
+    """The other half, stated so the case above is not misread: OkGen's own SAVE
+    never leaves a zero on a no-size-lines file — D58 seeds it 5-10 — so a
+    converted "0" can only come from a file that arrived that way."""
+    p = _stripped_size_rows(tmp_path, "StyleHeader.OK", registry, config)
+    _force_total(p, registry, "0000000")
+
+    service.apply_edits(p, [{"section_index": 0, "record_index": 0,
+                             "field": "tot_qty", "value": "0000000"}],
+                        registry, backup=False, config=config)
+
+    seeded = _ok_header_value(p, registry, config, "tot_qty")
+    assert seeded != "0000000"
+    assert 5 <= int(seeded) <= 10, seeded
+    h = json.loads(sorted(Path(service.convert_apply([str(p)], registry, config)["folder"])
+                          .glob("*.json"))[0].read_text(encoding="utf-8"))["data"]["header"]
+    assert h["sizes"] == [{"size": None, "quantity": str(int(seeded))}]
+
+
+def test_a_file_that_HAS_size_lines_is_completely_unaffected(tmp_path, registry, config):
+    """The whole point of `empty_row:` — it fires only when there are no rows.
+    A populated file keeps each row's OWN quantity; the header total is not
+    injected anywhere, and the four rows here sum to 8 against a stale 22."""
+    h = _converted(tmp_path, "StyleHeader.OK", registry, config)
+
+    assert h["sizes"] == [{"size": "EA", "quantity": "2"},
+                          {"size": "XL", "quantity": "2"},
+                          {"size": "XXL", "quantity": "2"},
+                          {"size": "P65", "quantity": "2"}]
+    assert h["totalQuantity"] == "22"          # stale on purpose (D58's sample)
+
+
+@pytest.mark.parametrize("name,layout,section", [
+    ("DistLabels.OK", "DistLabels", "Store"),
+    ("CartonLabel.OK", "CartonLabel", "store"),
+])
+def test_the_other_layouts_declare_no_empty_row_and_are_untouched(
+        tmp_path, registry, config, name, layout, section):
+    """Per layout, per field. Neither of these declares `empty_row:`, so an
+    emptied section still writes the shared json_empty_rows.yaml values."""
+    doc = _emptied_and_converted(tmp_path, name, layout, section, registry, config)
+    stores = doc["data"]["header"]["stores"]
+    assert len(stores) == 1
+    assert all(v in (None, "", " ") for v in stores[0].values()), stores[0]
+
+
+def test_the_borrowed_quantity_is_reported_not_silent(tmp_path, registry, config):
+    """D33: conversion may invent nothing SILENTLY. This value is read from the
+    .OK, so the coverage report must name where it came from — otherwise the one
+    field that crosses sections is the only one not accounted for."""
+    p = _stripped_size_rows(tmp_path, "StyleHeader.OK", registry, config)
+
+    pv = service.convert_preview([str(p)], registry, config)
+    row = next(r for r in pv["samples"][0]["report"]
+               if r["field"] == "sizes[].quantity")
+
+    assert row["value"] == "22"
+    assert "Header.tot_qty" in row["source"], row["source"]
+    assert "no rows" in row["source"], row["source"]
+
+
+def test_a_misdeclared_empty_row_field_fails_loudly(tmp_path, registry, config):
+    """A typo must not write a stray key into the row (or vanish). The section's
+    own keys come from the template, so anything else is a config error."""
+    from okgen import okjson
+    with pytest.raises(okjson.ConvertError, match="not a field of that section"):
+        okjson._empty_row([{"size": None, "quantity": None}], set(), set(), {},
+                          "sizes", {"qty": {"from": "tot_qty"}},
+                          {"Header": [{"tot_qty": "0000022"}]}, {}, None)
+
+
+def test_an_empty_row_reading_a_missing_section_fails_loudly(tmp_path, registry, config):
+    from okgen import okjson
+    with pytest.raises(okjson.ConvertError, match="which the .OK does not have"):
+        okjson._empty_row([{"size": None, "quantity": None}], set(), set(), {},
+                          "sizes", {"quantity": {"from": "tot_qty",
+                                                 "from_section": "Nope"}},
+                          {"Header": [{"tot_qty": "0000022"}]}, {}, None)

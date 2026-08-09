@@ -72,6 +72,23 @@ conversions:
         fields:
           size:     { from: size, transform: blank_to_null }
           quantity: { from: qty, transform: strip_zeros }
+        # What the ONE empty row carries when the .OK has no size lines at all.
+        # Overrides json_empty_rows.yaml (null) for the fields named here.
+        #
+        # A file with no size lines still has a printed quantity, and it is
+        # `tot_qty` — the same rule D58 settled on the .OK side, where an empty
+        # Size section makes the header total AUTHORITATIVE rather than derived
+        # from rows that do not exist. Leaving it null threw away the file's only
+        # quantity. `strip_zeros` is what a real size quantity already uses, so
+        # 0000022 writes "22" — the same form a populated row would have had,
+        # not the raw padded value. `size` is deliberately not listed: there is
+        # no size to name, and inventing one would be D33's forbidden silence.
+        #
+        # A zero or blank total is copied through as "0" (the user's call), so
+        # this rule has no exception to remember: whatever tot_qty says, the
+        # size row says too.
+        empty_row:
+          quantity: { from: tot_qty, from_section: Header, transform: strip_zeros }
       # A StyleHeader .OK has NO store section, so the template placeholder row
       # stands — but these three must read as present-and-empty (JSON null)
       # rather than carry values borrowed from an unrelated order.
