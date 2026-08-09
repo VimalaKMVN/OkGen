@@ -400,3 +400,110 @@ def test_renaming_the_output_folder_does_not_change_the_source(
     assert "SCAN" in folder.name, "fixture must start with the token"
     assert before["source"] == after["source"] == "SCAN"
     assert before["reason"] == after["reason"]
+
+
+# --------------------------------------------------------------------------- #
+# Bulk Edit — the key is resolved per FILE, like everywhere else
+# --------------------------------------------------------------------------- #
+# `bulk_scope` builds its field list per LAYOUT, so it used to ask
+# `config.unique_field(layout)` with no source at all and got the configured
+# DEFAULT (WMS) for every file. On a SCAN selection that greyed `headerASNid`
+# — which is not the key there — and left `keytrol`, the field that IS the key,
+# offered as editable: one apply would have written the same key into every
+# file. The tree, the editor and Volume Generate always read the file.
+def _bulk_key_locks(paths, registry, config, layout):
+    return service.bulk_scope([str(p) for p in paths], registry,
+                              config)["key_fields"][layout]
+
+
+@pytest.mark.parametrize("layout,fixture", sorted(SOURCE_DEPENDENT.items()))
+@pytest.mark.parametrize("source,key,other", [
+    ("SCAN", "keytrol", "headerASNid"),
+    ("WMS", "headerASNid", "keytrol"),
+])
+def test_bulk_edit_locks_the_key_the_payload_selects(
+        tmp_path, registry, config, layout, fixture, source, key, other):
+    d = _folder_of_copies(tmp_path, "Batch09", fixture, count=2, source=source)
+
+    scope = service.bulk_scope([str(f) for f in sorted(d.iterdir())], registry, config)
+    by_name = {f["name"]: f for f in scope["header_fields"][layout]}
+
+    assert by_name[key].get("editable") is False, f"{key} is the key under {source}"
+    assert by_name[key]["locked_reason"], "a greyed field must say why"
+    assert source in by_name[key]["locked_reason"], "the reason must name the source"
+    # The other source's field is an ordinary editable header field here.
+    assert by_name[other].get("editable") is not False
+    assert not by_name[other].get("locked_reason")
+
+    assert scope["sources"][layout] == {source: 2}
+    assert list(_bulk_key_locks(sorted(d.iterdir()), registry, config, layout)) == [key]
+    assert {f["source"] for f in scope["files"]} == {source}
+
+
+def test_bulk_edit_locks_BOTH_keys_when_a_selection_mixes_sources(
+        tmp_path, registry, config):
+    """The case a per-layout answer cannot express. `keytrol` is a real key for
+    the SCAN files and an ordinary field for the WMS ones — bulk writes one
+    value to all of them, so both fields must be locked, each saying which
+    files it is the key for (a wrong reason is worse than none, D61)."""
+    d = tmp_path / "Mixed"
+    d.mkdir()
+    doc = json.loads((FIX / "styleheader_fmtB.json").read_text(encoding="utf-8"))
+    (d / "wms.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    doc["data"]["header"]["headerASNid"] = None
+    (d / "scan.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    scope = service.bulk_scope([str(d / "scan.json"), str(d / "wms.json")],
+                               registry, config)
+    by_name = {f["name"]: f for f in scope["header_fields"]["CalgaryStyleHeader"]}
+    for field, src in (("keytrol", "SCAN"), ("headerASNid", "WMS")):
+        assert by_name[field].get("editable") is False, f"{field} must be locked"
+        assert src in by_name[field]["locked_reason"], by_name[field]["locked_reason"]
+
+    assert scope["sources"]["CalgaryStyleHeader"] == {"SCAN": 1, "WMS": 1}
+    assert {f["name"]: f["source"] for f in scope["files"]} == {
+        "scan.json": "SCAN", "wms.json": "WMS"}
+
+
+def test_bulk_edit_on_cartonlabel_reports_the_source_but_keys_the_same(
+        tmp_path, registry, config):
+    """Two separate questions, as everywhere else: CartonLabel HAS a source and
+    should show it, but `pickListId` is its key under both."""
+    d = tmp_path / "Cartons"
+    d.mkdir()
+    doc = json.loads((FIX / "cartonlabel_minified.json").read_text(encoding="utf-8"))
+    (d / "wms.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+    doc["data"]["header"]["headerASNid"] = None
+    (d / "scan.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+    scope = service.bulk_scope([str(d / "scan.json"), str(d / "wms.json")],
+                               registry, config)
+    assert scope["sources"]["CalgaryCartonLabel"] == {"SCAN": 1, "WMS": 1}
+    assert list(scope["key_fields"]["CalgaryCartonLabel"]) == ["pickListId"]
+    by_name = {f["name"]: f for f in scope["header_fields"]["CalgaryCartonLabel"]}
+    assert by_name["pickListId"].get("editable") is False
+    # Not source-dependent, so the reason must NOT claim a source.
+    assert "SCAN" not in by_name["pickListId"]["locked_reason"]
+    assert "WMS" not in by_name["pickListId"]["locked_reason"]
+
+
+@pytest.mark.parametrize("sample,key", [
+    ("StyleHeader.OK", "keytrol"), ("Preticket.OK", "po"),
+    ("DistLabels.OK", "keytrol"), ("CartonLabel.OK", "picklist_id"),
+])
+def test_bulk_edit_on_an_ok_file_is_unchanged_by_all_this(
+        tmp_path, registry, config, sample, key):
+    """The seven .OK layouts have no source at all — their key still comes from
+    keys.yaml, their files carry no source, and the reason names none."""
+    d = tmp_path / "okfiles"
+    d.mkdir()
+    (d / sample).write_bytes((DATA_DIR / sample).read_bytes())
+
+    scope = service.bulk_scope([str(d / sample)], registry, config)
+    layout = scope["files"][0]["layout"]
+    assert scope["files"][0]["source"] is None
+    assert scope["sources"] == {}
+    assert list(scope["key_fields"][layout]) == [key]
+    entry = next(f for f in scope["header_fields"][layout] if f["name"] == key)
+    assert entry.get("editable") is False
+    assert entry["locked_reason"] == "the unique key — use Make keys unique"

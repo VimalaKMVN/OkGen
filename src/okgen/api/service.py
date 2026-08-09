@@ -244,7 +244,8 @@ def json_source_for(path, config: Config, override: Optional[str] = None,
 
 
 def _source_name_for(path, layout: Optional[str], config: Config,
-                     source: Optional[str] = None) -> Optional[str]:
+                     source: Optional[str] = None,
+                     header: Optional[dict] = None) -> Optional[str]:
     """The source a file resolved to, or None when the layout has none.
 
     Reported per re-keyed file so a bulk Make Unique over a MIXED folder can
@@ -254,24 +255,30 @@ def _source_name_for(path, layout: Optional[str], config: Config,
     Note this answers for EVERY Calgary JSON layout, including CartonLabel:
     the source is worth knowing there even though the key (``pickListId``) is
     the same either way.
+
+    ``header`` is forwarded so a caller that has already read the file's header
+    (Bulk Edit reads one per selected file) does not read it a second time.
     """
     if not config.has_source(layout):
         return None
-    return json_source_for(path, config, source).get("source")
+    return json_source_for(path, config, source, header=header).get("source")
 
 
 def _unique_field_for(path, layout: Optional[str], config: Config,
-                      source: Optional[str] = None) -> Optional[str]:
+                      source: Optional[str] = None,
+                      header: Optional[dict] = None) -> Optional[str]:
     """The key field for ONE file, resolving SCAN/WMS where it matters.
 
     Only the Calgary JSON layouts key off the source; for every other layout
     (and for CalgaryCartonLabel, whose key is ``pickListId`` either way) this is
     exactly ``config.unique_field(layout)`` and the file is never read for it.
+
+    ``header`` short-circuits that read for a caller that already has it.
     """
     if not config.source_dependent(layout):
         return config.unique_field(layout)
     return config.unique_field(
-        layout, json_source_for(path, config, source).get("source"))
+        layout, json_source_for(path, config, source, header=header).get("source"))
 
 
 def _editable_file(path: Path) -> bool:
@@ -2714,7 +2721,8 @@ def clean_files(paths, registry) -> dict:
 # --------------------------------------------------------------------------- #
 # Bulk edit (B1: Header fields, one layout, set value)
 # --------------------------------------------------------------------------- #
-def _header_fields_for_layout(layout, config: Config) -> List[dict]:
+def _header_fields_for_layout(layout, config: Config,
+                              key_locks: Optional[Dict[str, str]] = None) -> List[dict]:
     """Header-section field metadata for a layout, for the bulk-edit dropdowns.
 
     Excludes the layout's unique key field — bulk set-value would make every
@@ -2723,10 +2731,20 @@ def _header_fields_for_layout(layout, config: Config) -> List[dict]:
     single-file editor (notably the layout's detection signature) cannot be
     changed in bulk either. Bulk is where that would hurt most: one apply across
     a selection would otherwise brick every file in it.
+
+    ``key_locks`` ({field: reason}) is how the KEY is decided when the caller
+    knows which files are in play. A Calgary StyleHeader/DistLabel keys off its
+    own payload — ``keytrol`` for SCAN, ``headerASNid`` for WMS — so asking the
+    layout alone gets the configured DEFAULT source for every file, which is
+    wrong for half of them and dangerous rather than merely mislabelled: the
+    field left editable is the one that actually IS the key. Callers with no
+    file in hand may omit it and get the layout-level answer as before.
     """
     if not layout.sections:
         return []
-    key = config.unique_field(layout.name)
+    if key_locks is None:
+        key_locks = {config.unique_field(layout.name):
+                     "the unique key — use Make keys unique"}
     locked = config.readonly_fields(layout.name) | config.hidden_fields(layout.name)
     out = []
     for f in layout.sections[0].fields:
@@ -2740,8 +2758,8 @@ def _header_fields_for_layout(layout, config: Config) -> List[dict]:
         # be written: the panel disables it, and `_bulk_op_eval`'s guards plus
         # `_assert_layout_stable` refuse it whatever the client sends (D12).
         blocked = None
-        if f.name == key:
-            blocked = "the unique key — use Make keys unique"
+        if f.name in key_locks:
+            blocked = key_locks[f.name]
         elif f.name in locked or getattr(f, "readonly", False):
             blocked = "read-only — it identifies the layout"
         opts = config.options(f.name, layout=layout.name,
@@ -2758,26 +2776,54 @@ def _header_fields_for_layout(layout, config: Config) -> List[dict]:
 
 
 def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
-    """Summarize a selection for bulk edit: per-file layout + header fields."""
+    """Summarize a selection for bulk edit: per-file layout + header fields.
+
+    The SOURCE (SCAN/WMS) is resolved per FILE, not per layout. A Calgary
+    StyleHeader or DistLabel keys off its own payload, so a selection may hold
+    both kinds — and every key field present in it must be locked, since bulk
+    would otherwise write one value into what is a real key for some of them.
+    """
     files, layouts = [], {}
+    sources: Dict[str, Dict[str, int]] = {}       # layout -> {SCAN: n, WMS: n}
+    key_sources: Dict[str, Dict[str, set]] = {}   # layout -> {key field: {sources}}
     for p in paths or []:
         sp = Path(p)
-        layout = chain = None
+        layout = chain = source = None
         try:
             layout = detect_layout(sp).layout
             chain = read_chain(sp)
         except Exception:
             pass
-        files.append({"path": str(sp), "name": sp.name, "layout": layout, "chain": chain})
+        if layout and config is not None and config.has_source(layout):
+            # One header read serves both the badge and the key: the source is
+            # a single field of it (`headerASNid`), and the key follows.
+            try:
+                header = _json_header(sp)
+            except Exception:                     # noqa: BLE001 — unreadable file
+                header = None
+            source = _source_name_for(sp, layout, config, header=header)
+            key = _unique_field_for(sp, layout, config, header=header)
+            if key:
+                key_sources.setdefault(layout, {}).setdefault(key, set()).add(source)
+        elif layout and config is not None:
+            key = config.unique_field(layout)
+            if key:
+                key_sources.setdefault(layout, {}).setdefault(key, set())
+        files.append({"path": str(sp), "name": sp.name, "layout": layout,
+                      "chain": chain, "source": source})
         if layout:
             layouts[layout] = layouts.get(layout, 0) + 1
+            if source:
+                sources.setdefault(layout, {})
+                sources[layout][source] = sources[layout].get(source, 0) + 1
     header_fields = {}
     detail_sections = {}
     rollups = {}
     for name in layouts:
         lay = registry.get(name)
         if lay:
-            header_fields[name] = _header_fields_for_layout(lay, config)
+            header_fields[name] = _header_fields_for_layout(
+                lay, config, _key_locks(name, key_sources.get(name), config))
             detail_sections[name] = _detail_sections_for_layout(lay, config)
             # Which header fields are roll-ups (config/rollup_fields.yaml), so
             # the panel can warn the moment one is picked rather than after the
@@ -2789,7 +2835,38 @@ def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
         "files": files, "layouts": layouts,
         "header_fields": header_fields, "detail_sections": detail_sections,
         "rollups": rollups,
+        # {layout: {SCAN: n, WMS: n}} — only the layouts that HAVE a source.
+        # The panel states it beside the layout, because on a source-dependent
+        # layout it is what decides which field is greyed.
+        "sources": sources,
+        # {layout: {key field: reason}} — the same reasons carried on the fields,
+        # collected so the panel can name the key without scanning the list.
+        "key_fields": {name: _key_locks(name, key_sources.get(name), config)
+                       for name in layouts},
     }
+
+
+def _key_locks(layout: Optional[str], by_field: Optional[Dict[str, set]],
+               config: Config) -> Dict[str, str]:
+    """{key field: the reason it is locked} for the files actually selected.
+
+    A layout whose key does not depend on the source keeps the original one-line
+    reason. A Calgary StyleHeader/DistLabel names the source, because with both
+    kinds in one selection BOTH fields are locked and "the unique key" alone
+    would be false of half the files for each of them — the D61 rule that a
+    blocked control must carry the TRUE reason, not merely a reason.
+    """
+    if not by_field:
+        return {}
+    if config is None or not config.source_dependent(layout):
+        return {f: "the unique key — use Make keys unique" for f in by_field}
+    mixed = len(by_field) > 1
+    out = {}
+    for field, srcs in by_field.items():
+        named = ", ".join(sorted(s for s in srcs if s)) or "these"
+        which = f"the {named} files in this selection" if mixed else f"these {named} files"
+        out[field] = f"the unique key for {which} — use Make keys unique"
+    return out
 
 
 def _detail_sections_for_layout(layout, config: Config) -> List[dict]:

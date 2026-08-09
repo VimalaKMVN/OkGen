@@ -538,6 +538,32 @@ function renderBulkFieldsPanel(scope) {
   });
   panel.appendChild(scopeBox);
 
+  // Which SOURCE the selected files came from. Shown because on a Calgary
+  // StyleHeader/DistLabel it is what DECIDES the key — `keytrol` for SCAN,
+  // `headerASNid` for WMS — so the greyed field below only makes sense beside
+  // it. Read from each file's own payload, never from the folder name.
+  const srcBox = el("div", "bulk-sources");
+  panel.appendChild(srcBox);
+  function renderSources() {
+    srcBox.innerHTML = "";
+    const counts = (scope.sources || {})[selectedLayout];
+    if (!counts || !Object.keys(counts).length) { srcBox.hidden = true; return; }
+    srcBox.hidden = false;
+    srcBox.appendChild(el("span", "bulk-label", "source:"));
+    Object.keys(counts).sort().forEach((s) => {
+      // Same badge classes as the tree, so SCAN/WMS look identical everywhere.
+      srcBox.appendChild(el("span", `src-badge src-badge-${s.toLowerCase()}`,
+                            `${s} (${counts[s]})`));
+    });
+    const keys = Object.keys((scope.key_fields || {})[selectedLayout] || {});
+    if (keys.length) {
+      srcBox.appendChild(el("span", "bulk-note",
+        keys.length > 1
+          ? `mixed selection — ${keys.join(" and ")} are both keys here, so both are locked`
+          : `key: ${keys[0]}`));
+    }
+  }
+
   panel.appendChild(el("div", "bulk-note",
     "Tick the fields to change. One value sets it on every file; a comma list "
     + "gives each file (or row) a random pick; a range varies per file — so for "
@@ -629,6 +655,7 @@ function renderBulkFieldsPanel(scope) {
       groups.appendChild(group(`“${d.name}” row fields`, d.name, d.fields || [],
                                "applies to every row"));
     });
+    renderSources();
     reset();
   }
   build();

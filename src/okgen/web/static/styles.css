@@ -372,6 +372,10 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 .bulk-head .btn { margin-left: auto; }
 .bulk-note { color: var(--text-dim); padding: 10px; }
 .bulk-scope, .bulk-edit-row, .bulk-actions { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+/* SCAN/WMS split for the selected files — sits under the layout radios,
+   because on a Calgary StyleHeader/DistLabel it is what decides the key. */
+.bulk-sources { display: flex; align-items: center; gap: 8px; margin: -6px 0 12px; flex-wrap: wrap; }
+.bulk-sources[hidden] { display: none; }
 .bulk-label { color: var(--text-dim); font-size: 12px; }
 .bulk-radio { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
 .bulk-section { color: var(--text-dim); font-size: 12px; }
