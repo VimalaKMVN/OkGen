@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from okgen import detect
 from okgen.api import service
 from okgen.config import Config
 from okgen.layout.registry import LayoutRegistry
@@ -1154,7 +1155,18 @@ SIGNATURE_FIELDS = [
 ]
 
 
-@pytest.mark.parametrize("sample,layout,field", SIGNATURE_FIELDS)
+# The signatures that are LOCKED in the UI. DistLabels `format` is a signature
+# byte but is deliberately NOT locked: both of its values ('7' Distribution
+# Label, '9' Coordinate Dist. Label) are DistLabels, so changing it is an
+# ordinary edit rather than a layout change. It stays in SIGNATURE_FIELDS above
+# because the SAVE backstop must still cover it — that guard is exactly what
+# makes unlocking safe, and it is pinned by
+# `test_save_refuses_to_break_detection` plus the DistLabels tests below.
+LOCKED_SIGNATURE_FIELDS = [t for t in SIGNATURE_FIELDS
+                           if (t[1], t[2]) != ("DistLabels", "format")]
+
+
+@pytest.mark.parametrize("sample,layout,field", LOCKED_SIGNATURE_FIELDS)
 def test_signature_field_is_readonly_in_editor(registry, config, sample, layout, field):
     if not (DATA_DIR / sample).exists():
         pytest.skip(f"no sample for {sample}")
@@ -1164,7 +1176,7 @@ def test_signature_field_is_readonly_in_editor(registry, config, sample, layout,
     assert not meta["editable"], f"{layout}.{field} is the detection signature — must be read-only"
 
 
-@pytest.mark.parametrize("sample,layout,field", SIGNATURE_FIELDS)
+@pytest.mark.parametrize("sample,layout,field", LOCKED_SIGNATURE_FIELDS)
 def test_signature_field_not_offered_in_bulk(registry, config, sample, layout, field):
     if not (DATA_DIR / sample).exists():
         pytest.skip(f"no sample for {sample}")
@@ -1195,6 +1207,72 @@ def test_save_refuses_to_break_detection(tmp_path, registry, config, sample, lay
 
     assert work.read_bytes() == original                 # nothing written
     assert not work.with_suffix(".OK.bak").exists()       # and no stray backup
+
+
+# --------------------------------------------------------------------------- #
+# DistLabels `format` — a signature byte that is nonetheless EDITABLE
+# --------------------------------------------------------------------------- #
+# '7' (Distribution Label) and '9' (Coordinate Dist. Label) both detect as
+# DistLabels, so moving between them changes the ticket format, not the layout.
+# It was locked with the other signatures, which blocked a legitimate edit on
+# every path. What confines it now is not a UI list but the two write-path
+# guards — `_assert_layout_stable` (below) and, where the chain declares a
+# format list, `enforce_options`.
+def _distlabels(tmp_path, name="DistLabels.OK"):
+    if not (DATA_DIR / "DistLabels.OK").exists():
+        pytest.skip("no DistLabels sample")
+    work = tmp_path / name
+    shutil.copy2(DATA_DIR / "DistLabels.OK", work)
+    return work
+
+
+def test_distlabels_format_is_editable_in_the_editor(tmp_path, registry, config):
+    work = _distlabels(tmp_path)
+    view = service.parse_file_view(work, registry, config)
+    meta = next(f for f in view["sections"][0]["fields"] if f["name"] == "format")
+    assert meta["editable"] is True
+    assert not meta.get("locked_reason")
+
+
+def test_distlabels_format_is_editable_in_bulk_and_generate(tmp_path, registry, config):
+    """Both bulk panels and Volume Generate read the same lock list."""
+    work = _distlabels(tmp_path)
+    bulk = next(f for f in service.bulk_scope([str(work)], registry, config)
+                ["header_fields"]["DistLabels"] if f["name"] == "format")
+    assert bulk.get("editable") is not False
+    assert not bulk.get("locked_reason")
+    gen = next(f for f in service.generate_scope([str(work)], registry, config)
+               ["header_fields"] if f["name"] == "format")
+    assert gen.get("editable") is not False
+    assert not gen.get("locked_reason")
+
+
+@pytest.mark.parametrize("value", ["7", "9"])
+def test_distlabels_format_can_be_bulk_set_to_either_of_its_own_values(
+        tmp_path, registry, config, value):
+    work = _distlabels(tmp_path)
+    res = service.bulk_apply([str(work)], "DistLabels", "format", value,
+                             registry, config, backup=False)
+    assert [r["status"] for r in res["results"]] == ["changed"] or \
+           [r["status"] for r in res["results"]] == ["unchanged"]
+    # The point of the whole change: the file is still a DistLabels afterwards.
+    assert detect.detect_layout(work).layout == "DistLabels"
+    view = service.parse_file_view(work, registry, config)
+    assert view["sections"][0]["records"][0]["values"]["format"] == value
+
+
+@pytest.mark.parametrize("value", ["N", "8"])
+def test_distlabels_format_still_refuses_a_value_that_is_not_distlabels(
+        tmp_path, registry, config, value):
+    """Unlocking the control did NOT widen what may be written: 'N' would detect
+    as StyleHeader and '8' as no layout at all. Both are refused with the file
+    left byte-identical — the guard, not the lock, is what protects it."""
+    work = _distlabels(tmp_path)
+    original = work.read_bytes()
+    res = service.bulk_apply([str(work)], "DistLabels", "format", value,
+                             registry, config, backup=False)
+    assert [r["status"] for r in res["results"]] == ["error"]
+    assert work.read_bytes() == original
 
 
 def test_bulk_apply_reports_signature_break_per_file(tmp_path, registry, config):

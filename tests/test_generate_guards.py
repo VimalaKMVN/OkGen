@@ -122,9 +122,12 @@ def test_an_unknown_field_is_not_silently_skipped(tmp_path, registry, config):
 # --------------------------------------------------------------------------- #
 # Locked fields are SHOWN, greyed, with an accurate reason
 # --------------------------------------------------------------------------- #
+# DistLabels `format` is deliberately absent: it is a signature byte, but both
+# of its values are DistLabels, so it is editable everywhere (see
+# tests/test_api.py::test_distlabels_format_is_editable_in_bulk_and_generate).
 @pytest.mark.parametrize("sample,layout,field", [
     ("StyleHeader.OK", "StyleHeader", "indicator"),
-    ("DistLabels.OK", "DistLabels", "format"),
+    ("Preticket.OK", "Preticket", "indicator"),
     ("EUStyleHeader.OK", "EUStyleHeader", "process"),
 ])
 def test_a_signature_field_is_listed_but_not_editable(tmp_path, registry, config,

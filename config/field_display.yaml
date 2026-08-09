@@ -20,11 +20,22 @@ readonly:
   # layout, so editing one makes the saved file unopenable — or worse, silently
   # detect as a DIFFERENT layout (StyleHeader/Preticket 'indicator' -> a digit
   # reads as DistLabels, and every field then parses at the wrong offset).
-  # Locking them here also removes them from Bulk Edit. A save-time check
+  # Locking them here greys them in Bulk Edit and Volume Generate too (they are
+  # LISTED with the reason, not hidden). A save-time check
   # (service._assert_layout_stable) backstops this list if it ever drifts.
+  #
+  # DistLabels `format` is deliberately NOT here, unlike the rest. It is a
+  # signature byte — but BOTH of its values are DistLabels ('7' Distribution
+  # Label, '9' Coordinate Dist. Label), so moving between them is an ordinary
+  # edit rather than a layout change, and locking it blocked legitimate work.
+  # Two guards already confine it and neither depends on this list:
+  # `enforce_options` (field_display.yaml below) refuses any value outside the
+  # file's own chain list, and `_assert_layout_stable` refuses anything that
+  # would stop the file detecting as DistLabels. Measured: '7'/'9' save and
+  # still detect as DistLabels; 'N' and '3' are refused naming the allowed set.
+  # The other signatures stay locked — their alternatives are OTHER layouts.
   StyleHeader: [indicator]      # 'N' at raw pos 4
   Preticket: [indicator]        # 'Y' at raw pos 4
-  DistLabels: [format]          # '7'/'9' at raw pos 4
   CartonLabel: [picklist_pre]   # 'C:' at raw pos 5..6
   EUPreticket: [indicator]      # 'P' in the '¦P|' delimited header signature
   EUStyleHeader: [process]      # 'D' at raw pos 2
