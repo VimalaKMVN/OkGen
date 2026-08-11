@@ -141,7 +141,7 @@ def test_it_works_where_the_marker_looks_like_a_real_row(tmp_path, registry, con
 
     The marker must be GONE afterwards; whether what replaces it is blank is a
     question about the seed, not about this rule (see the next test for Lanes,
-    whose seed is a real value, so what replaces the marker is a real row).
+    whose seed the user has since chosen to be blank).
     """
     p = _emptied(tmp_path, registry, config, "styleheader_fmtB.json",
                  "CalgaryStyleHeader", section)
@@ -152,32 +152,34 @@ def test_it_works_where_the_marker_looks_like_a_real_row(tmp_path, registry, con
     assert _counts(p, key)[0] == 1
 
 
-def test_a_NON_blank_seed_makes_a_section_read_as_having_data(tmp_path, registry,
-                                                              config):
-    """The inverse of what this test used to assert, and the reason the seed
-    was changed.
+def test_a_blank_seed_makes_a_section_read_as_having_no_data(tmp_path, registry,
+                                                             config):
+    """The consequence of the user's `lane: ""` seed, stated rather than
+    discovered. Lanes has ONE field, so a blank seed is a blank ROW — which is
+    exactly what D52 treats as "this section holds no data". A repeated single
+    add therefore REPLACES rather than stacks, the same accepted behaviour
+    StyleHeader Stores already has.
 
-    Lanes has ONE field, so its seed value decides whether an added row is a
-    blank row. With `lane: ""` the section still read as holding no data (D52),
-    so repeated single adds REPLACED rather than stacked — and, once D75 began
-    skipping field ops on dataless sections, "add rows then set the field"
-    could never succeed for Lanes at all. Seeding `RCV001` makes the added row
-    real, so adds stack and the field can then be set.
-
-    Bulk add N and Generate n were never affected either way: both build the
-    whole section at once.
+    Bulk add N and Generate n are unaffected: both build the whole section, so
+    they still produce N rows. Giving `lane` any non-blank value in
+    `json_seed_rows.yaml` restores stacking — that is the whole fix, and it is a
+    config edit.
     """
     doc = json.loads((FIX / "styleheader_fmtB.json").read_text(encoding="utf-8"))
     doc["data"]["header"]["lanes"] = []
     p = tmp_path / "f.json"
     p.write_text(json.dumps(doc, indent=4), encoding="utf-8")
 
-    for expected in (1, 2, 3):
+    for _ in range(3):
         service.add_record(p, _si(p, "Lanes", registry, config), [], registry,
                            config, preview=False, backup=False)
-        rows = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["lanes"]
-        assert len(rows) == expected, "adds should STACK once the row is real"
-        assert all(r == {"lane": "RCV001"} for r in rows)
+    assert _counts(p, "lanes") == (1, 1)
+
+    service.bulk_op_apply([str(p)], "CalgaryStyleHeader", "Lanes",
+                          {"type": "add", "count": 4}, registry, config, backup=False)
+    assert _counts(p, "lanes")[0] == 4
+
+
 def test_a_vendor_shipped_blank_row_is_replaced(tmp_path, registry, config):
     """The accepted trade. An all-blank section holds no data and nothing
     distinguishes its rows from D45's marker, so the first row added replaces

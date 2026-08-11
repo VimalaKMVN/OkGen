@@ -131,23 +131,15 @@ def test_size_is_seeded_null_by_choice(tmp_path, registry, config):
     assert _rows(p, "sizes")[0] == {"size": None, "quantity": "100"}
 
 
-def test_lanes_seed_a_real_lane_value(tmp_path, registry, config):
-    """`RCV001`, the user's chosen value — deliberately NOT the vendor sample's
-    blank `lane`, which every other seed here does follow.
-
-    The blank was withdrawn because it had a cost the sample does not: Lanes
-    has ONE field, so a blank seed is a blank ROW, and D52 reads a section of
-    blank rows as holding no data. Since D75 a field op on such a section is
-    skipped — so "add rows, then set the field" could never work for Lanes,
-    because adding rows only produced more blank ones. A non-blank seed is the
-    whole fix, which D54 had already named as the lever.
-    """
+def test_lanes_seed_the_samples_blank_lane(tmp_path, registry, config):
+    """The user's chosen value, matching the vendor sample. Its one consequence
+    is pinned by `test_a_blank_seed_makes_a_section_read_as_having_no_data`."""
     p = _with_empty(tmp_path, "styleheader_fmtB.json", "lanes")
 
     service.add_record(p, _si(p, "Lanes", registry, config), [], registry, config,
                        preview=False, backup=False)
 
-    assert _rows(p, "lanes")[0] == {"lane": "RCV001"}
+    assert _rows(p, "lanes")[0] == {"lane": ""}
 
 
 # --------------------------------------------------------------------------- #

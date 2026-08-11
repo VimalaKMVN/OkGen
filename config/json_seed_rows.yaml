@@ -41,17 +41,10 @@
 #   layout -> { section -> { field -> seed value } }
 seed_rows:
   CalgaryStyleHeader:
-    # Sizes keeps its chosen values rather than the sample row's.
-    #
-    # `lane` was `""` — the vendor sample's own value — and that turned out to
-    # have a cost the sample does not: a row seeded blank leaves the section
-    # reading as HOLDING NO DATA (D52), so since D75 a field op on it is
-    # skipped, and "add rows then set the field" could never succeed for Lanes
-    # — adding rows just produced more blank ones. `RCV001` is the user's
-    # value; any non-blank one restores normal behaviour, which D54 already
-    # recorded as the lever.
+    # Lanes and Sizes are confirmed good as they are, so they keep their chosen
+    # values rather than the sample row (whose `lane` is blank).
     Lanes:
-      lane: "RCV001"
+      lane: ""
     Sizes:
       # `size` is a real null, not "" — the vendor sample carries null and the
       # two are not interchangeable (D34/D39).

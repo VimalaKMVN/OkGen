@@ -422,22 +422,19 @@ def test_the_two_engines_now_agree_on_a_dataless_section(tmp_path, registry, con
     assert r2["results"][0]["fields"][0]["status"] == "skipped"
 
 
-def test_adding_rows_then_setting_works_on_every_section(
+def test_adding_rows_then_setting_works_on_every_section_but_one(
         tmp_path, registry, config):
-    """The workflow the skip message tells the user to follow: add rows, then
-    set. It must work everywhere, or the message sends people down a dead end.
-
-    `CalgaryStyleHeader.Lanes` used to be exactly that: its seed was `""`, so
-    added rows were blank, the section never gained data and the field stayed
-    skipped forever. Seeding `RCV001` fixed it — which is why the seed VALUE is
-    load-bearing here and not just cosmetic.
+    """The workflow the message tells the user to follow: add rows, then set.
+    It works everywhere EXCEPT `CalgaryStyleHeader.Lanes`, whose seed is `""` —
+    added rows are blank, so the section never gains data and the field stays
+    skipped. Recorded as a KNOWN dead end (PLAN §6): the fix is one seed value
+    in `json_seed_rows.yaml` and is the user's to choose.
     """
-    cases = [(DATA_DIR / "StyleHeader.OK", "StyleHeader", "Lane", "lane1"),
+    works = [(DATA_DIR / "StyleHeader.OK", "StyleHeader", "Lane", "lane1"),
              (DATA_DIR / "StyleHeader.OK", "StyleHeader", "Size", "size"),
              (FIX / "styleheader_fmtS.json", "CalgaryStyleHeader", "Sizes", "size"),
-             (FIX / "styleheader_fmtS.json", "CalgaryStyleHeader", "Lanes", "lane"),
              (FIX / "distlabel.json", "CalgaryDistLabel", "Stores", "store")]
-    for i, (src, layout, section, field) in enumerate(cases):
+    for i, (src, layout, section, field) in enumerate(works):
         p = _empty(_copy(tmp_path, src, f"w{i}{Path(src).suffix}"),
                    layout, section, registry, config)
         service.bulk_op_apply([str(p)], layout, section,
@@ -448,44 +445,36 @@ def test_adding_rows_then_setting_works_on_every_section(
             [{"section": section, "type": "list", "field": field,
               "values": ["0007"]}], registry, config, backup=False)
         assert res["results"][0]["fields"][0]["status"] == "change", \
-            f"{layout}.{section}: add-then-set must work"
+            f"{layout}.{section}: add-then-set should work"
 
-
-def test_a_seeded_lane_row_counts_as_data(tmp_path, registry, config):
-    """The seed value is what makes the row REAL. A blank seed leaves the
-    section reading as dataless (D52), which is what created the dead end."""
-    p = _copy(tmp_path, FIX / "styleheader_fmtS.json")
+    # ...and the one that does not, asserted so it cannot change unnoticed.
+    p = _copy(tmp_path, FIX / "styleheader_fmtS.json", "dead.json")
     service.bulk_op_apply([str(p)], "CalgaryStyleHeader", "Lanes",
                           {"type": "add", "count": 2}, registry, config,
                           backup=False)
-    lanes = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["lanes"]
-    assert lanes == [{"lane": "RCV001"}, {"lane": "RCV001"}]
-    assert _has_data(p, "Lanes", registry, config) is True
+    res = service.bulk_multi_apply(
+        [str(p)], "CalgaryStyleHeader",
+        [{"section": "Lanes", "type": "list", "field": "lane",
+          "values": ["0007"]}], registry, config, backup=False)
+    assert res["results"][0]["fields"][0]["status"] == "skipped", \
+        "if this starts passing, the Lanes seed changed — update PLAN §6"
 
 
-def test_the_lane_seed_fits_its_declared_width(registry, config):
-    """`lane` declares 8 (v0.108.0). A seed longer than that would be written
-    and then refused on the next edit — the D48 shape, arriving through a seed."""
-    sec = next(s for s in registry["CalgaryStyleHeader"].sections
-               if s.name == "Lanes")
-    width = next(f for f in sec.fields if f.name == "lane").size
-    seed = config.json_seed_row("CalgaryStyleHeader", "Lanes")["lane"]
-    assert seed == "RCV001"
-    assert len(seed) <= width
-
-
-def test_the_editor_still_writes_into_a_placeholder(tmp_path, registry, config):
-    """Unchanged by any of this — and it was the only way into Lanes before the
-    seed was fixed, so it is worth keeping pinned."""
-    p = _empty(_copy(tmp_path, FIX / "styleheader_fmtS.json"),
-               "CalgaryStyleHeader", "Sizes", registry, config)
+def test_the_editor_is_the_way_out_of_the_lanes_dead_end(tmp_path, registry, config):
+    """The single editor still writes into a placeholder, so a lane value typed
+    there makes the row real and bulk works from then on."""
+    p = _copy(tmp_path, FIX / "styleheader_fmtS.json")
     okf = service.parse_okfile(p, registry=registry)
-    ri = next(r.index for r in okf.records if r.section.name == "Sizes")
-    service.apply_edits(p, [{"record_index": ri, "field": "size",
-                             "value": "MED"}], registry, config=config,
+    ri = next(r.index for r in okf.records if r.section.name == "Lanes")
+    service.apply_edits(p, [{"record_index": ri, "field": "lane",
+                             "value": "L1"}], registry, config=config,
                         backup=False)
-    rows = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["sizes"]
-    assert rows[0]["size"] == "MED"
+    assert _has_data(p, "Lanes", registry, config) is True
+    res = service.bulk_multi_apply(
+        [str(p)], "CalgaryStyleHeader",
+        [{"section": "Lanes", "type": "list", "field": "lane",
+          "values": ["LANE0007"]}], registry, config, backup=False)
+    assert res["results"][0]["fields"][0]["status"] == "change"
 
 
 def test_a_two_field_section_IS_still_skipped(tmp_path, registry, config):
