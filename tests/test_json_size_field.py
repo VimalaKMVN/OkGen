@@ -251,12 +251,17 @@ def test_every_sample_size_value_still_fits(registry):
 # Generate through the API — while the single editor accepts it. 44 fields were
 # in that state. These four are declared at the user's widths; the rest stay
 # open because their widths are not knowable from the samples (see PLAN §6).
+_SAMPLE_FOR = {"CalgaryStyleHeader": "styleheader_fmtS.json",
+               "CalgaryDistLabel": "distlabel.json",
+               "CalgaryCartonLabel": "cartonlabel_minified.json"}
+
 MORE = [
     ("CalgaryStyleHeader", "Lanes", "lane", 8),
     ("CalgaryStyleHeader", "Details", "pageNumber", 3),
     ("CalgaryStyleHeader", "Details", "lineNumber", 3),
-    ("CalgaryStyleHeader", "Header", "locator", 7),
-    ("CalgaryDistLabel", "Header", "locator", 7),
+    ("CalgaryStyleHeader", "Header", "locator", 20),
+    ("CalgaryDistLabel", "Header", "locator", 20),
+    ("CalgaryCartonLabel", "Header", "locator", 20),
 ]
 
 
@@ -268,17 +273,46 @@ def test_the_width_is_declared(registry, layout, section, field, width):
     assert f.size == width
 
 
-def test_calgary_cartonlabel_locator_is_deliberately_NOT_declared(registry):
-    """The user asked for locator 7, taken from the `.OK` CartonLabel field of
-    that name. It does NOT hold on the Calgary carton label: its own vendor
-    sample and the shipped template both carry a 15-character value
-    ('289430000204787'), so declaring 7 would make OkGen refuse to write back a
-    value it had just read — the exact D48 defect. Same name, different field.
+def test_json_locator_is_twenty_and_the_OK_one_stays_seven(registry):
+    """`locator` is 7 on the FIXED-WIDTH CartonLabel and 20 on all three JSON
+    layouts. Same name, different field — and the difference is load-bearing:
+    the Calgary carton label's own sample carries a 15-character value, so 7
+    would have made OkGen refuse a value it had just read (D48). 20 matches
+    `lpn`, which the JSON locator mirrors, and is asserted against it here so
+    the two cannot drift.
     """
-    lay = registry["CalgaryCartonLabel"]
-    sec = next(s for s in lay.sections if s.name == "Header")
-    f = next(x for x in sec.fields if x.name == "locator")
-    assert f.size is None
+    for lay in ("CalgaryStyleHeader", "CalgaryDistLabel", "CalgaryCartonLabel"):
+        sec = next(s for s in registry[lay].sections if s.name == "Header")
+        assert next(x for x in sec.fields if x.name == "locator").size == 20
+
+    # ...and the fixed-width one is untouched: there a size IS the format.
+    sec = next(s for s in registry["CartonLabel"].sections if s.name == "Header")
+    assert next(x for x in sec.fields if x.name == "locator").size == 7
+
+
+def test_the_json_locator_matches_lpn(registry):
+    """The user's reasoning — in JSON a locator is usually the LPN — so if one
+    ever moves the other should be revisited with it."""
+    for lay in ("CalgaryDistLabel", "CalgaryCartonLabel"):
+        sec = next(s for s in registry[lay].sections if s.name == "Header")
+        lpn = next(x for x in sec.fields if x.name == "lpn").size
+        loc = next(x for x in sec.fields if x.name == "locator").size
+        assert loc == lpn == 20
+
+
+def test_the_carton_labels_own_15_char_locator_still_saves(tmp_path, registry, config):
+    """The value that made 7 impossible. It must round-trip, not merely fit."""
+    p = _copy(tmp_path, "cartonlabel_minified.json")
+    doc = json.loads(Path(p).read_text(encoding="utf-8"))
+    original = doc["data"]["header"]["locator"]
+    assert len(str(original)) == 15, original
+    res = service.bulk_multi_apply(
+        [str(p)], "CalgaryCartonLabel",
+        [{"section": "Header", "type": "list", "field": "locator",
+          "values": [str(original)]}], registry, config, backup=False)
+    assert res["results"][0]["status"] in ("changed", "unchanged"), res["results"][0]
+    after = json.loads(Path(p).read_text(encoding="utf-8"))["data"]["header"]["locator"]
+    assert str(after) == str(original)
 
 
 def test_every_declared_width_holds_every_sample_value(registry):
@@ -318,8 +352,7 @@ def test_bulk_edit_can_now_write_it(tmp_path, registry, config,
                                     layout, section, field, width):
     """It used to answer `<field> has no fixed width` — offered in the panel,
     then refused on apply, which is exactly what was reported for `size`."""
-    sample = "styleheader_fmtS.json" if layout == "CalgaryStyleHeader" else "distlabel.json"
-    p = _copy(tmp_path, sample)
+    p = _copy(tmp_path, _SAMPLE_FOR[layout])
     val = "7" * width
     res = service.bulk_multi_apply(
         [str(p)], layout,
@@ -335,8 +368,7 @@ def test_volume_generate_offers_AND_writes_it(tmp_path, registry, config,
                                               layout, section, field, width):
     """Both halves. It was omitted from the panel (so it read as forgotten) and
     silently skipped by the API path while reporting success."""
-    sample = "styleheader_fmtS.json" if layout == "CalgaryStyleHeader" else "distlabel.json"
-    p = _copy(tmp_path, sample)
+    p = _copy(tmp_path, _SAMPLE_FOR[layout])
     scope = service.generate_scope([str(p)], registry, config)
     if section == "Header":
         offered = [x["name"] for x in scope["header_fields"]]
