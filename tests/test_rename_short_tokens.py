@@ -401,3 +401,61 @@ def test_the_two_other_calgary_presets_carry_no_type():
         names = [x if isinstance(x, str) else (x.get("name") or x.get("value"))
                  for x in p["parts"]]
         assert not any(n and n.endswith("type") for n in names)
+
+
+# -------------------------------------------- the key is a TOKEN, not a field
+
+# Naming the key FIELD (`keytrol`, `po`, `picklist_id`) works only on the layout
+# that happens to use it. Applied to any other — a folder holding mixed layouts
+# renamed with one preset — the field is empty, so the whole `K…` run is dropped
+# (correctly, per D69) and the filename silently loses the value identifying the
+# order. Measured across every preset x layout pair: 24 of 49 lost it. The `key`
+# derived token resolves each FILE'S OWN unique field, which takes that to 0
+# while leaving every correct-preset name byte-identical.
+KEY_FIELDS = {"keytrol", "po", "picklist_id", "pickListId", "headerASNid"}
+
+
+def _shipped():
+    return Config.load(Path(__file__).resolve().parents[1] / "config")
+
+
+def test_no_preset_names_a_key_FIELD_directly():
+    for p in _shipped().rename_presets():
+        names = [x if isinstance(x, str) else (x.get("name") or x.get("value"))
+                 for x in p["parts"]]
+        clash = KEY_FIELDS.intersection(names)
+        assert not clash, (
+            f"{p['name']} names {clash} directly; use the `key` token so the "
+            f"preset still works on a layout keyed by a different field")
+
+
+def test_every_preset_carries_the_key_token():
+    for p in _shipped().rename_presets():
+        names = [x if isinstance(x, str) else (x.get("name") or x.get("value"))
+                 for x in p["parts"]]
+        assert "key" in names, f"{p['name']} has no key at all"
+
+
+@pytest.mark.parametrize("sample,layout", [
+    ("StyleHeader.OK", "StyleHeader"), ("Preticket.OK", "Preticket"),
+    ("CartonLabel.OK", "CartonLabel"), ("DistLabels.OK", "DistLabels"),
+    ("EUPreticket.OK", "EUPreticket"), ("EUStyleHeader.OK", "EUStyleHeader"),
+    ("EUCartonLabel.OK", "EUCartonLabel"),
+])
+def test_any_OK_preset_names_the_key_of_any_OK_file(tmp_path, registry, config,
+                                                    sample, layout):
+    """The mixed-folder case: one preset over a selection of several layouts.
+    Whichever preset is used, every file must still carry its own key."""
+    shipped = _shipped()
+    ok_presets = [p for p in shipped.rename_presets()
+                  if not p["name"].startswith("Calgary")]
+    assert ok_presets
+    for p in ok_presets:
+        d = tmp_path / f"{layout}_{ok_presets.index(p)}"
+        d.mkdir(parents=True, exist_ok=True)
+        f = d / sample
+        shutil.copy(DATA_DIR / sample, f)
+        new = service.bulk_rename_preview([str(f)], p["parts"], "_",
+                                          registry, shipped)["results"][0]["new"]
+        assert "_K" in new, (
+            f"{p['name']} applied to a {layout} file produced {new!r} — no key")

@@ -23,6 +23,12 @@
 #   5. Order of the labelled pairs: FMT, T, K, D, CP, UP, RP — the ticket
 #      format, then what kind of ticket, then WHICH order it is, then the
 #      merchandising values.
+#   6. The key is the `key` TOKEN, never the field name behind it. `key`
+#      resolves each file's OWN unique field (keytrol / po / picklist_id, and
+#      SCAN-vs-WMS on the Calgary layouts), so a preset applied to a folder of
+#      mixed layouts still names every file's key. Naming the field directly
+#      wrote no key at all on any layout keyed by a different one, and the
+#      segment vanished silently — 24 of the 49 preset x layout combinations.
 #
 # The `.OK` and Calgary JSON presets differ ONLY in field names (`dept` vs
 # `department`, `comp_price` vs `compareAtPrice`, …) — the shape is the same,
@@ -55,7 +61,10 @@ presets:
       - type           #   2
       - KEY            # label "K"
       - no_delim
-      - keytrol        #   550000
+      - key            #   550000 — the LAYOUT'S OWN key field (keytrol here),
+                       #   not the field named directly: a preset naming
+                       #   `keytrol` writes no key at all on a layout keyed by
+                       #   `po`, and the segment vanishes silently
       - no_delim
       - suffix         #   P1A  (part of the key, so it stays glued on)
       - DEPT           # label "D"
@@ -86,7 +95,7 @@ presets:
       - type
       - KEY
       - no_delim
-      - po             # the Preticket key
+      - key            # the layout's own key field (po here)
       - DEPT
       - no_delim
       - dept
@@ -114,7 +123,7 @@ presets:
       - no_delim
       - C              # the "C:" picklist marker
       - no_delim
-      - picklist_id
+      - key            # the layout's own key field (picklist_id here)
       - no_delim
       - picklist_seq
 
@@ -130,7 +139,7 @@ presets:
       - format
       - KEY
       - no_delim
-      - keytrol
+      - key            # the layout's own key field (keytrol here)
       - no_delim
       - hsuffix
 
@@ -158,7 +167,7 @@ presets:
       - type
       - KEY
       - no_delim
-      - po
+      - key            # the layout's own key field (po here)
       - DEPT
       - no_delim
       - dept
@@ -187,7 +196,7 @@ presets:
       - type
       - KEY
       - no_delim
-      - keytrol
+      - key            # the layout's own key field (keytrol here)
       - DEPT
       - no_delim
       - dept
@@ -215,7 +224,7 @@ presets:
       - type
       - KEY
       - no_delim
-      - keytrol
+      - key            # the layout's own key field (keytrol here)
       - DEPT
       - no_delim
       - dept
