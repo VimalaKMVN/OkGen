@@ -1106,11 +1106,22 @@ function renderBulkPanel(scope) {
   rebuildSections();
 }
 
+// Status -> the word a user reads. Anything not listed falls through to the
+// token itself, so a NEW status is merely terse rather than invisible.
+const BULK_STATUS_WORDS = {
+  changed: "changed", change: "will change", unchanged: "unchanged",
+  no_section: "skipped", no_data: "skipped", missing_field: "no such field",
+  too_wide: "too long", error: "error",
+};
+
 function renderBulkTable(host, results, applied) {
   host.innerHTML = "";
   const counts = {};
   results.forEach((r) => { counts[r.status] = (counts[r.status] || 0) + 1; });
-  const summary = Object.entries(counts).map(([k, v]) => `${v} ${k}`).join("  ·  ");
+  // The summary reads in the same words as the rows — it used to count raw
+  // tokens ("1 no_section"), which is the same defect one line up.
+  const summary = Object.entries(counts)
+    .map(([k, v]) => `${v} ${BULK_STATUS_WORDS[k] || k}`).join("  ·  ");
   host.appendChild(el("div", "bulk-summary", (applied ? "Results:  " : "Preview:  ") + summary));
   const table = el("table", "bulk-table");
   const thead = el("thead"); const htr = el("tr");
@@ -1121,7 +1132,13 @@ function renderBulkTable(host, results, applied) {
     const tr = el("tr", "st-" + r.status);
     tr.appendChild(el("td", null, r.name));
     tr.appendChild(el("td", "mono", r.detail || ""));
-    tr.appendChild(el("td", null, r.status + (r.error ? `: ${r.error}` : "")));
+    // A STATUS is a value the code branches on; the user reads a word. The
+    // raw token used to be printed here — `no_section` with an empty Change
+    // column said nothing about what had happened or what to do. The
+    // explanation is the server's `detail`, shown beside it.
+    tr.appendChild(el("td", null, BULK_STATUS_WORDS[r.status] || r.status)
+                   ).title = r.detail || r.error || "";
+    if (r.error) tr.children[2].textContent += `: ${r.error}`;
     tbody.appendChild(tr);
   });
   table.appendChild(tbody); host.appendChild(table);

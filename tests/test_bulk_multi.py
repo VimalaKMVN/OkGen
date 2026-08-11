@@ -582,3 +582,62 @@ def test_fields_that_are_NOT_enforced_stay_permissive(shipped_config):
     assert shipped_config.enforces_options("CalgaryStyleHeader", "chain") is False
     assert shipped_config.enforces_options("CalgaryStyleHeader", "type") is False
     assert shipped_config.enforces_options("CalgaryStyleHeader", "compareAtUp") is False
+
+
+# --------------------------------------------------------------------------- #
+# The ROWS & SEQUENCES panel (single-op) reads as words too
+#
+# The guard above covers the multi-field panel. The single-op panel prints
+# `status` straight into a column, so it still showed raw tokens — `no_section`
+# with an EMPTY Change column told a user nothing at all. Same class, other
+# panel, found while checking what an emptied section does on the .OK side.
+# --------------------------------------------------------------------------- #
+def _op(paths, layout, section, op, registry, config):
+    return service.bulk_op_preview(paths, layout, section, op, registry, config)
+
+
+def test_single_op_no_rows_explains_itself(files, registry, config):
+    """`no_section` on a file whose section has no rows. The status is what the
+    code branches on; `detail` is what the user reads."""
+    service.bulk_op_apply([str(files[0])], "StyleHeader", "Lane",
+                          {"type": "keep", "count": 0}, registry, config,
+                          backup=False)
+    res = _op([str(files[0])], "StyleHeader", "Lane",
+              {"type": "set", "field": "lane1", "value": "0007"},
+              registry, config)
+    r = res["results"][0]
+    assert r["status"] == "no_section"
+    assert r.get("detail"), "no explanation at all — the original defect"
+    assert r["detail"] not in STATUS_TOKENS
+    assert len(r["detail"].split()) > 2
+    assert "Lane" in r["detail"]
+
+
+def test_single_op_missing_section_explains_itself(files, registry, config):
+    res = _op([str(files[0])], "StyleHeader", "NoSuchSection",
+              {"type": "set", "field": "x", "value": "1"}, registry, config)
+    r = res["results"][0]
+    assert r["status"] == "no_section"
+    assert "NoSuchSection" in r.get("detail", "")
+
+
+def test_every_non_changing_single_op_status_carries_a_sentence(files, registry, config):
+    """Whatever goes wrong, something readable comes back — the rule the
+    multi-field panel has had, applied to this one."""
+    service.bulk_op_apply([str(files[0])], "StyleHeader", "Lane",
+                          {"type": "keep", "count": 0}, registry, config,
+                          backup=False)
+    cases = [
+        ("Lane", {"type": "set", "field": "lane1", "value": "0007"}),
+        ("NoSuchSection", {"type": "set", "field": "x", "value": "1"}),
+        ("Size", {"type": "set", "field": "nosuchfield", "value": "1"}),
+    ]
+    for section, op in cases:
+        r = _op([str(files[0])], "StyleHeader", section, op,
+                registry, config)["results"][0]
+        if r["status"] in ("change", "changed", "unchanged"):
+            continue
+        text = r.get("detail") or r.get("error") or ""
+        assert text, f"{section}/{r['status']} says nothing"
+        assert text not in STATUS_TOKENS, text
+        assert len(text.split()) > 2, text

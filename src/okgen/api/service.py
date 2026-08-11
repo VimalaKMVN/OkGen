@@ -3046,7 +3046,9 @@ def _apply_bulk_op_raw(okf, name, layout_name, section_name, op, config):
     grouped = okf.sections()
     sec = next((s for s in okf.layout.sections if s.name == section_name), None)
     if sec is None:
-        return {"name": name, "status": "no_section"}
+        return {"name": name, "status": "no_section",
+                "detail": f"this file's layout has no {section_name} section "
+                          f"— nothing to change"}
     recs = grouped.get(section_name, [])
     header_name = okf.layout.sections[0].name if okf.layout.sections else None
     t = op.get("type")
@@ -3061,7 +3063,14 @@ def _apply_bulk_op_raw(okf, name, layout_name, section_name, op, config):
     # Every op except "add" needs existing rows to work on; "add" can seed the
     # first row into an empty section from its reference line.
     if not recs and t != "add":
-        return {"name": name, "status": "no_section"}
+        # A sentence, not the token: the single-op panel prints `status`
+        # straight into a column, so a bare `no_section` told the user nothing
+        # and left the Change column empty. The multi-field panel already maps
+        # this; the difference was that it wrote its own wording and this path
+        # had none to write.
+        return {"name": name, "status": "no_section",
+                "detail": (f"no {section_name} rows in this file — nothing to "
+                           f"change. Add rows to {section_name} first.")}
 
     _is_date = (op.get("field") and config is not None
                 and bool(config.date_format(layout_name, op.get("field"))))
@@ -3116,7 +3125,9 @@ def _apply_bulk_op_raw(okf, name, layout_name, section_name, op, config):
         field = op.get("field")
         fdef = next((x for x in sec.fields if x.name == field), None)
         if fdef is None:
-            return {"name": name, "status": "missing_field"}
+            return {"name": name, "status": "missing_field",
+                    "detail": f"no field '{field}' in {section_name} "
+                              f"on {layout_name}"}
         # A section holding NO DATA takes a field value nowhere useful: with no
         # rows the write lands nowhere, and with only a blank placeholder row
         # (D45's marker, or one a vendor shipped) it lands on that row and
