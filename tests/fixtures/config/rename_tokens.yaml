@@ -1,7 +1,13 @@
 # Fixed rename-token palette for tests.
 rename_tokens:
   custom:
+    # Label tokens: fixed strings that INTRODUCE the value glued after them.
+    # `_build_name` needs to know which tokens are labels to decide that a
+    # label whose value is empty should be dropped with it, so the fixture
+    # carries more than one of them.
     FMT: "FMT"
+    KEY: "K"
+    CP: "CP"
   derived:
     - sl
     - brand
@@ -13,6 +19,12 @@ rename_tokens:
     - seq
     - orig
   header_fields:
+    - department
+    - headerSuffix
+    - compareAtPrice
+    - compareAtUp
+    - retailPrice
+    - headerASNid
     - chain
     - format
     - type

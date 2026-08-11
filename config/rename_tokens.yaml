@@ -18,7 +18,7 @@ rename_tokens:
     KEY: "K"
     DEPT: "D"
     CP: "CP"
-    CU: "CUP"
+    CU: "UP"
     RP: "RP"
     T: "T"
     C: "C"
@@ -60,6 +60,19 @@ rename_tokens:
 
   # ---- header fields (raw values; union across all layouts) ----
   header_fields:
+    # ---- Calgary JSON (json_mode) header fields ----
+    # The Calgary layouts spell these out where the .OK layouts abbreviate, so
+    # both spellings are offered and each resolves on its own engine.
+    - department          # .OK calls it `dept`
+    - headerSuffix        # .OK calls it `suffix`
+    - compareAtPrice      # .OK calls it `comp_price`
+    - compareAtUp         # .OK calls it `comp_up`
+    - retailPrice         # .OK calls it `ret_price`
+    - purchaseOrderNumber # .OK calls it `po`
+    - headerASNid         # the WMS key (and what decides SCAN vs WMS, D38)
+    - pickListId
+    - pickListSequence
+    - packId
     - chain
     - format
     - indicator

@@ -478,7 +478,10 @@ def test_rename_scope_palette(tmp_path, registry, config):
     assert sc["files"][0]["layout"] == "StyleHeader"
     assert "brand" in sc["palette"]["derived"]
     assert "keytrol" in sc["palette"]["header_fields"]
-    assert sc["palette"]["custom"] == {"FMT": "FMT"}     # from fixture rename_tokens
+    # From the fixture rename_tokens. More than one, because `_build_name`
+    # treats a CUSTOM token as a LABEL — a fixture with a single one could not
+    # exercise "a label whose glued value is empty is dropped with it".
+    assert sc["palette"]["custom"] == {"FMT": "FMT", "KEY": "K", "CP": "CP"}
     assert sc["sample"]["brand"] == "Homegoods"
     assert sc["sample"]["keytrol"] == "550000"
 

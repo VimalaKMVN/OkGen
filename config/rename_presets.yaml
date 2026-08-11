@@ -12,210 +12,290 @@
 #                                   join with NO separator (everything else
 #                                   still uses `separator`). {glue: true} works too.
 #
-# Easy to edit — add/remove presets and reorder parts freely.
+# HOUSE STYLE for every preset below, so they stay consistent:
+#
+#   1. `sl` first        — 01, 02, 03 …, padded to the size of the batch.
+#   2. `brand_short`     — the tree badge text (HG, TJM, WN, EU, HS).
+#   3. `layout_short`    — SH / PT / CL / DL.
+#   4. A LABEL is GLUED to its own value: FMTA, T2, K550000, D78, CP000000,
+#      UPN, RP002099. The label and the value are one thing, and a separator
+#      between them was pure length.
+#   5. Order of the labelled pairs: FMT, T, K, D, CP, UP, RP — the ticket
+#      format, then what kind of ticket, then WHICH order it is, then the
+#      merchandising values.
+#
+# The `.OK` and Calgary JSON presets differ ONLY in field names (`dept` vs
+# `department`, `comp_price` vs `compareAtPrice`, …) — the shape is the same,
+# so a file renamed from either engine reads the same way.
 presets:
 #  - name: "Brand · Layout · Key"
 #    separator: "_"
 #    parts: [brand, layout, key]
 #
-#  - name: "FMT + Format + Keytrol"
-#    separator: "_"
-#    parts: [FMT, format, KEY, keytrol]
-#
-#  - name: "Dept + Key"
-#    separator: "_"
-#    parts: [DEPT, dept, KEY, key]
-#
-#  - name: "Chain Format Key (no separator)"
-#    separator: ""
-#    parts: [chain, format, key]
-#
 #  # Glue example: FMT joins directly to the format value, the rest use "_".
-#  #   -> Homegoods_FMTA_550000.OK
+#  #   -> 01_HG_FMTA_550000.OK
 #  - name: "FMT glued to format"
 #    separator: "_"
-#    parts: [brand, FMT, no_delim, format, keytrol]
+#    parts: [sl, brand_short, FMT, no_delim, format, keytrol]
 
-  # Labelled full tag, e.g.
-  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
-  # (custom label token, then its header value, repeated)
+  # -------------------------------------------------------------- .OK files
+
+  # 01_HG_SH_FMTA_T2_K550000P1A_D78_CP000000_UPN_RP002099.OK
   - name: "Styleheader naming convension"
     separator: "_"
     parts:
-      - sl             # 01, 02, 03 ... (padded to the batch size)
+      - sl             # 01, 02, 03 … (padded to the batch size)
       - brand_short    # HG  (the tree badge text)
-      - layout_short   # SH / PT / CL / DL
-      - FMT            # label "FMT"
-      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
-      - format         #   value A
-      - KEY
-      - keytrol
-      - no_delim       # no delimiter
-      - suffix
-      - T              # label "T"
-      - type           #   value 2
-      - DEPT           # label "DEPT"
-      - dept           #   value 78
-      - CP             # label "CP"
-      - comp_price     #   value 000000
-      - CU             # label "CU"
-      - comp_up        #   value N
-      - RP             # label "RP"
-      - ret_price      #   value 002099
+      - layout_short   # SH
+      - FMT
+      - no_delim
+      - format         #   A
+      - T
+      - no_delim
+      - type           #   2
+      - KEY            # label "K"
+      - no_delim
+      - keytrol        #   550000
+      - no_delim
+      - suffix         #   P1A  (part of the key, so it stays glued on)
+      - DEPT           # label "D"
+      - no_delim
+      - dept           #   78
+      - CP
+      - no_delim
+      - comp_price     #   000000
+      - CU             # label "UP"
+      - no_delim
+      - comp_up        #   N
+      - RP
+      - no_delim
+      - ret_price      #   002099
 
-
-  # Labelled full tag, e.g.
-  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
-  # (custom label token, then its header value, repeated)
+  # 01_TJM_PT_FMTA_T3_K33001P3A_D06_CP999999_UPY_RP599999.OK
   - name: "Preticket naming convension"
     separator: "_"
     parts:
-      - sl             # 01, 02, 03 ... (padded to the batch size)
-      - brand_short    # HG  (the tree badge text)
-      - layout_short   # SH / PT / CL / DL
-      - FMT            # label "FMT"
-      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
-      - format         #   value A
-      - KEY
-      - po
-      - T              # label "T"
-      - type           #   value 2
-      - DEPT           # label "DEPT"
-      - dept           #   value 78
-      - CP             # label "CP"
-      - comp_price     #   value 000000
-      - CU             # label "CU"
-      - comp_up        #   value N
-      - RP             # label "RP"
-      - ret_price      #   value 002099
-      
-      
-  # Labelled full tag, e.g.
-  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
-  # (custom label token, then its header value, repeated)
-  # EU / EWMS pipe-delimited preticket, e.g.
-  #   Europe_EUPreticket_FMT_A_Z10_Reg2_KEY_10021888_T_1_DEPT_87_CP_003500_CU_N_RP_999998.OK
-  # (key = po; region from regions.yaml via zone; type/comp_price/comp_up/ret_price
-  #  come from the detail line)
-  - name: "EUPreticket naming convension"
-    separator: "_"
-    parts:
-      - sl             # 01, 02, 03 ... (padded to the batch size)
-      - brand_short    # EU  (the tree badge text)
-      - layout_short   # SH / PT / CL / DL
-      - FMT            # label "FMT"
-      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
-      - format         #   value A
-      - region         #   Reg1/Reg2 mapped from zone (regions.yaml)
-      - Z              # label "Z"
+      - sl
+      - brand_short
+      - layout_short   # PT
+      - FMT
       - no_delim
-      - zone           #   value 10
-      - KEY            # label "KEY"
-      - po             #   value 10021888
-      - T              # label "T"
-      - type           #   value 1  (from the detail line)
-      - DEPT           # label "DEPT"
-      - dept           #   value 87
-      - CP             # label "CP"
-      - comp_price     #   value 003500  (from the detail line)
-      - CU             # label "CU"
-      - comp_up        #   value N  (from the detail line)
-      - RP             # label "RP"
-      - ret_price      #   value 999998  (from the detail line)
+      - format
+      - T
+      - no_delim
+      - type
+      - KEY
+      - no_delim
+      - po             # the Preticket key
+      - DEPT
+      - no_delim
+      - dept
+      - CP
+      - no_delim
+      - comp_price
+      - CU
+      - no_delim
+      - comp_up
+      - RP
+      - no_delim
+      - ret_price
 
-
-  # Labelled full tag, e.g.
-  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
-  # (custom label token, then its header value, repeated)
-  # EU / EWMS pipe-delimited preticket, e.g.
-  #   Europe_EUPreticket_FMT_A_Z10_Reg2_KEY_10021888_T_1_DEPT_87_CP_003500_CU_N_RP_999998.OK
-  # (key = po; region from regions.yaml via zone; type/comp_price/comp_up/ret_price
-  #  come from the detail line)
-  - name: "EUCartonLabel naming convension"
-    separator: "_"
-    parts:
-      - sl             # 01, 02, 03 ... (padded to the batch size)
-      - brand_short    # EU  (the tree badge text)
-      - layout_short   # SH / PT / CL / DL
-      - FMT            # label "FMT"
-      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
-      - format         #   value A
-      - KEY            # label "KEY"
-      - keytrol             #   value 10021888
-      - T              # label "T"
-      - type           #   value 1  (from the detail line)
-      - DEPT           # label "DEPT"
-      - dept           #   value 87
-      - CP             # label "CP"
-      - zone_compare_at     #   value 003500  (from the detail line)
-      - RP             # label "RP"
-      - zone_retail      #   value 999998  (from the detail line)
-
-  # Labelled full tag, e.g.
-  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
-  # (custom label token, then its header value, repeated)
-  # EU / EWMS pipe-delimited preticket, e.g.
-  #   Europe_EUPreticket_FMT_A_Z10_Reg2_KEY_10021888_T_1_DEPT_87_CP_003500_CU_N_RP_999998.OK
-  # (key = po; region from regions.yaml via zone; type/comp_price/comp_up/ret_price
-  #  come from the detail line)
-  - name: "EUStyle Header naming convension"
-    separator: "_"
-    parts:
-      - sl             # 01, 02, 03 ... (padded to the batch size)
-      - brand_short    # EU  (the tree badge text)
-      - layout_short   # SH / PT / CL / DL
-      - FMT            # label "FMT"
-      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
-      - format                #   value A  (EUStyleHeader's ticket format)
-      - KEY            # label "KEY"
-      - keytrol             #   value 10021888
-      - T              # label "T"
-      - type           #   value 1  (from the detail line)
-      - DEPT           # label "DEPT"
-      - dept           #   value 87
-      - CP             # label "CP"
-      - zone_compare_at     #   value 003500  (from the detail line)
-      - RP             # label "RP"
-      - zone_retail      #   value 999998  (from the detail line)
-
-
-
-
-
-  # Labelled full tag, e.g.
-  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
-  # (custom label token, then its header value, repeated)
+  # 01_TJM_CL_FMT1_KC001440002.OK
   - name: "Carton Label naming convension"
     separator: "_"
     parts:
-      - sl             # 01, 02, 03 ... (padded to the batch size)
-      - brand_short    # HG  (the tree badge text)
-      - layout_short   # SH / PT / CL / DL
-      - FMT            # label "FMT"
-      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
-      - format         #   value A
+      - sl
+      - brand_short
+      - layout_short   # CL
+      - FMT
+      - no_delim
+      - format
       - KEY
-      - C
+      - no_delim
+      - C              # the "C:" picklist marker
       - no_delim
       - picklist_id
       - no_delim
       - picklist_seq
 
-
-
-  # Labelled full tag, e.g.
-  #   Homegoods_StyleHeader_FMT_A_T_2_D_78_CP_000000_CU_N_RP_002099.OK
-  # (custom label token, then its header value, repeated)
+  # 01_TJM_DL_FMT7_K550034AAA.OK
   - name: "Distribution Label naming convension"
     separator: "_"
     parts:
-      - sl             # 01, 02, 03 ... (padded to the batch size)
-      - brand_short    # HG  (the tree badge text)
-      - layout_short   # SH / PT / CL / DL
-      - FMT            # label "FMT"
-      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
-      - format         #   value A
+      - sl
+      - brand_short
+      - layout_short   # DL
+      - FMT
+      - no_delim
+      - format
       - KEY
+      - no_delim
       - keytrol
-      - no_delim       # no delimiter
+      - no_delim
       - hsuffix
+
+  # --------------------------------------------------- EU / EWMS pipe files
+
+  # 01_EU_PT_FMTA_Reg2_Z10_T1_K10021888_D87_CP003500_UPN_RP999998.OK
+  # (key = po; region from regions.yaml via zone; type/comp_price/comp_up/
+  #  ret_price come from the detail line)
+  - name: "EUPreticket naming convension"
+    separator: "_"
+    parts:
+      - sl
+      - brand_short    # EU
+      - layout_short   # PT — the EU layouts share the NA codes; the badge
+                       #      already says EU, so `EPT` would only repeat it
+      - FMT
+      - no_delim
+      - format
+      - region         #   Reg1/Reg2 mapped from zone
+      - Z
+      - no_delim
+      - zone           #   10
+      - T
+      - no_delim
+      - type
+      - KEY
+      - no_delim
+      - po
+      - DEPT
+      - no_delim
+      - dept
+      - CP
+      - no_delim
+      - comp_price
+      - CU
+      - no_delim
+      - comp_up
+      - RP
+      - no_delim
+      - ret_price
+
+  # 01_EU_SH_FMTQ_T1_K126539Q_D42_CP_RP599.OK
+  - name: "EUStyle Header naming convension"
+    separator: "_"
+    parts:
+      - sl
+      - brand_short
+      - layout_short   # SH
+      - FMT
+      - no_delim
+      - format
+      - T
+      - no_delim
+      - type
+      - KEY
+      - no_delim
+      - keytrol
+      - DEPT
+      - no_delim
+      - dept
+      - CP
+      - no_delim
+      - zone_compare_at
+      - RP
+      - no_delim
+      - zone_retail
+
+  # 01_EU_CL_FMT1_-_Carton_Label_T7_K8881333_D89_CP9300_RP5999.OK
+  # NOTE `format` here is a DERIVED field (derived_fields.yaml) that expands to
+  # a descriptive string, not a letter — see PLAN §6.
+  - name: "EUCartonLabel naming convension"
+    separator: "_"
+    parts:
+      - sl
+      - brand_short
+      - layout_short   # CL
+      - FMT
+      - no_delim
+      - format
+      - T
+      - no_delim
+      - type
+      - KEY
+      - no_delim
+      - keytrol
+      - DEPT
+      - no_delim
+      - dept
+      - CP
+      - no_delim
+      - zone_compare_at
+      - RP
+      - no_delim
+      - zone_retail
+
+  # ----------------------------------------------- Calgary JSON (json_mode)
+  #
+  # Same shape as the `.OK` presets above; only the FIELD NAMES differ, because
+  # the Calgary layouts spell them out (`department`, not `dept`). Using the
+  # `.OK` presets on a JSON file leaves those segments BLANK while the labels
+  # survive, which reads as `…_D_CP_UP_RP.json` — the D43 empty-segment
+  # failure — so these exist rather than being a nicety.
+  #
+  # `type` is deliberately ABSENT. On a Calgary file the header `type` is the
+  # DOCUMENT discriminator (`styleHeaders`), not a ticket type digit — the
+  # ticket type lives on the detail row and is shadowed by the header field of
+  # the same name. Including it would put the word `styleHeaders` in every
+  # filename. See PLAN §6.
+
+  # 01_WN_SH_FMTS_K140251A_D92_CP000999999_UPtrue_RP7999.99.json
+  - name: "Calgary StyleHeader (JSON)"
+    separator: "_"
+    parts:
+      - sl
+      - brand_short
+      - layout_short   # SH
+      - FMT
+      - no_delim
+      - format
+      - KEY
+      - no_delim
+      - key            # source-aware: keytrol on SCAN, headerASNid on WMS
+      - DEPT
+      - no_delim
+      - department
+      - CP
+      - no_delim
+      - compareAtPrice
+      - CU
+      - no_delim
+      - compareAtUp
+      - RP
+      - no_delim
+      - retailPrice
+
+  # 01_WN_DL_FMTA_K….json
+  - name: "Calgary DistLabel (JSON)"
+    separator: "_"
+    parts:
+      - sl
+      - brand_short
+      - layout_short   # DL
+      - FMT
+      - no_delim
+      - format
+      - KEY
+      - no_delim
+      - key
+      - DEPT
+      - no_delim
+      - department
+
+  # 01_WN_CL_FMTA_K….json  (key is pickListId either way — not source-dependent)
+  - name: "Calgary CartonLabel (JSON)"
+    separator: "_"
+    parts:
+      - sl
+      - brand_short
+      - layout_short   # CL
+      - FMT
+      - no_delim
+      - format
+      - KEY
+      - no_delim
+      - key
+      - DEPT
+      - no_delim
+      - department

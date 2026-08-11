@@ -3644,7 +3644,20 @@ def _tokens_from_okf(okf: OkFile, config: Config, orig_stem: str, custom: dict) 
     toks["layout_short"] = config.layout_code(layout)
     fmt = toks.get("format", "")
     toks["format_label"] = config.label("format", fmt, chain=chain, layout=layout, fmt=fmt) if fmt else ""
+    # The KEY depends on the file's SOURCE on the two Calgary layouts that key
+    # off it (D62), and asking without one silently returns the configured WMS
+    # default — so on a SCAN order this resolved to `headerASNid`, which such a
+    # file does not carry, and the `key` token came out BLANK: the filename
+    # lost the very value that identifies the order. Same class D62 fixed in
+    # Bulk Edit, still living here. The parsed record already holds the field
+    # that decides it, so this costs no extra read and works for a file that is
+    # not on disk yet (Volume Generate names from memory).
     kf = config.unique_field(layout)
+    if config.source_dependent(layout):
+        src = json_source_for(
+            None, config, header={"headerASNid": toks.get("headerASNid", "")}
+        ).get("source")
+        kf = config.unique_field(layout, src)
     toks["key"] = toks.get(kf, "") if kf else ""
     toks["region"] = config.region(toks.get("zone", ""))
     toks["orig"] = orig_stem
@@ -3658,14 +3671,22 @@ def _tokens_from_okf(okf: OkFile, config: Config, orig_stem: str, custom: dict) 
 
 
 def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None,
-                sl_pad=2) -> str:
-    """Join ordered parts into a filename stem. A {'type': 'glue'} part means the
-    next value attaches with NO separator. Empty values are skipped.
+                sl_pad=2, literal_tokens=None) -> str:
+    """Join ordered parts into a filename stem. A {'type': 'glue'} part binds the
+    next part onto the one before it with NO separator. Empty values are skipped.
 
     ``label_names`` are tokens whose values may contain spaces (brand,
-    format_label, derived fields) and so are space-to-underscore sanitized."""
+    format_label, derived fields) and so are space-to-underscore sanitized.
+    ``literal_tokens`` are the CUSTOM tokens — fixed strings like `K`, `CP`,
+    `UP` that label the value beside them rather than carrying data.
+    """
     label_names = label_names or {"brand", "format_label"}
-    out = ""
+    literal_tokens = literal_tokens or set()
+
+    # Resolve every part first, grouped into GLUED RUNS, because whether a part
+    # survives can depend on its neighbours: a label glued to an empty value has
+    # nothing left to introduce.
+    runs = []                       # [[(value, is_literal), ...], ...]
     glue = False
     for part in parts or []:
         ptype = part.get("type")
@@ -3673,28 +3694,45 @@ def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None,
             glue = True
             continue
         if ptype == "text":
-            v = _strip_invalid(part.get("value", ""))
+            v, lit = _strip_invalid(part.get("value", "")), True
         else:
             name = part.get("name") or part.get("value", "")
+            lit = name in literal_tokens
             if name == "seq":
                 v = str(seq).zfill(seq_pad)
             elif name == "sl":
                 # The serial the user reads as "1, 2, 3". Padded, because an
                 # unpadded run sorts 1, 10, 11, 2 in Explorer and in the hot
                 # folder — the two places these names are actually read. Width
-                # is the BATCH's, not a constant: 7 files stay 1..7, 12 become
-                # 01..12, 150 become 001..150, so the name is never longer than
-                # the batch requires and never sorts wrongly.
+                # is the BATCH's, not a constant: 7 files stay 01..07, 150
+                # become 001..150, so the name is never longer than the batch
+                # requires and never sorts wrongly.
                 v = str(seq).zfill(sl_pad)
             elif name in label_names:
                 v = _sanitize_label(toks.get(name, ""))
             else:
                 v = _strip_invalid(toks.get(name, ""))
-        if v == "":
-            continue
-        out = v if out == "" else out + ("" if glue else separator) + v
+        if glue and runs:
+            runs[-1].append((v, lit))
+        else:
+            runs.append([(v, lit)])
         glue = False
-    return out
+
+    segs = []
+    for run in runs:
+        has_value_slot = any(not lit for _v, lit in run)
+        has_value = any(v for v, lit in run if not lit)
+        # A label exists only to introduce a value. With every value in its run
+        # empty it says nothing, so the whole run goes — otherwise `CP` glued to
+        # an absent compare-at price surfaced as the nonsense `CPRP599`, reading
+        # as one token made of two labels. A run of PURE literals (a Text part,
+        # a lone custom token) is kept: that is the user asking for the text.
+        if has_value_slot and not has_value:
+            continue
+        seg = "".join(v for v, _lit in run)
+        if seg:
+            segs.append(seg)
+    return separator.join(segs)
 
 
 def rename_scope(paths, registry, config) -> dict:
@@ -3780,7 +3818,8 @@ def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:
                 results.append({"path": str(f), "old": f.name, "new": None, "status": "error", "error": str(exc)})
                 continue
             base = _build_name(parts, toks, separator, seq,
-                               label_names=label_names, sl_pad=sl_pad)
+                               label_names=label_names, sl_pad=sl_pad,
+                               literal_tokens=set(custom or {}))
             if not base:
                 results.append({"path": str(f), "old": f.name, "new": None, "status": "empty"})
                 continue
@@ -4304,7 +4343,13 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
         _assert_layout_stable(okf)          # a random value must never break detection
 
         toks = _tokens_from_okf(okf, config, orig_stem=src.stem, custom={})
-        stem = _build_name(parts, toks, separator, i + 1, label_names=label_names) or src.stem
+        # No literal tokens here, matching the `custom={}` above: generation has
+        # never resolved custom label tokens, so a generated name is unchanged
+        # by the run-grouping in _build_name. Passing the real set would start
+        # resolving labels that have always come out blank — a rename change
+        # leaking into generated output (§6).
+        stem = _build_name(parts, toks, separator, i + 1, label_names=label_names,
+                           literal_tokens=set()) or src.stem
         ext = src.suffix or ".OK"       # generated JSON must stay .json
         name = f"{stem}{ext}"
         if name.lower() in seen_names:      # names need not be unique — keys are

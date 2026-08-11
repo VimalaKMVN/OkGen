@@ -215,10 +215,12 @@ def test_no_shipped_preset_still_uses_the_long_forms():
         assert "layout" not in names, f"{p['name']} still uses the full layout"
 
 
-def test_the_shipped_cu_label_reads_cup():
-    """It inserted `UP`, which read as a stray fragment beside `CP`."""
+def test_the_shipped_cu_label_reads_up():
+    """Went `CU` -> `CUP` -> `UP` across two rounds of the user's review. It is
+    pinned rather than left to the config alone because the label is GLUED to
+    its value now (`UPN`), so a change here silently changes every filename."""
     shipped = Config.load(Path(__file__).resolve().parents[1] / "config")
-    assert shipped.rename_token_groups()["custom"]["CU"] == "CUP"
+    assert shipped.rename_token_groups()["custom"]["CU"] == "UP"
 
 
 def test_key_and_dept_labels_are_single_letters():
@@ -229,3 +231,78 @@ def test_key_and_dept_labels_are_single_letters():
     custom = shipped.rename_token_groups()["custom"]
     assert custom["KEY"] == "K"
     assert custom["DEPT"] == "D"
+
+
+# ------------------------------------------------ labels glued to their value
+
+def test_a_label_glues_to_its_own_value(tmp_path, registry, config):
+    """`K_550000` -> `K550000`. The label and the value are one thing; the
+    separator between them was pure length."""
+    parts = [{"name": "FMT"}, {"type": "glue"}, {"name": "format"}]
+    assert _names(_copies(tmp_path, 1), parts, registry, config) == ["FMTA.OK"]
+
+
+def test_a_label_whose_value_is_EMPTY_is_dropped_with_it(tmp_path, registry, config):
+    """A label exists only to introduce a value. Glued to nothing it said
+    nothing — and worse, it stuck to whatever came next: an EUStyleHeader with
+    no compare-at price produced `CPRP599`, which reads as one token made of
+    two labels. Both halves of that are asserted here."""
+    parts = [{"name": "FMT"}, {"type": "glue"}, {"name": "nosuchfield"},
+             {"name": "CP"}, {"type": "glue"}, {"name": "keytrol"}]
+    got = _names(_copies(tmp_path, 1), parts, registry, config)
+    assert got == ["CP550000.OK"]        # the FMT run vanished entirely...
+    assert "FMT" not in got[0]           # ...label and all
+
+
+def test_an_empty_value_does_not_glue_the_NEXT_part(tmp_path, registry, config):
+    """The mechanism behind `CPRP599`: skipping an empty value left the glue
+    flag set, so the following part joined with no separator and two unrelated
+    segments ran together."""
+    parts = [{"name": "keytrol"}, {"type": "glue"}, {"name": "nosuchfield"},
+             {"name": "dept"}]
+    got = _names(_copies(tmp_path, 1), parts, registry, config)
+    assert got == ["550000_78.OK"]       # separated, not "55000078"
+
+
+def test_a_run_keeps_going_when_only_SOME_values_are_empty(tmp_path, registry, config):
+    """Dropping the whole run on ANY empty part would be the opposite error:
+    a StyleHeader key is keytrol + suffix, and a missing suffix must not take
+    the key with it."""
+    parts = [{"name": "KEY"}, {"type": "glue"}, {"name": "keytrol"},
+             {"type": "glue"}, {"name": "nosuchfield"}]
+    assert _names(_copies(tmp_path, 1), parts, registry, config) == ["K550000.OK"]
+
+
+def test_a_pure_literal_run_survives(tmp_path, registry, config):
+    """A Text part or a lone custom token is the user asking for that text —
+    it has no value slot to be empty, so the drop rule must not reach it."""
+    parts = [{"type": "text", "value": "PROD"}, {"name": "keytrol"}]
+    assert _names(_copies(tmp_path, 1), parts, registry, config) == ["PROD_550000.OK"]
+
+
+def test_every_shipped_preset_glues_each_label_to_its_value():
+    """The ask was for K, T, D and UP — easy to apply to the preset you are
+    looking at and miss on the other nine."""
+    shipped = Config.load(Path(__file__).resolve().parents[1] / "config")
+    labels = set(shipped.rename_token_groups()["custom"])
+    for p in shipped.rename_presets():
+        names = [x if isinstance(x, str) else (x.get("name") or x.get("value")
+                 or ("no_delim" if x.get("type") == "glue" else None))
+                 for x in p["parts"]]
+        for i, n in enumerate(names[:-1]):
+            if n in labels:
+                assert names[i + 1] in ("no_delim", None), (
+                    f"{p['name']}: label {n!r} is not glued to its value")
+
+
+def test_the_key_pair_comes_after_the_type_pair():
+    """The user's ordering: format, then WHAT KIND of ticket, then WHICH order."""
+    shipped = Config.load(Path(__file__).resolve().parents[1] / "config")
+    checked = 0
+    for p in shipped.rename_presets():
+        names = [x if isinstance(x, str) else (x.get("name") or x.get("value"))
+                 for x in p["parts"]]
+        if "T" in names and "KEY" in names:
+            assert names.index("T") < names.index("KEY"), p["name"]
+            checked += 1
+    assert checked >= 4, "expected several presets to carry both pairs"
