@@ -259,6 +259,7 @@ MORE = [
     ("CalgaryStyleHeader", "Lanes", "lane", 8),
     ("CalgaryStyleHeader", "Details", "pageNumber", 3),
     ("CalgaryStyleHeader", "Details", "lineNumber", 3),
+    ("CalgaryStyleHeader", "Details", "ladderPlan", 8),
     ("CalgaryStyleHeader", "Header", "locator", 20),
     ("CalgaryDistLabel", "Header", "locator", 20),
     ("CalgaryCartonLabel", "Header", "locator", 20),
@@ -546,3 +547,34 @@ def test_the_OK_date_fields_are_untouched(registry):
                 "EUStyleHeader", "EUCartonLabel"):
         sec = next(s for s in registry[lay].sections if s.name == "Header")
         assert next(f for f in sec.fields if f.name == "date").size == 8
+
+
+def test_ladderplan_is_eight_and_holds_its_own_values(registry):
+    """`ladderPlan` carries a YYYYMMDD date as a plain string — `20260401` —
+    so 8 is exactly its width. It is NOT declared in `date_fields.yaml`, so
+    unlike `timestamp` nothing else was policing its length: before this it was
+    refused by Bulk Edit and skipped by Generate like `lane` was.
+
+    Note it is a different field from `ladderPlanMMYY` (4, `0426`), which sits
+    beside it — the two are easy to conflate by name.
+    """
+    sec = next(s for s in registry["CalgaryStyleHeader"].sections
+               if s.name == "Details")
+    assert next(f for f in sec.fields if f.name == "ladderPlan").size == 8
+    assert next(f for f in sec.fields if f.name == "ladderPlanMMYY").size == 4
+
+    import glob
+    checked = 0
+    for path in sorted(glob.glob(str(FIX / "styleheader*.json"))):
+        for det in json.loads(Path(path).read_text(encoding="utf-8"))["data"].get("details", []):
+            v = det.get("ladderPlan")
+            if isinstance(v, str):
+                assert len(v) <= 8, f"{Path(path).name}: {v!r}"
+                checked += 1
+    assert checked, "no ladderPlan values checked"
+
+
+def test_ladderplan_is_not_treated_as_a_date(config):
+    """It looks like one and is not declared as one — so it must not acquire
+    date coercion by accident, which would rewrite `20260401` into a stamp."""
+    assert not config.date_format("CalgaryStyleHeader", "ladderPlan")

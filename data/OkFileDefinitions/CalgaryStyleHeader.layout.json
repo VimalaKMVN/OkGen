@@ -573,7 +573,8 @@
           "size": 4
         },
         {
-          "name": "ladderPlan"
+          "name": "ladderPlan",
+          "size": 8
         },
         {
           "name": "frenchDescription",
