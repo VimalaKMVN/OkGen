@@ -2341,7 +2341,16 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Copy ${count} files` : "Copy", () => copySelection());
   add("Paste here", () => pasteInto(folderOf(node.path)), !state.clipboard.length);
   menu.appendChild(el("div", "ctx-sep"));
-  add(count > 1 ? `Bulk Edit (${count})` : "Bulk Edit", () => enterBulkMode());
+  // BOTH bulk modes, as the Bulk Actions dropdown offers them. A single
+  // "Bulk Edit" entry here called enterBulkMode() with no argument, which
+  // defaults to "fields" — so rows & sequences was unreachable from the
+  // right-click menu entirely. They are not two doors to one job (D59): field
+  // edits are order-independent and batch, row ops do not, which is why the
+  // split exists and why one entry cannot stand for both.
+  add(count > 1 ? `Bulk Edit — field values (${count})` : "Bulk Edit — field values",
+      () => enterBulkMode("fields"));
+  add(count > 1 ? `Bulk Edit — rows & sequences (${count})` : "Bulk Edit — rows & sequences",
+      () => enterBulkMode("rows"));
   add(count > 1 ? `Bulk Rename (${count})…` : "Bulk Rename…", () => enterRenameMode());
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   add(count > 1 ? `🧹  Clean up ${count} files` : "🧹  Clean up file", () => cleanUpSelection());
@@ -3330,8 +3339,16 @@ $("#bulkBtn").addEventListener("click", (e) => { e.stopPropagation(); showBulkMe
 $("#toscaBtn").addEventListener("click", (e) => { e.stopPropagation(); runTosca(); });
 $("#toscaReportsBtn").addEventListener("click", (e) => { e.stopPropagation(); openToscaReports(); });
 
-// Dropdown of bulk actions, anchored under the "Bulk Actions" button —
-// mirrors the right-click menu so both places offer the same options.
+// Dropdown of bulk actions, anchored under the "Bulk Actions" button. It and
+// the right-click menu are meant to offer the same bulk actions, and drifted
+// once already: this list gained the D59 field/rows split while the right-click
+// menu kept a single "Bulk Edit", leaving rows & sequences reachable from only
+// one of the two. `tests/js/test_bulk_menus.js` now pins that they agree.
+// They are NOT identical lists. This one has no file-management entries
+// (Open/Copy/Rename/Delete), and "Generate volume files…" is deliberately here
+// only — it works from ONE template, so it does not belong on a menu opened by
+// right-clicking a file in a multi-file selection (the user's explicit call).
+// Run TOSCA was missing here purely by omission and is now offered in both.
 function showBulkMenu() {
   const n = state.selection.size;
   if (n < 1) return;
@@ -3356,6 +3373,9 @@ function showBulkMenu() {
       () => convertToJson());
   menu.appendChild(el("div", "ctx-sep"));
   add(sendMenuLabel(n), () => sendToNiceLabel());
+  // Same order as the right-click menu (Send, then TOSCA), where this has
+  // always been offered — it was missing here only by omission.
+  add(n === 1 ? "▶  Run TOSCA Script" : `▶  Run TOSCA Script (${n})`, () => runTosca());
   const r = $("#bulkBtn").getBoundingClientRect();
   menu.style.left = Math.max(8, r.right - 220) + "px";
   menu.style.top = (r.bottom + 4) + "px";
