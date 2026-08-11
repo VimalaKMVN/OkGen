@@ -6,8 +6,12 @@
 //
 //   * the editor must SAY which form the file on disk is using, because the
 //     text box alone shows a value and leaves the user to infer the rest; and
-//   * the field must still be PICKABLE from a list, not only typeable — making
+//   * the field must still be CHOOSABLE from a list, not only typeable — making
 //     it a text box for the sake of capitalisation must not cost the dropdown.
+//
+// That dropdown now lives IN the box (an <input list=> + its <datalist>). The
+// separate `pick…` <select> that used to sit beside it was withdrawn as
+// confusing — see the middle section for what had to move with it.
 //
 // What may be SAVED is server-side and unchanged (can_change_chain still
 // refuses Europe on these North-America layouts, by code or by name).
@@ -107,37 +111,100 @@ check("each form is styled distinctly",
       && badgeClasses.every((c) => c && c.includes("form-badge")));
 
 // --------------------------------------------------------------------------
-// The dropdown is still there
+// The dropdown is IN THE BOX — there is no second control
 // --------------------------------------------------------------------------
+// User-reported: the separate `pick…` <select> beside the field was confusing.
+// It always was two controls for one field, and the second could never show the
+// field's own value (its first entry had to be a placeholder), so it read as a
+// rival input. The <datalist> the box already carried IS a dropdown in the box.
 const r = render("04");
-check("a picker is rendered beside the box", !!r.pick && r.pick.tagName === "SELECT");
-check("it offers every chain the server allowed",
-      r.pick && descendants(r.pick).length === Object.keys(OPTIONS).length + 1);
-check("its first entry is a placeholder, not a value",
-      r.pick && descendants(r.pick)[0].value === "");
-check("the box itself is still typeable",
+check("no separate picker is rendered", !r.pick);
+check("no <select> is rendered for this field at all",
+      !descendants(api.renderForm(section("04"))).some((e) => e.tagName === "SELECT"));
+check("the box itself is typeable",
       r.input && r.input.tagName === "INPUT" && r.input.type === "text"
       && !r.input.disabled);
-check("the keyboard path keeps the same values",
-      r.list && descendants(r.list).length === Object.keys(OPTIONS).length);
-check("Europe is offered nowhere — the server filtered it and the client adds nothing",
-      !descendants(r.pick).some((o) => /europe|^05$/i.test(o.value || ""))
-      && !descendants(r.list).some((o) => /europe|^05$/i.test(o.value || "")));
+check("the box owns a dropdown, wired by id",
+      r.list && !!r.list.id && r.input.getAttribute("list") === r.list.id);
+check("the dropdown offers every chain the server allowed, plus the type-it hint",
+      r.list && descendants(r.list).length === Object.keys(OPTIONS).length + 1);
+check("Europe is offered nowhere — the server filtered it, the client adds nothing",
+      !descendants(r.list).some((o) => /europe|^05$/i.test(o.value || "")));
+check("the tooltip points at the box, not at a neighbour",
+      /list in this box/i.test(r.input.title || "")
+      && !/beside/i.test(r.input.title || ""));
+
+// The label is the whole reason the picker existed — a bare `01` means nothing.
+// It has to survive the removal, carried by the option itself.
+const all = descendants(r.list);
+const opts = all.filter((o) => o.value !== "");   // real values, minus the hint
+const byValue = (v) => opts.filter((o) => o.value === v)[0];
+check("a CODE carries its brand name as the option label",
+      byValue("01") && byValue("01").getAttribute("label") === "TJMAXX");
+check("...on every code, not just the first",
+      ["02", "03", "04", "06"].every(
+        (c) => byValue(c) && byValue(c).getAttribute("label") === OPTIONS[c]));
+check("...and as text too, for browsers that render the text not @label",
+      byValue("01") && byValue("01").textContent === "TJMAXX");
+check("a NAME is not labelled with itself — 'Winners (Winners)' reads as two things",
+      byValue("Winners") && !byValue("Winners").hasAttribute("label"));
+check("every option still inserts the VALUE, never the label",
+      opts.every((o) => Object.keys(OPTIONS).includes(o.value)));
 
 // --------------------------------------------------------------------------
-// Picking has to behave exactly like typing
+// "---- or type value ----" — the entry that is not a value
 // --------------------------------------------------------------------------
+// The lists are SUGGESTIONS, not the whole truth, and a plain box says nothing
+// about that. This entry says it, and clears the box when chosen.
+const HINT = "---- or type value ----";
+const hint = all.filter((o) => (o.getAttribute("label") || "") === HINT)[0];
+check("the hint is offered in the dropdown", !!hint);
+check("it is the FIRST entry, so it reads as a heading for the list",
+      all[0] === hint);
+check("it carries the hint as a LABEL, not as a value",
+      hint && hint.value === "" && hint.getAttribute("label") === HINT);
+check("...as text too, for browsers that render text rather than @label",
+      hint && hint.textContent === HINT);
+// This is the load-bearing one. A chosen suggestion inserts the option's VALUE,
+// and that insert is subject to maxLength — 9 on chain, 1 on a detail `type`.
+// A hint carried as a value would arrive truncated to nonsense.
+check("the hint's value fits any field, however narrow",
+      hint && hint.value.length === 0);
+check("no real option was displaced by it",
+      opts.length === Object.keys(OPTIONS).length);
+
+// Choosing it must EMPTY the box, not write the hint into it.
+const h = render("04");
+const hCtl = h.input;
+hCtl.value = "";                                   // what the browser inserts
+(hCtl._handlers.input || []).forEach((fn) => fn({ target: hCtl }));
+check("choosing the hint clears the box", hCtl.value === "");
+check("the badge shows no form for an empty box", h.badge.textContent === "");
+
+// Belt and braces: if a browser inserts the LABEL instead (Firefox renders the
+// label in place of the value, so the two are easy to conflate), still clear.
+const h2 = render("04");
+h2.input.value = HINT;
+(h2.input._handlers.input || []).forEach((fn) => fn({ target: h2.input }));
+check("the hint text never survives in the box, whichever the browser inserts",
+      h2.input.value === "");
+check("...and it is never collected as an edit",
+      !Object.values(api.state.edits || {}).includes(HINT));
+
+// --------------------------------------------------------------------------
+// Choosing from the box IS typing — same event, same handlers
+// --------------------------------------------------------------------------
+// A datalist selection fires `input` on the box, so there is no separate path
+// left to keep in step; that is the simplification, and this pins it.
 const p = render("04");
-p.pick.value = "HomeSense";
-(p.pick._handlers.change || []).forEach((fn) => fn({ target: p.pick }));
+p.input.value = "HomeSense";
+(p.input._handlers.input || []).forEach((fn) => fn({ target: p.input }));
 
-check("picking fills the box", p.input.value === "HomeSense");
-check("picking records the edit, so Save picks it up",
+check("choosing a value fills the box", p.input.value === "HomeSense");
+check("choosing records the edit, so Save picks it up",
       Object.values(api.state.edits || {}).includes("HomeSense"));
 check("the box is marked dirty", (p.input.className || "").includes("dirty"));
-check("the badge follows the picked value", p.badge.textContent === "name");
-check("the picker resets to its placeholder, so it never shows a stale value",
-      p.pick.value === "");
+check("the badge follows the chosen value", p.badge.textContent === "name");
 
 // Typing back the ORIGINAL value must clear the edit, not leave a phantom one.
 p.input.value = "04";
@@ -145,5 +212,27 @@ p.input.value = "04";
 check("returning to the original value drops the edit",
       !Object.values(api.state.edits || {}).includes("HomeSense"));
 check("...and the badge goes back to code", p.badge.textContent === "code");
+
+// --------------------------------------------------------------------------
+// The picker is gone from the SOURCES too, not just from this render
+// --------------------------------------------------------------------------
+// A DOM assertion cannot see a stale stylesheet rule or a second render site
+// that still appends a picker, so both are read directly. `renderTable` (detail
+// rows) appended `okgenPicker` alongside `renderForm` — a fix to one that
+// missed the other would leave the confusing control on exactly the sections
+// with the most fields on screen.
+const CSS = fs.readFileSync(
+  path.join(__dirname, "..", "..", "src", "okgen", "web", "static", "styles.css"),
+  "utf8");
+check("no .fval-pick rule is left in the stylesheet",
+      !/^\s*select\.fval-pick\b/m.test(CSS) && !/\.fval-pick\s*\{/.test(CSS));
+check("app.js creates no fval-pick element anywhere",
+      !/["']fval-pick["']/.test(src));
+check("no render site still appends a picker", !/okgenPicker/.test(src));
+// A QUOTED string literal only. The comment above the control explains why the
+// picker went and names it in backticks, so a bare /pick…/ — or one that counts
+// a backtick as a quote — matches that prose and fails forever.
+check("no 'pick…' placeholder string is left in any control",
+      !/["']pick…/.test(src));
 
 process.exit(failures ? 1 : 0);

@@ -735,22 +735,11 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
    (and the field width) readable. */
 .fval-literal { font-family: ui-monospace, Menlo, Consolas, monospace; }
 
-/* ----- Freeform field: text box + picker + the form it is stored in ----- */
-/* The input is the value; the picker only writes into it, so it is deliberately
-   secondary — narrow, muted, and never wider than the box it feeds. */
-select.fval-pick {
-  font-family: inherit;
-  font-size: 11px;
-  margin-left: 4px;
-  max-width: 110px;
-  background: #2d2d2d;
-  color: var(--muted, #aaa);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  padding: 2px 3px;
-  vertical-align: middle;
-}
-select.fval-pick:hover { color: var(--text); }
+/* ----- Freeform field: text box + the form it is stored in ----- */
+/* The box carries its own dropdown (an <input list=> + <datalist>), so there is
+   no separate picker to style. A `select.fval-pick` rule lived here until the
+   picker was withdrawn — two controls for one field read as two inputs that
+   might disagree. The badge below is the only sibling the box now has. */
 
 /* Says whether the value on disk is a brand NAME or a chain CODE — both are
    valid, so this reports rather than warns. `unknown` is the exception: that

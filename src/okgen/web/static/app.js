@@ -1891,6 +1891,14 @@ function optionLabel(label, code) {
   return label === code ? code : `${label} (${code})`;
 }
 
+// The first entry of a FREEFORM field's dropdown. It is not a value — choosing
+// it empties the box so something outside the list can be typed. These lists
+// are suggestions, not the whole truth (D56/D57), and nothing in a plain text
+// box says so; a user who saw only known values reasonably read the list as
+// exhaustive. Kept as one constant because the control writes it, the clearing
+// handler compares against it, and the tests assert it.
+const FREEFORM_HINT = "---- or type value ----";
+
 function makeControl(sec, rec, field) {
   const value = (rec.values[field.name] != null) ? rec.values[field.name] : "";
   // Read-only field: show a static label (coded values use their friendly
@@ -1910,49 +1918,75 @@ function makeControl(sec, rec, field) {
   let ctrl;
   let orig = value;
   if (field.options && field.freeform) {
-    // TYPE IT or PICK IT — both, side by side. The list is a set of
-    // SUGGESTIONS, not the whole truth: `type` needs another capitalisation of
-    // its one word, and `chain` needs `homesense` as readily as `HomeSense` or
-    // `06`. A bare <select> could express none of that, so the input is the
-    // source of truth (it carries the data-* the edit collector reads) and the
-    // picker beside it writes into it. The datalist keeps the same values on
-    // the keyboard path. What may actually be SAVED is unchanged and decided
-    // server-side — _assert_layout_stable for `type`, can_change_chain for
-    // `chain`, which is what still refuses Europe on these NA layouts.
+    // TYPE IT or CHOOSE IT — in ONE control. The list is a set of SUGGESTIONS,
+    // not the whole truth: `type` needs another capitalisation of its one word,
+    // and `chain` needs `homesense` as readily as `HomeSense` or `06`. A bare
+    // <select> could express none of that, so the input is the source of truth
+    // (it carries the data-* the edit collector reads) and its own datalist
+    // drops down inside the box. What may actually be SAVED is unchanged and
+    // decided server-side — _assert_layout_stable for `type`, can_change_chain
+    // for `chain`, which is what still refuses Europe on these NA layouts.
+    //
+    // There used to be a separate `pick…` <select> beside the box as well.
+    // It was withdrawn as confusing, and it was: the datalist ALREADY is a
+    // dropdown in the field itself, so the two controls did one job, and the
+    // second one could not show the field's value (its first entry had to be a
+    // placeholder) — so a user reasonably read it as a second, disagreeing
+    // input. The only thing it carried that the datalist did not was the
+    // LABEL for a code, which the options below now carry directly.
     ctrl = el("input", "cell fval");
     ctrl.type = "text";
     orig = value;
     ctrl.value = orig;
+    // Choosing this entry CLEARS the box, so a value outside the list can be
+    // typed. Defensive only — the empty `value` above already does the
+    // clearing — for a browser that inserts the LABEL instead (Firefox renders
+    // the label in place of the value, so the two are easy to conflate).
+    // Registered before the badge and the edit collector, which are added
+    // later in this branch and at the end of makeControl: listeners fire in
+    // registration order, so both of those see the CLEARED value, never the
+    // hint text.
+    ctrl.addEventListener("input", () => {
+      if (ctrl.value === FREEFORM_HINT) ctrl.value = "";
+    });
     // The datalist is a SIBLING, never a child: an <input> is a void element,
     // so appending to it is invalid. `list=` resolves by id anywhere in the
     // document, and the caller drops these nodes in beside the control.
     const listId = `dl-${sec.index}-${rec.index}-${field.name}`;
     const dl = el("datalist");
     dl.id = listId;
+    // The hint rides in the LABEL, never the value, and that is load-bearing
+    // rather than stylistic. A chosen suggestion always inserts the option's
+    // VALUE, and the value is then subject to the box's maxLength — so a hint
+    // carried as a value would be truncated to nonsense on `chain` (9 chars)
+    // and to a single "-" on a detail line's `type` (1 char). An empty value
+    // fits every field, and inserting it is precisely the "clear the box"
+    // behaviour wanted. It sits first so it reads as a heading for the list.
+    const hint = el("option");
+    hint.value = "";
+    hint.setAttribute("label", FREEFORM_HINT);
+    hint.textContent = FREEFORM_HINT;
+    dl.appendChild(hint);
     Object.keys(field.options).forEach((code) => {
       const o = el("option");
       o.value = code;
+      // What the box will hold is the VALUE; the label is the human reading of
+      // it ("01" -> TJMAXX). Set only when the two differ — a Calgary chain
+      // name and `type` map each value to itself, and "Winners" labelled
+      // "Winners" reads as two different things (the optionLabel rule).
+      const label = field.options[code];
+      if (label && label !== code) {
+        o.setAttribute("label", label);
+        o.textContent = label;   // browsers that render text rather than @label
+      }
       dl.appendChild(o);
     });
     ctrl.setAttribute("list", listId);
-    ctrl.title = "Type any capitalisation, or pick from the list beside it. "
+    ctrl.title = "Type any capitalisation, or choose from the list in this box. "
+               + `These are suggestions, not the only allowed values — "${FREEFORM_HINT}" `
+               + "clears the box so you can type your own. "
                + "A value this layout does not allow is refused on save.";
     if (field.size != null) ctrl.maxLength = field.size;
-
-    // The picker. Its first entry is a placeholder so it never claims to be
-    // showing the field's value — the input is what shows that.
-    const pick = el("select", "fval-pick");
-    pick.appendChild(new Option("pick…", ""));
-    Object.keys(field.options).forEach((code) =>
-      pick.appendChild(new Option(optionLabel(field.options[code], code), code)));
-    pick.title = "Pick a known value — it fills the box, which stays editable.";
-    pick.addEventListener("change", () => {
-      if (!pick.value) return;
-      ctrl.value = pick.value;
-      pick.value = "";                      // back to "pick…"; the box is the value
-      onEdit({ target: ctrl });
-      if (ctrl.okgenForm) ctrl.okgenForm(ctrl.value);
-    });
 
     // Which FORM the value is in — a brand name or a chain code. Both are
     // valid and a file may carry either (D41/D57), so the editor says which
@@ -1984,7 +2018,6 @@ function makeControl(sec, rec, field) {
       ctrl.okgenBadge = badge;
     }
     ctrl.okgenDatalist = dl;
-    ctrl.okgenPicker = pick;
   } else if (field.options) {
     ctrl = el("select", "cell fval");
     const codes = Object.keys(field.options);
@@ -2072,7 +2105,6 @@ function renderForm(sec) {
     const ctl = makeControl(sec, rec, field);
     f.appendChild(ctl);
     // Siblings, never children of the void <input> — see makeControl.
-    if (ctl.okgenPicker) f.appendChild(ctl.okgenPicker);
     if (ctl.okgenBadge) f.appendChild(ctl.okgenBadge);
     if (ctl.okgenDatalist) f.appendChild(ctl.okgenDatalist);
     // Roll-up total: a sibling badge saying whether this agrees with the rows
@@ -2127,7 +2159,6 @@ function renderTable(sec) {
       const td = el("td");
       const ctl = makeControl(sec, rec, field);
       td.appendChild(ctl);
-      if (ctl.okgenPicker) td.appendChild(ctl.okgenPicker);
       if (ctl.okgenBadge) td.appendChild(ctl.okgenBadge);
       if (ctl.okgenDatalist) td.appendChild(ctl.okgenDatalist);
       tr.appendChild(td);

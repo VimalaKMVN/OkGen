@@ -52,7 +52,7 @@ const SECTION = {
 
 const run = new Function(
   "document", "window", "localStorage", "Option", "fetch", "confirm", "prompt", "alert",
-  src + "\n;return { state, renderForm };");
+  src + "\n;return { state, renderForm, renderTable };");
 
 let api;
 try {
@@ -120,5 +120,66 @@ check("the control is wired for edit collection",
       typeCtl && typeCtl.dataset.section === 0 && typeCtl.dataset.record === 0);
 check("its original value is recorded, so an untouched field is not re-sent",
       typeCtl && typeCtl.dataset.orig === "styleHeaders");
+
+// --------------------------------------------------------------------------
+// The OTHER `type` — the one on a DETAIL line
+// --------------------------------------------------------------------------
+// `freeform:` is declared per LAYOUT and matched by field NAME, with no section
+// scope, so the entry meant for the header's document discriminator also lands
+// on CalgaryStyleHeader.Details.type — a different field entirely, with nine
+// coded values (`1` -> Type 1 ... `9` -> Type 9).
+//
+// Two things follow. It renders through renderTable, a SECOND site that had to
+// lose the picker as well; and its labels are the whole meaning of the field —
+// a dropdown of bare 1..9 says nothing. Before the picker went, that meaning
+// lived ONLY in the picker, so removing it without labelling the options would
+// have destroyed it here while looking fine on `chain`.
+const tableApi = run(doc, global.window, global.localStorage, global.Option,
+                     () => Promise.resolve({}), global.confirm, global.prompt,
+                     global.alert);
+const DETAIL_OPTS = {
+  "1": "Type 1", "2": "Type 2", "3": "Type 3", "4": "Type 4", "5": "Type 5",
+  "6": "Type 6", "7": "Type 7", "8": "Type 8", "9": "Type 9",
+};
+const detailNodes = descendants(tableApi.renderTable({
+  index: 4, name: "Details", max_records: null,
+  fields: [{ name: "type", start: null, size: 1, type: "char",
+             options: DETAIL_OPTS, hidden: false, editable: true,
+             literal: false, freeform: true }],
+  records: [{ index: 4, values: { type: "1" } }],
+}));
+const dCtl = detailNodes.filter((e) => e.dataset && e.dataset.field === "type")[0];
+const dList = detailNodes.filter((e) => e.tagName === "DATALIST")[0];
+
+check("the detail-line type is a typeable box",
+      dCtl && dCtl.tagName === "INPUT" && dCtl.type === "text");
+check("no picker survives in the detail TABLE either",
+      !detailNodes.some((e) => e.tagName === "SELECT")
+      && !detailNodes.some((e) => (e.className || "").includes("fval-pick")));
+check("its dropdown is in the box, wired by id",
+      dList && !!dList.id && dCtl.getAttribute("list") === dList.id);
+const dReal = dList ? descendants(dList).filter((o) => o.value !== "") : [];
+check("every coded value carries the label that gives it meaning",
+      dReal.length === 9
+      && dReal.every((o) => o.getAttribute("label") === DETAIL_OPTS[o.value]));
+check("the option still inserts the CODE, not the label",
+      dReal.every((o) => /^[1-9]$/.test(o.value)));
+
+// The type-it hint reaches the detail table too — and this is the field that
+// proves it must ride in the LABEL. `type` here is ONE character wide, so a
+// hint carried as a value would be inserted and then cut to a single "-".
+const dHint = dList
+  ? descendants(dList).filter((o) => (o.getAttribute("label") || "")
+                                     === "---- or type value ----")[0]
+  : null;
+check("the detail line offers the type-it hint as well", !!dHint);
+check("its value is empty, so a 1-char field cannot truncate it",
+      dHint && dHint.value === "" && dCtl.maxLength === 1);
+check("choosing it clears the box rather than writing a stray '-'",
+      (() => {
+        dCtl.value = "---- or type value ----";
+        (dCtl._handlers.input || []).forEach((fn) => fn({ target: dCtl }));
+        return dCtl.value === "";
+      })());
 
 process.exit(failures ? 1 : 0);
