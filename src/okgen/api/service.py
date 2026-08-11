@@ -1270,20 +1270,22 @@ def _is_blank_row(rec, hidden: set) -> bool:
 def _skip_field_on_dataless(okf, sec, config) -> bool:
     """Should a FIELD-VALUE op on this section be skipped as pointless?
 
-    Only when the section holds no data AND has more than one field. The harm
-    being prevented is a PARTIALLY populated row — a `size` with no `quantity`
-    — which is worse than nothing: it flips the section to "has data", so the
-    blank marker stops being replaced when rows are added (D52), and it becomes
-    the CLONE TEMPLATE (D53), so every row added later inherits its emptiness
-    instead of the seed.
+    Whenever the section holds no data — no rows, only blank rows, or only
+    filler rows. Both engines answer the same way, which is the point: a
+    fixed-width section that has been emptied simply has no rows, so a field op
+    there was ALREADY skipped with a message by an older guard. JSON cannot
+    empty a section the same way (the array must keep its key, D45), so it is
+    left holding a blank marker row, and without this it would keep writing
+    into that row while `.OK` refused.
 
-    A section with a SINGLE field cannot be partially populated: setting it
-    fully specifies the row. `CalgaryStyleHeader.Lanes` and `StyleHeader.Lane`
-    are the two, and skipping them would take away the `lane` editing that was
-    asked for and built — so the rule stops short of them deliberately.
+    A one-field section was briefly exempt on the reasoning that setting its
+    only field fully populates the row, so nothing could be left half-filled.
+    That is true, and the user withdrew the exemption anyway: `.OK` does not
+    make the distinction, and a rule that behaves differently per section shape
+    is harder to predict than one that always says "add rows first". Rows are
+    added through the row ops — which are deliberately never guarded here, and
+    Volume Generate's row counts are untouched.
     """
-    if len(sec.fields) < 2:
-        return False
     return not _section_has_data(okf, sec, config)
 
 

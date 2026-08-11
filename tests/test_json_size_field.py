@@ -66,6 +66,34 @@ def _copy(tmp_path, sample):
     return p
 
 
+def _with_data(path, layout, section, registry, config):
+    """Ensure `section` holds data, so a WIDTH check measures the width.
+
+    Since v0.116.0 a field op on a dataless section is skipped by design, so on
+    a section that ships blank the check would be measuring the skip instead.
+    Rows are added where the seed produces real values; where it does not
+    (`CalgaryStyleHeader.Lanes` seeds `lane: ""`), the single editor is used —
+    it still writes into a placeholder, which is the documented way out.
+    """
+    okf = service.parse_okfile(path, registry=registry)
+    sec = next((x for x in okf.layout.sections if x.name == section), None)
+    if sec is None or service._section_has_data(okf, sec, config):
+        return path
+    service.bulk_op_apply([str(path)], layout, section,
+                          {"type": "add", "count": 1}, registry, config,
+                          backup=False)
+    okf = service.parse_okfile(path, registry=registry)
+    sec = next(x for x in okf.layout.sections if x.name == section)
+    if service._section_has_data(okf, sec, config):
+        return path
+    # Still blank: its seed is blank too. Type a value in, as a user would.
+    ri = next(r.index for r in okf.records if r.section.name == section)
+    service.apply_edits(path, [{"record_index": ri,
+                                "field": sec.fields[0].name, "value": "x"}],
+                        registry, config=config, backup=False)
+    return path
+
+
 def _sizes(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))["data"]["header"]["sizes"]
 
@@ -353,7 +381,8 @@ def test_bulk_edit_can_now_write_it(tmp_path, registry, config,
                                     layout, section, field, width):
     """It used to answer `<field> has no fixed width` — offered in the panel,
     then refused on apply, which is exactly what was reported for `size`."""
-    p = _copy(tmp_path, _SAMPLE_FOR[layout])
+    p = _with_data(_copy(tmp_path, _SAMPLE_FOR[layout]), layout, section,
+                   registry, config)
     val = "7" * width
     res = service.bulk_multi_apply(
         [str(p)], layout,
@@ -369,7 +398,8 @@ def test_volume_generate_offers_AND_writes_it(tmp_path, registry, config,
                                               layout, section, field, width):
     """Both halves. It was omitted from the panel (so it read as forgotten) and
     silently skipped by the API path while reporting success."""
-    p = _copy(tmp_path, _SAMPLE_FOR[layout])
+    p = _with_data(_copy(tmp_path, _SAMPLE_FOR[layout]), layout, section,
+                   registry, config)
     scope = service.generate_scope([str(p)], registry, config)
     if section == "Header":
         offered = [x["name"] for x in scope["header_fields"]]
@@ -643,6 +673,7 @@ def test_rows_and_sequences_panel_can_write_it(tmp_path, registry, config, op,
     Before a width was declared this answered `<field> has no fixed width`."""
     p = tmp_path / f"{op}_{field}_{layout}.json"
     shutil.copy2(FIX / _SAMPLE_FOR[layout], p)
+    _with_data(p, layout, section, registry, config)
     spec = ({"type": "set", "field": field, "value": value} if op == "set"
             else {"type": "list", "field": field, "values": [value]})
     res = service.bulk_op_apply([str(p)], layout, section, spec,

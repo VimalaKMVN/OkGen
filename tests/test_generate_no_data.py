@@ -382,35 +382,99 @@ def test_the_poisoning_this_prevents(tmp_path, registry, config):
     assert all(r["quantity"] == "100" for r in rows), "rows should be seeded"
 
 
-def test_a_SINGLE_field_section_is_not_skipped(tmp_path, registry, config):
-    """`CalgaryStyleHeader.Lanes` has one field, so setting it FULLY populates
-    the row — there is nothing left empty and none of the harm applies.
-
-    Skipping it would take back the `lane` editing that was asked for and
-    built, so the rule stops short of a one-field section deliberately. This is
-    the boundary between two of the user's requests and is easy to lose.
+def test_a_SINGLE_field_section_is_skipped_too(tmp_path, registry, config):
+    """`CalgaryStyleHeader.Lanes` has one field, so setting it would fully
+    specify the row and none of the half-filled harm applies. It is skipped
+    anyway, at the user's call: `.OK` makes no such distinction — an emptied
+    fixed-width section simply has no rows — and a rule that behaves
+    differently per section shape is harder to predict than one that always
+    says "add rows first".
     """
     p = _copy(tmp_path, FIX / "styleheader_fmtS.json")
     assert _has_data(p, "Lanes", registry, config) is False   # blank as shipped
+    before = p.read_bytes()
 
     res = service.bulk_multi_apply(
         [str(p)], "CalgaryStyleHeader",
         [{"section": "Lanes", "type": "list", "field": "lane",
           "values": ["LANE0007"]}], registry, config, backup=False)
-    assert res["results"][0]["status"] == "changed", res["results"][0]
-    lanes = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["lanes"]
-    assert lanes == [{"lane": "LANE0007"}], "a one-field row is complete"
+    assert res["results"][0]["fields"][0]["status"] == "skipped"
+    assert p.read_bytes() == before
 
 
-def test_the_exemption_is_about_FIELD_COUNT_not_the_section_name(registry):
-    """Stated as a rule, not a special case for `Lanes`: any single-field
-    section qualifies, and `StyleHeader.Lane` on the fixed-width side is the
-    other one today."""
-    singles = [(lay, sec.name)
-               for lay in ("CalgaryStyleHeader", "StyleHeader")
-               for sec in registry[lay].sections[1:] if len(sec.fields) == 1]
-    assert ("CalgaryStyleHeader", "Lanes") in singles
-    assert ("StyleHeader", "Lane") in singles
+def test_the_two_engines_now_agree_on_a_dataless_section(tmp_path, registry, config):
+    """The point of withdrawing the exemption. `.OK` emptied -> no rows ->
+    skipped by the older guard; JSON emptied -> one blank row -> skipped by
+    this one. Same answer, different mechanism."""
+    ok = _empty(_copy(tmp_path, DATA_DIR / "StyleHeader.OK"),
+                "StyleHeader", "Lane", registry, config)
+    js = _copy(tmp_path, FIX / "styleheader_fmtS.json")
+
+    r1 = service.bulk_multi_apply(
+        [str(ok)], "StyleHeader",
+        [{"section": "Lane", "type": "list", "field": "lane1",
+          "values": ["0007"]}], registry, config, backup=False)
+    r2 = service.bulk_multi_apply(
+        [str(js)], "CalgaryStyleHeader",
+        [{"section": "Lanes", "type": "list", "field": "lane",
+          "values": ["0007"]}], registry, config, backup=False)
+    assert r1["results"][0]["fields"][0]["status"] == "skipped"
+    assert r2["results"][0]["fields"][0]["status"] == "skipped"
+
+
+def test_adding_rows_then_setting_works_on_every_section_but_one(
+        tmp_path, registry, config):
+    """The workflow the message tells the user to follow: add rows, then set.
+    It works everywhere EXCEPT `CalgaryStyleHeader.Lanes`, whose seed is `""` —
+    added rows are blank, so the section never gains data and the field stays
+    skipped. Recorded as a KNOWN dead end (PLAN §6): the fix is one seed value
+    in `json_seed_rows.yaml` and is the user's to choose.
+    """
+    works = [(DATA_DIR / "StyleHeader.OK", "StyleHeader", "Lane", "lane1"),
+             (DATA_DIR / "StyleHeader.OK", "StyleHeader", "Size", "size"),
+             (FIX / "styleheader_fmtS.json", "CalgaryStyleHeader", "Sizes", "size"),
+             (FIX / "distlabel.json", "CalgaryDistLabel", "Stores", "store")]
+    for i, (src, layout, section, field) in enumerate(works):
+        p = _empty(_copy(tmp_path, src, f"w{i}{Path(src).suffix}"),
+                   layout, section, registry, config)
+        service.bulk_op_apply([str(p)], layout, section,
+                              {"type": "add", "count": 2}, registry, config,
+                              backup=False)
+        res = service.bulk_multi_apply(
+            [str(p)], layout,
+            [{"section": section, "type": "list", "field": field,
+              "values": ["0007"]}], registry, config, backup=False)
+        assert res["results"][0]["fields"][0]["status"] == "change", \
+            f"{layout}.{section}: add-then-set should work"
+
+    # ...and the one that does not, asserted so it cannot change unnoticed.
+    p = _copy(tmp_path, FIX / "styleheader_fmtS.json", "dead.json")
+    service.bulk_op_apply([str(p)], "CalgaryStyleHeader", "Lanes",
+                          {"type": "add", "count": 2}, registry, config,
+                          backup=False)
+    res = service.bulk_multi_apply(
+        [str(p)], "CalgaryStyleHeader",
+        [{"section": "Lanes", "type": "list", "field": "lane",
+          "values": ["0007"]}], registry, config, backup=False)
+    assert res["results"][0]["fields"][0]["status"] == "skipped", \
+        "if this starts passing, the Lanes seed changed — update PLAN §6"
+
+
+def test_the_editor_is_the_way_out_of_the_lanes_dead_end(tmp_path, registry, config):
+    """The single editor still writes into a placeholder, so a lane value typed
+    there makes the row real and bulk works from then on."""
+    p = _copy(tmp_path, FIX / "styleheader_fmtS.json")
+    okf = service.parse_okfile(p, registry=registry)
+    ri = next(r.index for r in okf.records if r.section.name == "Lanes")
+    service.apply_edits(p, [{"record_index": ri, "field": "lane",
+                             "value": "L1"}], registry, config=config,
+                        backup=False)
+    assert _has_data(p, "Lanes", registry, config) is True
+    res = service.bulk_multi_apply(
+        [str(p)], "CalgaryStyleHeader",
+        [{"section": "Lanes", "type": "list", "field": "lane",
+          "values": ["LANE0007"]}], registry, config, backup=False)
+    assert res["results"][0]["fields"][0]["status"] == "change"
 
 
 def test_a_two_field_section_IS_still_skipped(tmp_path, registry, config):
