@@ -163,15 +163,62 @@ check("it sits after Send, as in the right-click menu",
       })());
 
 // --------------------------------------------------------------------------
-// Where the menus still differ — recorded, not asserted away
+// Generate volume files belongs on BOTH menus
 // --------------------------------------------------------------------------
-// DELIBERATE, on the user's explicit call: volume generation works from ONE
-// template file, so it stays on the Bulk Actions dropdown only. Printed rather
-// than silently accepted, so the asymmetry is visible to the next reader.
+// It was Bulk-Actions-only at v0.99.0, on the user's explicit call, because
+// generation worked from ONE template file. That reason expired:
+// `enterGenerateMode` takes the whole selection and the panel draws each
+// generated file from a random source. This suite used to PRINT the asymmetry
+// as deliberate — now it asserts the parity, which is the same job done the
+// other way round.
 select([FILE]);
-console.log("     note (by design): Generate volume files — right-click: "
-            + has(ctxItems().map((e) => e.textContent || ""), /Generate volume/)
-            + ", Bulk Actions: "
-            + has(bulkItems().map((e) => e.textContent || ""), /Generate volume/));
+const g1 = ctxItems().map((e) => e.textContent || "");
+const gb1 = bulkItems().map((e) => e.textContent || "");
+check("right-click offers Generate volume files", has(g1, /Generate volume/));
+check("Bulk Actions offers it too", has(gb1, /Generate volume/));
+// Guarded like the TOSCA pair: a missing entry must FAIL, never throw on
+// `undefined.trim()` — a crash halts the suite and hides the checks below.
+const genIn = (ls) => {
+  const hit = ls.filter((l) => /Generate volume/.test(l))[0];
+  return hit === undefined ? null : hit.trim();
+};
+check("both spell it the same way", genIn(g1) !== null && genIn(g1) === genIn(gb1));
+check("one file reads without a count", genIn(g1) === "Generate volume files…");
+
+select([FILE, "C:/data/SH_0002.OK"]);
+const g2 = ctxItems().map((e) => e.textContent || "");
+const gb2 = bulkItems().map((e) => e.textContent || "");
+check("a multi-file selection counts SOURCE files in both",
+      genIn(g2) === "Generate volume files… (2 source files)"
+      && genIn(g2) === genIn(gb2));
+// Position, not just presence: it sits between Total Qty and Convert on both,
+// so the two menus read in the same order rather than merely holding the same
+// entries. Drift in ORDER is what makes one menu feel like a different tool.
+const between = (ls) => {
+  const g = ls.findIndex((l) => /Generate volume/.test(l));
+  const t = ls.findIndex((l) => /Total Qty/.test(l));
+  const c = ls.findIndex((l) => /Convert/.test(l));
+  return g > t && g < c;
+};
+check("it sits after Total Qty and before Convert in the right-click menu", between(g2));
+check("...and in the same place on Bulk Actions", between(gb2));
+
+// Clicking it must actually OPEN the generate panel. A label-only assertion
+// would pass on an entry wired to the wrong handler — the exact defect this
+// suite was written for (v0.99.0's single "Bulk Edit" always meant "fields").
+select([FILE]);
+const genItem = ctxItems().filter((e) => /Generate volume/.test(e.textContent || ""))[0];
+if (!genItem) {
+  check("the right-click entry opens the generate panel", false);
+} else {
+  const gp = doc.querySelector("#generatePanel");
+  // Stated so the check below cannot pass on a panel that was already open —
+  // a "still visible" assertion would be green whatever the entry is wired to.
+  check("the generate panel is hidden before the entry is clicked",
+        gp.classList.contains("hidden"));
+  genItem.click();
+  check("the right-click entry opens the generate panel",
+        !gp.classList.contains("hidden"));
+}
 
 process.exit(failures ? 1 : 0);

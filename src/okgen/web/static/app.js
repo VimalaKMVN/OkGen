@@ -2543,6 +2543,12 @@ function showCtxMenu(e, node, row) {
   add(count > 1 ? `Make keys unique (${count})` : "Make keys unique", () => makeUniqueSelection());
   add(count > 1 ? `🧹  Clean up ${count} files` : "🧹  Clean up file", () => cleanUpSelection());
   add(count > 1 ? `🔢  Total Qty check (${count})…` : "🔢  Total Qty check…", () => totalQtySelection());
+  // Offered here as well as on Bulk Actions. It was deliberately dropdown-only
+  // at v0.99.0 because generation worked from ONE template file — that reason
+  // has since expired: `enterGenerateMode` takes the whole selection and the
+  // panel draws each generated file from a random source. Same label in both
+  // menus, so neither can drift into describing the action differently.
+  add(generateMenuLabel(count), () => enterGenerateMode());
   add(count > 1 ? `⇄  Convert ${count} files to JSON…` : "⇄  Convert to JSON…",
       () => convertToJson());
   add(sendMenuLabel(count), () => sendToNiceLabel());
@@ -2779,6 +2785,16 @@ function sendMenuLabel(count) {
   const icon = allJson ? "📤" : "🏷️";
   return count > 1 ? `${icon}  ${verb} ${count} to NiceLabel`
                    : `${icon}  ${verb} to NiceLabel`;
+}
+
+// Both menus that offer volume generation build their label here. Shared
+// rather than duplicated because the two menus have drifted before (v0.99.0):
+// one list gained an entry the other did not, and the comment claiming they
+// agreed had quietly become false. A count of source files, not of files to be
+// generated — that number is typed in the panel.
+function generateMenuLabel(count) {
+  return count > 1 ? `Generate volume files… (${count} source files)`
+                   : "Generate volume files…";
 }
 
 // Custom confirm modal for Send: yellow warning + a guard checkbox that must
@@ -3532,11 +3548,12 @@ $("#toscaReportsBtn").addEventListener("click", (e) => { e.stopPropagation(); op
 // once already: this list gained the D59 field/rows split while the right-click
 // menu kept a single "Bulk Edit", leaving rows & sequences reachable from only
 // one of the two. `tests/js/test_bulk_menus.js` now pins that they agree.
-// They are NOT identical lists. This one has no file-management entries
-// (Open/Copy/Rename/Delete), and "Generate volume files…" is deliberately here
-// only — it works from ONE template, so it does not belong on a menu opened by
-// right-clicking a file in a multi-file selection (the user's explicit call).
-// Run TOSCA was missing here purely by omission and is now offered in both.
+// They are NOT identical lists: this one has no file-management entries
+// (Open/Copy/Rename/Delete). Every BULK action, though, is now on both —
+// "Generate volume files…" was dropdown-only at v0.99.0 on the reasoning that
+// it worked from ONE template file, and that reason expired when generation
+// learned to draw from a whole selection. Run TOSCA was missing here purely by
+// omission. Both are offered in both places now, through a shared label.
 function showBulkMenu() {
   const n = state.selection.size;
   if (n < 1) return;
@@ -3554,9 +3571,7 @@ function showBulkMenu() {
   add(`Make keys unique (${n})`, () => makeUniqueSelection());
   add(n === 1 ? "🧹  Clean up file" : `🧹  Clean up ${n} files`, () => cleanUpSelection());
   add(n === 1 ? "🔢  Total Qty check…" : `🔢  Total Qty check (${n})…`, () => totalQtySelection());
-  // Volume generation works from exactly ONE template file.
-  add(n === 1 ? "Generate volume files…" : `Generate volume files… (${n} source files)`,
-      () => enterGenerateMode());
+  add(generateMenuLabel(n), () => enterGenerateMode());
   add(n === 1 ? "⇄  Convert to JSON…" : `⇄  Convert ${n} files to JSON…`,
       () => convertToJson());
   menu.appendChild(el("div", "ctx-sep"));
