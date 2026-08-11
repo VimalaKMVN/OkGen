@@ -11,9 +11,11 @@
 // to type another casing of it. The user reported it as "type is not allowing
 // me to edit".
 //
-// It now renders as a text box with the known values SUGGESTED via a datalist,
-// driven by `freeform` in field_display.yaml. What may actually be SAVED is
-// unchanged and still server-side — this file only asserts the control.
+// It now renders as a text box with its OWN dropdown (built in app.js, not a
+// native <datalist> — that filters by the box's current value, so a populated
+// field showed no choices at all), driven by `freeform` in field_display.yaml.
+// What may actually be SAVED is unchanged and still server-side — this file
+// only asserts the control.
 const fs = require("fs");
 const path = require("path");
 const { install, descendants } = require("./dom-stub.js");
@@ -84,23 +86,35 @@ check("it is not disabled or read-only",
       typeCtl && !typeCtl.disabled && !(typeCtl.className || "").includes("fval-ro"));
 check("its length limit is the field's declared size",
       typeCtl && typeCtl.maxLength === 20);
-check("it explains that any capitalisation is accepted",
-      typeCtl && /capitalisation/i.test(typeCtl.title || ""));
+check("it explains that any value may be typed",
+      typeCtl && /type any value/i.test(typeCtl.title || ""));
 check("...and that a cross-layout change is refused",
       typeCtl && /refused/i.test(typeCtl.title || ""));
 
 // --------------------------------------------------------------------------
 // The known value stays discoverable
 // --------------------------------------------------------------------------
-const lists = nodes.filter((e) => e.tagName === "DATALIST");
-check("a datalist of known values is rendered", lists.length === 1);
-check("the input points at it by id",
-      typeCtl && lists[0] && typeCtl.attrs
-      && typeCtl.attrs.list === lists[0].id && !!lists[0].id);
-check("the datalist offers the layout's own type word",
-      lists[0] && descendants(lists[0]).some((o) => o.value === "styleHeaders"));
-check("the datalist is a SIBLING, never a child of the void <input>",
-      typeCtl && !descendants(typeCtl).some((e) => e.tagName === "DATALIST"));
+const cls = (e, c) => (e.className || "").split(/\s+/).includes(c);
+// If a control is missing entirely (an older app.js, or a regression), every
+// check must FAIL rather than the suite throwing on the first one — a crash
+// truncates the run and hides every assertion after it.
+const MISSING = { classList: { contains: () => false, remove() {}, add() {} },
+                  className: "", textContent: "", value: null, maxLength: null };
+const or = (x) => x || MISSING;
+const menus = nodes.filter((e) => cls(e, "fval-menu"));
+const rowsOf = (m) => (m ? descendants(m) : []).filter((e) => cls(e, "fval-opt"));
+const textOf = (r) => descendants(r)
+  .filter((e) => (e.className || "").includes("fval-opt-text"))
+  .map((e) => e.textContent)[0];
+check("a dropdown of known values is rendered", menus.length === 1);
+check("an arrow opens it from inside the box",
+      nodes.filter((e) => cls(e, "fval-arrow")).length === 1);
+check("the dropdown offers the layout's own type word",
+      rowsOf(menus[0]).some((r) => textOf(r) === "styleHeaders"));
+check("the menu is a SIBLING, never a child of the void <input>",
+      typeCtl && !descendants(typeCtl).some((e) => cls(e, "fval-menu")));
+check("no native <datalist> is used — it cannot show a populated field's values",
+      !nodes.some((e) => e.tagName === "DATALIST"));
 
 // --------------------------------------------------------------------------
 // Nothing else changes shape
@@ -110,8 +124,9 @@ check("a normal coded field is still a dropdown",
 check("the coded dropdown still offers its labelled values",
       chainCtl && descendants(chainCtl).length >= 2);
 check("a plain field is still a plain text input",
-      keyCtl && keyCtl.tagName === "INPUT" && !(keyCtl.attrs || {}).list);
-check("only the freeform field gets a datalist", lists.length === 1);
+      keyCtl && keyCtl.tagName === "INPUT"
+      && (keyCtl.attrs || {}).role !== "combobox");
+check("only the freeform field gets a dropdown", menus.length === 1);
 
 // --------------------------------------------------------------------------
 // Edits are still collected from it
@@ -149,37 +164,42 @@ const detailNodes = descendants(tableApi.renderTable({
   records: [{ index: 4, values: { type: "1" } }],
 }));
 const dCtl = detailNodes.filter((e) => e.dataset && e.dataset.field === "type")[0];
-const dList = detailNodes.filter((e) => e.tagName === "DATALIST")[0];
+const dMenu = detailNodes.filter((e) => cls(e, "fval-menu"))[0];
+const dArrow = detailNodes.filter((e) => cls(e, "fval-arrow"))[0];
+const dRows = rowsOf(dMenu);
+const dVisible = () => dRows.filter((r) => !r.classList.contains("hidden"));
 
 check("the detail-line type is a typeable box",
       dCtl && dCtl.tagName === "INPUT" && dCtl.type === "text");
 check("no picker survives in the detail TABLE either",
       !detailNodes.some((e) => e.tagName === "SELECT")
-      && !detailNodes.some((e) => (e.className || "").includes("fval-pick")));
-check("its dropdown is in the box, wired by id",
-      dList && !!dList.id && dCtl.getAttribute("list") === dList.id);
-const dReal = dList ? descendants(dList).filter((o) => o.value !== "") : [];
-check("every coded value carries the label that gives it meaning",
-      dReal.length === 9
-      && dReal.every((o) => o.getAttribute("label") === DETAIL_OPTS[o.value]));
-check("the option still inserts the CODE, not the label",
-      dReal.every((o) => /^[1-9]$/.test(o.value)));
+      && !detailNodes.some((e) => cls(e, "fval-pick")));
+check("it has its own arrow and menu inside the cell", !!dArrow && !!dMenu);
 
-// The type-it hint reaches the detail table too — and this is the field that
-// proves it must ride in the LABEL. `type` here is ONE character wide, so a
-// hint carried as a value would be inserted and then cut to a single "-".
-const dHint = dList
-  ? descendants(dList).filter((o) => (o.getAttribute("label") || "")
-                                     === "---- or type value ----")[0]
-  : null;
+// The regression, on the field where it bit hardest: the box holds "1", and a
+// native datalist would have offered only the option "1".
+((dArrow && dArrow._handlers.mousedown) || []).forEach((fn) =>
+  fn({ preventDefault() {} }));
+check("opening it on a populated row offers EVERY type, not just '1'",
+      dVisible().length === 10);            // 9 values + the type-it hint
+check("every coded value shows the label that gives it meaning",
+      ["1 — Type 1", "5 — Type 5", "9 — Type 9"]
+        .every((t) => dVisible().map(textOf).includes(t)));
+
+// Choosing stores the CODE. This is the field that proves the hint cannot be a
+// value: `type` is ONE character wide, so a 23-character hint inserted as a
+// value would have been cut to a single "-".
+const t9 = dRows.filter((r) => textOf(r) === "9 — Type 9")[0];
+((t9 && t9._handlers.mousedown) || []).forEach((fn) => fn({ preventDefault() {} }));
+check("choosing a row stores the code, not the label", or(dCtl).value === "9");
+check("the box's 1-char limit is untouched by the long row text",
+      or(dCtl).maxLength === 1);
+
+const dHint = dRows.filter((r) => textOf(r) === "---- or type value ----")[0];
 check("the detail line offers the type-it hint as well", !!dHint);
-check("its value is empty, so a 1-char field cannot truncate it",
-      dHint && dHint.value === "" && dCtl.maxLength === 1);
+((dHint && dHint._handlers.mousedown) || []).forEach((fn) =>
+  fn({ preventDefault() {} }));
 check("choosing it clears the box rather than writing a stray '-'",
-      (() => {
-        dCtl.value = "---- or type value ----";
-        (dCtl._handlers.input || []).forEach((fn) => fn({ target: dCtl }));
-        return dCtl.value === "";
-      })());
+      or(dCtl).value === "");
 
 process.exit(failures ? 1 : 0);

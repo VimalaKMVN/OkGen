@@ -72,13 +72,34 @@ try {
 
 function render(value) {
   const nodes = descendants(api.renderForm(section(value)));
+  const cls = (e, c) => (e.className || "").split(/\s+/).includes(c);
+  const menu = nodes.filter((e) => cls(e, "fval-menu"))[0];
   return {
+    nodes,
     input: nodes.filter((e) => e.dataset && e.dataset.field === "chain")[0],
-    pick: nodes.filter((e) => (e.className || "").includes("fval-pick"))[0],
-    badge: nodes.filter((e) => (e.className || "").includes("form-badge"))[0],
-    list: nodes.filter((e) => e.tagName === "DATALIST")[0],
+    pick: nodes.filter((e) => cls(e, "fval-pick"))[0],
+    // The badge beside the box — NOT the per-row tags inside the menu, which
+    // carry the same class. Taking [0] blindly would silently assert a row.
+    badge: nodes.filter((e) => cls(e, "form-badge")
+                            && !(e.parentNode && cls(e.parentNode, "fval-opt")))[0],
+    arrow: nodes.filter((e) => cls(e, "fval-arrow"))[0],
+    menu,
+    rows: menu ? descendants(menu).filter((e) => cls(e, "fval-opt")) : [],
   };
 }
+const fire = (el, ev, arg) =>
+  ((el && el._handlers && el._handlers[ev]) || [])
+    .forEach((fn) => fn(arg || { preventDefault() {} }));
+// If the control is missing entirely (an older app.js, or a regression), every
+// check below must FAIL rather than the suite throwing on the first one — a
+// crash truncates the run and hides every assertion after it.
+const MISSING = { classList: { contains: () => false, remove() {}, add() {} },
+                  className: "", textContent: "", _handlers: {} };
+const or = (x) => x || MISSING;
+const rowText = (r) => descendants(r)
+  .filter((e) => (e.className || "").includes("fval-opt-text"))
+  .map((e) => e.textContent)[0];
+const visible = (rows) => rows.filter((r) => !r.classList.contains("hidden"));
 
 // --------------------------------------------------------------------------
 // Which form is this file using?
@@ -111,108 +132,132 @@ check("each form is styled distinctly",
       && badgeClasses.every((c) => c && c.includes("form-badge")));
 
 // --------------------------------------------------------------------------
-// The dropdown is IN THE BOX — there is no second control
+// The dropdown is IN THE BOX, and it shows EVERY value on a populated field
 // --------------------------------------------------------------------------
-// User-reported: the separate `pick…` <select> beside the field was confusing.
-// It always was two controls for one field, and the second could never show the
-// field's own value (its first entry had to be a placeholder), so it read as a
-// rival input. The <datalist> the box already carried IS a dropdown in the box.
+// This is the regression that matters. The control used to be an <input list=>
+// with a <datalist>, and a datalist filters its options by what is already in
+// the box, by PREFIX — so on a field holding "04" the native list collapsed to
+// the single option "04" and the user saw no choices at all ("it shows only the
+// value that is populated there"). Chrome and Firefox additionally show nothing
+// until the user types or deletes; Safari renders only an option's value and
+// never its label. So the menu is built here instead.
+//
+// Every check below therefore renders a POPULATED field. A test that started
+// from an empty box would pass against the broken datalist too.
 const r = render("04");
 check("no separate picker is rendered", !r.pick);
 check("no <select> is rendered for this field at all",
-      !descendants(api.renderForm(section("04"))).some((e) => e.tagName === "SELECT"));
+      !r.nodes.some((e) => e.tagName === "SELECT"));
+check("no <datalist> is left — the browsers cannot show it usefully",
+      !r.nodes.some((e) => e.tagName === "DATALIST"));
 check("the box itself is typeable",
       r.input && r.input.tagName === "INPUT" && r.input.type === "text"
       && !r.input.disabled);
-check("the box owns a dropdown, wired by id",
-      r.list && !!r.list.id && r.input.getAttribute("list") === r.list.id);
-check("the dropdown offers every chain the server allowed, plus the type-it hint",
-      r.list && descendants(r.list).length === Object.keys(OPTIONS).length + 1);
-check("Europe is offered nowhere — the server filtered it, the client adds nothing",
-      !descendants(r.list).some((o) => /europe|^05$/i.test(o.value || "")));
-check("the tooltip points at the box, not at a neighbour",
-      /list in this box/i.test(r.input.title || "")
-      && !/beside/i.test(r.input.title || ""));
+check("the box carries the file's value", or(r.input).value === "04");
+check("a dropdown arrow sits in the field", !!r.arrow && r.arrow.type === "button");
+check("the menu starts closed", r.menu && or(r.menu).classList.contains("hidden"));
 
-// The label is the whole reason the picker existed — a bare `01` means nothing.
-// It has to survive the removal, carried by the option itself.
-const all = descendants(r.list);
-const opts = all.filter((o) => o.value !== "");   // real values, minus the hint
-const byValue = (v) => opts.filter((o) => o.value === v)[0];
-check("a CODE carries its brand name as the option label",
-      byValue("01") && byValue("01").getAttribute("label") === "TJMAXX");
-check("...on every code, not just the first",
-      ["02", "03", "04", "06"].every(
-        (c) => byValue(c) && byValue(c).getAttribute("label") === OPTIONS[c]));
-check("...and as text too, for browsers that render the text not @label",
-      byValue("01") && byValue("01").textContent === "TJMAXX");
-check("a NAME is not labelled with itself — 'Winners (Winners)' reads as two things",
-      byValue("Winners") && !byValue("Winners").hasAttribute("label"));
-check("every option still inserts the VALUE, never the label",
-      opts.every((o) => Object.keys(OPTIONS).includes(o.value)));
+// The whole point: open it on a populated field and every value is offered.
+fire(r.arrow, "mousedown");
+check("the arrow opens the menu", !or(r.menu).classList.contains("hidden"));
+check("EVERY value is offered even though the box holds '04'",
+      visible(r.rows).length === Object.keys(OPTIONS).length + 1);
+check("...including values that do not start with what is in the box",
+      visible(r.rows).some((x) => rowText(x) === "06 — HomeSense")
+      && visible(r.rows).some((x) => rowText(x) === "Winners"));
+check("the arrow closes it again",
+      (fire(r.arrow, "mousedown"), or(r.menu).classList.contains("hidden")));
+
+// --------------------------------------------------------------------------
+// What each row SAYS — the code, its brand name, and which form it is
+// --------------------------------------------------------------------------
+const r2 = render("04");
+fire(r2.arrow, "mousedown");
+const texts = visible(r2.rows).map(rowText);
+check("a CODE row shows the code and the brand name", texts.includes("01 — TJMAXX"));
+check("...for every code", ["02 — Marshalls", "03 — Homegoods", "04 — Winners"]
+      .every((t) => texts.includes(t)));
+check("a NAME row is not doubled up — 'Winners — Winners' reads as two things",
+      texts.includes("Winners") && !texts.includes("Winners — Winners"));
+check("each row says whether it is a code or a name",
+      visible(r2.rows).filter((x) => descendants(x)
+        .some((e) => (e.className || "").includes("form-badge"))).length
+      === Object.keys(OPTIONS).length);
+check("Europe is offered nowhere — the server filtered it, the client adds nothing",
+      !texts.some((t) => /europe|^05\b/i.test(t)));
 
 // --------------------------------------------------------------------------
 // "---- or type value ----" — the entry that is not a value
 // --------------------------------------------------------------------------
-// The lists are SUGGESTIONS, not the whole truth, and a plain box says nothing
-// about that. This entry says it, and clears the box when chosen.
 const HINT = "---- or type value ----";
-const hint = all.filter((o) => (o.getAttribute("label") || "") === HINT)[0];
-check("the hint is offered in the dropdown", !!hint);
-check("it is the FIRST entry, so it reads as a heading for the list",
-      all[0] === hint);
-check("it carries the hint as a LABEL, not as a value",
-      hint && hint.value === "" && hint.getAttribute("label") === HINT);
-check("...as text too, for browsers that render text rather than @label",
-      hint && hint.textContent === HINT);
-// This is the load-bearing one. A chosen suggestion inserts the option's VALUE,
-// and that insert is subject to maxLength — 9 on chain, 1 on a detail `type`.
-// A hint carried as a value would arrive truncated to nonsense.
-check("the hint's value fits any field, however narrow",
-      hint && hint.value.length === 0);
-check("no real option was displaced by it",
-      opts.length === Object.keys(OPTIONS).length);
+const r3 = render("04");
+fire(r3.arrow, "mousedown");
+const hintRow = r3.rows.filter((x) => rowText(x) === HINT)[0];
+check("the hint is offered", !!hintRow);
+check("it is FIRST, so it reads as a heading for the list",
+      r3.rows[0] === hintRow);
+check("it is styled as an instruction, not as a storable value",
+      hintRow && (hintRow.className || "").includes("fval-opt-hint"));
+check("it carries no code/name tag — it is not a value",
+      hintRow && !descendants(hintRow)
+        .some((e) => (e.className || "").includes("form-badge")));
 
-// Choosing it must EMPTY the box, not write the hint into it.
-const h = render("04");
-const hCtl = h.input;
-hCtl.value = "";                                   // what the browser inserts
-(hCtl._handlers.input || []).forEach((fn) => fn({ target: hCtl }));
-check("choosing the hint clears the box", hCtl.value === "");
-check("the badge shows no form for an empty box", h.badge.textContent === "");
-
-// Belt and braces: if a browser inserts the LABEL instead (Firefox renders the
-// label in place of the value, so the two are easy to conflate), still clear.
-const h2 = render("04");
-h2.input.value = HINT;
-(h2.input._handlers.input || []).forEach((fn) => fn({ target: h2.input }));
-check("the hint text never survives in the box, whichever the browser inserts",
-      h2.input.value === "");
-check("...and it is never collected as an edit",
-      !Object.values(api.state.edits || {}).includes(HINT));
+// Choosing it must EMPTY the box so something else can be typed.
+fire(hintRow, "mousedown");
+check("choosing the hint clears the box", or(r3.input).value === "");
+check("...and the hint text itself never lands in the field",
+      or(r3.input).value !== HINT);
+check("the badge shows no form for an empty box", or(r3.badge).textContent === "");
+check("choosing it closes the menu", or(r3.menu).classList.contains("hidden"));
 
 // --------------------------------------------------------------------------
-// Choosing from the box IS typing — same event, same handlers
+// Typing filters — but never hides the escape hatch
 // --------------------------------------------------------------------------
-// A datalist selection fires `input` on the box, so there is no separate path
-// left to keep in step; that is the simplification, and this pins it.
+const r4 = render("04");
+r4.input.value = "Home";
+fire(r4.input, "input", { target: r4.input });
+const shown = visible(r4.rows).map(rowText);
+check("typing opens the menu", !or(r4.menu).classList.contains("hidden"));
+check("typing narrows the list", shown.length < r4.rows.length);
+check("it matches anywhere in the row, not only the start",
+      shown.includes("03 — Homegoods") && shown.includes("06 — HomeSense"));
+check("a non-matching value is dropped", !shown.includes("01 — TJMAXX"));
+check("the hint survives every filter — it is the escape hatch",
+      shown.includes(HINT));
+
+const r5 = render("04");
+r5.input.value = "zzzz";
+fire(r5.input, "input", { target: r5.input });
+check("even when nothing matches, the hint is still offered",
+      visible(r5.rows).map(rowText).join("") === HINT);
+
+// --------------------------------------------------------------------------
+// Choosing a value behaves exactly like typing one
+// --------------------------------------------------------------------------
+// A CODE row stores the code — "06 — HomeSense" is one value shown two ways,
+// not two values, and what lands in the file is `06`.
 const p = render("04");
-p.input.value = "HomeSense";
-(p.input._handlers.input || []).forEach((fn) => fn({ target: p.input }));
-
-check("choosing a value fills the box", p.input.value === "HomeSense");
+fire(p.arrow, "mousedown");
+fire(p.rows.filter((x) => rowText(x) === "06 — HomeSense")[0], "mousedown");
+check("choosing a code row stores the CODE, not the brand name",
+      or(p.input).value === "06");
 check("choosing records the edit, so Save picks it up",
-      Object.values(api.state.edits || {}).includes("HomeSense"));
-check("the box is marked dirty", (p.input.className || "").includes("dirty"));
-check("the badge follows the chosen value", p.badge.textContent === "name");
+      Object.values(api.state.edits || {}).includes("06"));
+check("the box is marked dirty", (or(p.input).className || "").includes("dirty"));
+check("the badge says it is now a code", or(p.badge).textContent === "code");
+check("the menu closes after a choice", or(p.menu).classList.contains("hidden"));
 
-// Typing back the ORIGINAL value must clear the edit, not leave a phantom one.
-p.input.value = "04";
-(p.input._handlers.input || []).forEach((fn) => fn({ target: p.input }));
-check("returning to the original value drops the edit",
-      !Object.values(api.state.edits || {}).includes("HomeSense"));
-check("...and the badge goes back to code", p.badge.textContent === "code");
-
+// ...and the NAME row stores the name. Both forms are legitimate (D57), so the
+// list offers each one separately and the badge reports which you picked.
+const pn = render("04");
+fire(pn.arrow, "mousedown");
+fire(pn.rows.filter((x) => rowText(x) === "HomeSense")[0], "mousedown");
+check("choosing a name row stores the NAME", or(pn.input).value === "HomeSense");
+check("the badge says it is now a name", or(pn.badge).textContent === "name");
+check("Escape closes the menu",
+      (fire(p.arrow, "mousedown"),
+       fire(p.input, "keydown", { key: "Escape", preventDefault() {} }),
+       or(p.menu).classList.contains("hidden")));
 // --------------------------------------------------------------------------
 // The picker is gone from the SOURCES too, not just from this render
 // --------------------------------------------------------------------------
@@ -226,6 +271,27 @@ const CSS = fs.readFileSync(
   "utf8");
 check("no .fval-pick rule is left in the stylesheet",
       !/^\s*select\.fval-pick\b/m.test(CSS) && !/\.fval-pick\s*\{/.test(CSS));
+
+// The menu is absolutely positioned. If its container is not itself
+// positioned, it escapes to the corner of the PAGE instead of hanging under
+// the field — a defect no DOM assertion can see, and the exact class that made
+// the `NoSzLines` chip unreadable while its tests passed.
+check("the menu is positioned, and hangs below the field",
+      /\.fval-menu\s*\{[^}]*position:\s*absolute/m.test(CSS)
+      && /\.fval-menu\s*\{[^}]*top:\s*100%/m.test(CSS));
+check("its wrapper is the positioning context, not the flex-column field",
+      /\.fval-wrap\s*\{[^}]*position:\s*relative/m.test(CSS));
+check("it stacks above the fields below it",
+      /\.fval-menu\s*\{[^}]*z-index:\s*\d+/m.test(CSS));
+check("a long list scrolls instead of running off the window",
+      /\.fval-menu\s*\{[^}]*overflow-y:\s*auto/m.test(CSS)
+      && /\.fval-menu\s*\{[^}]*max-height:/m.test(CSS));
+check("the arrow sits inside the box, with room made for it",
+      /\.fval-arrow\s*\{[^}]*position:\s*absolute/m.test(CSS)
+      && /input\.fval\[role="combobox"\]\s*\{[^}]*padding-right:/m.test(CSS));
+check("the hint row is styled apart from real values",
+      /\.fval-opt-hint\s*\{/.test(CSS));
+check("a row shows it is selectable", /\.fval-opt.*:hover/.test(CSS));
 check("app.js creates no fval-pick element anywhere",
       !/["']fval-pick["']/.test(src));
 check("no render site still appends a picker", !/okgenPicker/.test(src));

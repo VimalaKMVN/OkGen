@@ -1918,75 +1918,140 @@ function makeControl(sec, rec, field) {
   let ctrl;
   let orig = value;
   if (field.options && field.freeform) {
-    // TYPE IT or CHOOSE IT — in ONE control. The list is a set of SUGGESTIONS,
-    // not the whole truth: `type` needs another capitalisation of its one word,
-    // and `chain` needs `homesense` as readily as `HomeSense` or `06`. A bare
-    // <select> could express none of that, so the input is the source of truth
-    // (it carries the data-* the edit collector reads) and its own datalist
-    // drops down inside the box. What may actually be SAVED is unchanged and
-    // decided server-side — _assert_layout_stable for `type`, can_change_chain
-    // for `chain`, which is what still refuses Europe on these NA layouts.
+    // TYPE IT or CHOOSE IT — in ONE control, built here rather than delegated
+    // to <datalist>. The list is a set of SUGGESTIONS, not the whole truth:
+    // `type` needs another capitalisation of its one word, and `chain` needs
+    // `homesense` as readily as `HomeSense` or `06`. What may actually be SAVED
+    // is unchanged and decided server-side — _assert_layout_stable for `type`,
+    // can_change_chain for `chain`, which still refuses Europe on NA layouts.
     //
-    // There used to be a separate `pick…` <select> beside the box as well.
-    // It was withdrawn as confusing, and it was: the datalist ALREADY is a
-    // dropdown in the field itself, so the two controls did one job, and the
-    // second one could not show the field's value (its first entry had to be a
-    // placeholder) — so a user reasonably read it as a second, disagreeing
-    // input. The only thing it carried that the datalist did not was the
-    // LABEL for a code, which the options below now carry directly.
+    // WHY NOT <datalist>, having twice tried it. A datalist filters its options
+    // by what is already in the box, by PREFIX — so on a populated field (which
+    // these always are) the list collapses to the current value and the user
+    // sees no choices at all. User-reported on Safari, but it is not a Safari
+    // bug: Chrome and Firefox additionally show nothing until the user types or
+    // deletes. Safari compounds it by rendering only an option's VALUE and
+    // never its label. So the browsers cannot show "here is every value you may
+    // pick" for a field that already holds one, which is the entire job.
+    //
+    // The `pick…` <select> that used to sit beside the box did do that job —
+    // a <select> shows every option regardless of the field's value — which is
+    // why removing it as "redundant" was wrong: the box handled TYPING and the
+    // picker handled BROWSING. This control does both, in one place.
     ctrl = el("input", "cell fval");
     ctrl.type = "text";
     orig = value;
     ctrl.value = orig;
-    // Choosing this entry CLEARS the box, so a value outside the list can be
-    // typed. Defensive only — the empty `value` above already does the
-    // clearing — for a browser that inserts the LABEL instead (Firefox renders
-    // the label in place of the value, so the two are easy to conflate).
-    // Registered before the badge and the edit collector, which are added
-    // later in this branch and at the end of makeControl: listeners fire in
-    // registration order, so both of those see the CLEARED value, never the
-    // hint text.
-    ctrl.addEventListener("input", () => {
-      if (ctrl.value === FREEFORM_HINT) ctrl.value = "";
-    });
-    // The datalist is a SIBLING, never a child: an <input> is a void element,
-    // so appending to it is invalid. `list=` resolves by id anywhere in the
-    // document, and the caller drops these nodes in beside the control.
-    const listId = `dl-${sec.index}-${rec.index}-${field.name}`;
-    const dl = el("datalist");
-    dl.id = listId;
-    // The hint rides in the LABEL, never the value, and that is load-bearing
-    // rather than stylistic. A chosen suggestion always inserts the option's
-    // VALUE, and the value is then subject to the box's maxLength — so a hint
-    // carried as a value would be truncated to nonsense on `chain` (9 chars)
-    // and to a single "-" on a detail line's `type` (1 char). An empty value
-    // fits every field, and inserting it is precisely the "clear the box"
-    // behaviour wanted. It sits first so it reads as a heading for the list.
-    const hint = el("option");
-    hint.value = "";
-    hint.setAttribute("label", FREEFORM_HINT);
-    hint.textContent = FREEFORM_HINT;
-    dl.appendChild(hint);
-    Object.keys(field.options).forEach((code) => {
-      const o = el("option");
-      o.value = code;
-      // What the box will hold is the VALUE; the label is the human reading of
-      // it ("01" -> TJMAXX). Set only when the two differ — a Calgary chain
-      // name and `type` map each value to itself, and "Winners" labelled
-      // "Winners" reads as two different things (the optionLabel rule).
-      const label = field.options[code];
-      if (label && label !== code) {
-        o.setAttribute("label", label);
-        o.textContent = label;   // browsers that render text rather than @label
-      }
-      dl.appendChild(o);
-    });
-    ctrl.setAttribute("list", listId);
-    ctrl.title = "Type any capitalisation, or choose from the list in this box. "
+    if (field.size != null) ctrl.maxLength = field.size;
+    // Ours is the only list: the native one would sit on top of it.
+    ctrl.setAttribute("autocomplete", "off");
+    ctrl.setAttribute("role", "combobox");
+    ctrl.setAttribute("aria-expanded", "false");
+    ctrl.title = "Type any value, or click ▾ for the full list. "
                + `These are suggestions, not the only allowed values — "${FREEFORM_HINT}" `
                + "clears the box so you can type your own. "
                + "A value this layout does not allow is refused on save.";
-    if (field.size != null) ctrl.maxLength = field.size;
+
+    const menu = el("div", "fval-menu hidden");
+    const rows = [];
+    let active = -1;
+
+    const closeMenu = () => {
+      menu.classList.add("hidden");
+      ctrl.setAttribute("aria-expanded", "false");
+      active = -1;
+      rows.forEach((r) => r.row.classList.remove("active"));
+    };
+    const commit = (v) => {
+      ctrl.value = v;
+      closeMenu();
+      onEdit({ target: ctrl });          // same path a keystroke takes
+      if (ctrl.okgenForm) ctrl.okgenForm(v);
+      try { ctrl.focus(); } catch (_) {}
+    };
+    const addRow = (text, v, kind, extra) => {
+      const row = el("div", "fval-opt" + (extra ? " " + extra : ""));
+      row.appendChild(el("span", "fval-opt-text", text));
+      // The code/name tag, in the list as well as beside the box — picking is
+      // exactly when you want to know which FORM you are about to store.
+      if (kind) row.appendChild(el("span", "form-badge form-badge-" + kind, kind));
+      row.dataset.value = v;
+      // mousedown, NOT click: a click on the menu fires after the input's blur,
+      // and blur closes the menu — so the choice would never register.
+      row.addEventListener("mousedown", (e) => {
+        if (e && e.preventDefault) e.preventDefault();
+        commit(v);
+      });
+      menu.appendChild(row);
+      rows.push({ row, value: v, text });
+    };
+
+    // First, and never filtered out: it is the escape hatch, so hiding it when
+    // nothing matches would remove it exactly when it is most wanted. Its value
+    // is empty, so choosing it clears the box — which IS "let me type my own".
+    addRow(FREEFORM_HINT, "", null, "fval-opt-hint");
+    Object.keys(field.options).forEach((code) => {
+      const label = field.options[code];
+      const kind = field.value_forms ? field.value_forms[code] : null;
+      // "01 — TJMAXX" for a coded value, but plain "Winners" where the label IS
+      // the value ("Winners — Winners" reads as two different things).
+      addRow(label && label !== code ? `${code} — ${label}` : code, code, kind);
+    });
+
+    const applyFilter = (needle) => {
+      const q = String(needle || "").toLowerCase();
+      rows.forEach((r) => {
+        const hit = !q || r.value === "" || r.text.toLowerCase().indexOf(q) >= 0;
+        if (hit) r.row.classList.remove("hidden");
+        else r.row.classList.add("hidden");
+      });
+    };
+    const openMenu = (filtered) => {
+      applyFilter(filtered ? ctrl.value : "");   // ▾ always shows EVERYTHING
+      menu.classList.remove("hidden");
+      ctrl.setAttribute("aria-expanded", "true");
+    };
+
+    const arrow = el("button", "fval-arrow", "▾");
+    arrow.type = "button";
+    arrow.tabIndex = -1;                  // a mouse affordance; the box is the control
+    arrow.title = "Show all values";
+    arrow.addEventListener("mousedown", (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      if (menu.classList.contains("hidden")) openMenu(false);
+      else closeMenu();
+    });
+
+    // Registered BEFORE the badge painter and before makeControl's own onEdit
+    // wiring, so both of those see the cleared value, never the hint text.
+    ctrl.addEventListener("input", () => {
+      if (ctrl.value === FREEFORM_HINT) ctrl.value = "";
+      openMenu(true);
+    });
+    ctrl.addEventListener("focus", () => openMenu(false));
+    ctrl.addEventListener("blur", () => closeMenu());
+    ctrl.addEventListener("keydown", (e) => {
+      const key = e && e.key;
+      if (key === "Escape") { closeMenu(); return; }
+      const vis = rows.filter((r) => !r.row.classList.contains("hidden"));
+      if (key === "ArrowDown" || key === "ArrowUp") {
+        if (e.preventDefault) e.preventDefault();
+        if (menu.classList.contains("hidden")) { openMenu(false); return; }
+        if (!vis.length) return;
+        const cur = vis.findIndex((r) => r.row.classList.contains("active"));
+        const next = key === "ArrowDown"
+          ? (cur + 1) % vis.length
+          : (cur <= 0 ? vis.length - 1 : cur - 1);
+        rows.forEach((r) => r.row.classList.remove("active"));
+        vis[next].row.classList.add("active");
+        active = next;
+        return;
+      }
+      if (key === "Enter") {
+        const hit = vis.filter((r) => r.row.classList.contains("active"))[0];
+        if (hit) { if (e.preventDefault) e.preventDefault(); commit(hit.value); }
+      }
+    });
 
     // Which FORM the value is in — a brand name or a chain code. Both are
     // valid and a file may carry either (D41/D57), so the editor says which
@@ -2017,7 +2082,19 @@ function makeControl(sec, rec, field) {
       ctrl.addEventListener("input", () => paint(ctrl.value));
       ctrl.okgenBadge = badge;
     }
-    ctrl.okgenDatalist = dl;
+    // The box, its arrow and its menu travel as ONE positioned unit. Without a
+    // wrapper the menu would anchor to `.field`, which is a flex COLUMN holding
+    // the label above and the badge below — so the arrow would sit halfway up
+    // the field rather than inside the box, and the menu would hang below the
+    // badge. The <input> stays the element carrying the data-* attributes, so
+    // every `.fval[data-section=…]` lookup still finds it through the wrapper.
+    const wrap = el("div", "fval-wrap");
+    wrap.appendChild(ctrl);
+    wrap.appendChild(arrow);
+    wrap.appendChild(menu);
+    ctrl.okgenWrap = wrap;
+    ctrl.okgenMenu = menu;
+    ctrl.okgenArrow = arrow;
   } else if (field.options) {
     ctrl = el("select", "cell fval");
     const codes = Object.keys(field.options);
@@ -2103,10 +2180,10 @@ function renderForm(sec) {
     }
     f.appendChild(label);
     const ctl = makeControl(sec, rec, field);
-    f.appendChild(ctl);
-    // Siblings, never children of the void <input> — see makeControl.
+    // A freeform field arrives wrapped with its arrow and menu (see
+    // makeControl); everything else is the bare control.
+    f.appendChild(ctl.okgenWrap || ctl);
     if (ctl.okgenBadge) f.appendChild(ctl.okgenBadge);
-    if (ctl.okgenDatalist) f.appendChild(ctl.okgenDatalist);
     // Roll-up total: a sibling badge saying whether this agrees with the rows
     // it sums, or — when there are none — that it is the quantity itself.
     const rspec = rollupSpec();
@@ -2158,9 +2235,8 @@ function renderTable(sec) {
       if (field.hidden) return;   // structural/marker field — never shown
       const td = el("td");
       const ctl = makeControl(sec, rec, field);
-      td.appendChild(ctl);
+      td.appendChild(ctl.okgenWrap || ctl);
       if (ctl.okgenBadge) td.appendChild(ctl.okgenBadge);
-      if (ctl.okgenDatalist) td.appendChild(ctl.okgenDatalist);
       tr.appendChild(td);
     });
     const atMax = sec.max_records != null && n >= sec.max_records;

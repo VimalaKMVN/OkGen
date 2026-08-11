@@ -735,11 +735,72 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
    (and the field width) readable. */
 .fval-literal { font-family: ui-monospace, Menlo, Consolas, monospace; }
 
-/* ----- Freeform field: text box + the form it is stored in ----- */
-/* The box carries its own dropdown (an <input list=> + <datalist>), so there is
-   no separate picker to style. A `select.fval-pick` rule lived here until the
-   picker was withdrawn — two controls for one field read as two inputs that
-   might disagree. The badge below is the only sibling the box now has. */
+/* ----- Freeform field: text box + its own dropdown ----- */
+/* Built here rather than delegated to <datalist>, which filters its options by
+   what is already in the box: on a populated field the native list collapses to
+   the current value, so the user sees no choices at all. This menu always shows
+   every value when opened with ▾, and filters only while typing.
+
+   The box, arrow and menu sit in their own positioned wrapper. Anchoring to
+   `.field` instead would be wrong twice over: it is a flex COLUMN with the
+   label above and the badge below, so the arrow would land halfway up the
+   field and the menu would hang under the badge. This is the part no DOM test
+   can see. */
+.fval-wrap { position: relative; display: block; }
+.fval-wrap > input.fval { width: 100%; box-sizing: border-box; }
+
+.fval-arrow {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  font-size: 10px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--text-dim, #aaa);
+  border: 0;
+  border-radius: 2px;
+}
+.fval-arrow:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+/* Keep typed text clear of the arrow. */
+input.fval[role="combobox"] { padding-right: 22px; }
+
+.fval-menu {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  top: 100%;
+  min-width: 100%;
+  max-height: 240px;
+  overflow-y: auto;
+  background: #252526;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+.fval-opt {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--text);
+}
+.fval-opt:hover, .fval-opt.active { background: var(--accent, #0e639c); color: #fff; }
+/* The escape hatch reads as an instruction, not as a value you might store. */
+.fval-opt-hint {
+  color: var(--text-dim, #aaa);
+  font-style: italic;
+  border-bottom: 1px solid var(--border);
+}
 
 /* Says whether the value on disk is a brand NAME or a chain CODE — both are
    valid, so this reports rather than warns. `unknown` is the exception: that
