@@ -281,8 +281,9 @@ def test_a_pure_literal_run_survives(tmp_path, registry, config):
 
 
 def test_every_shipped_preset_glues_each_label_to_its_value():
-    """The ask was for K, T, D and UP — easy to apply to the preset you are
-    looking at and miss on the other nine."""
+    """The ask was for T, D and UP — easy to apply to the preset you are
+    looking at and miss on the other nine. KEY is the deliberate exception and
+    has its own test: a long unpunctuated key needs the separator."""
     shipped = Config.load(Path(__file__).resolve().parents[1] / "config")
     labels = set(shipped.rename_token_groups()["custom"])
     for p in shipped.rename_presets():
@@ -290,7 +291,7 @@ def test_every_shipped_preset_glues_each_label_to_its_value():
                  or ("no_delim" if x.get("type") == "glue" else None))
                  for x in p["parts"]]
         for i, n in enumerate(names[:-1]):
-            if n in labels:
+            if n in labels and n != "KEY":
                 assert names[i + 1] in ("no_delim", None), (
                     f"{p['name']}: label {n!r} is not glued to its value")
 
@@ -459,3 +460,86 @@ def test_any_OK_preset_names_the_key_of_any_OK_file(tmp_path, registry, config,
                                           registry, shipped)["results"][0]["new"]
         assert "_K" in new, (
             f"{p['name']} applied to a {layout} file produced {new!r} — no key")
+
+
+# ------------------------------------------------- the key gets its separator
+
+def test_the_key_label_is_NOT_glued_to_its_value():
+    """The one exception to "a label glues to its value" (D69). A key can be
+    long and unpunctuated — a Calgary WMS key is a 17-character ASN — and glued
+    to `K` the run has no visible start: `KS403821608940739A`. The separator
+    earns its character there, on the user's call after seeing a real one."""
+    for p in _shipped().rename_presets():
+        names = [x if isinstance(x, str) else (x.get("name") or x.get("value")
+                 or ("no_delim" if x.get("type") == "glue" else None))
+                 for x in p["parts"]]
+        if "KEY" not in names:
+            continue
+        assert names[names.index("KEY") + 1] != "no_delim", (
+            f"{p['name']}: K is glued to the key again")
+
+
+@pytest.mark.parametrize("sample,layout", [
+    ("StyleHeader.OK", "StyleHeader"), ("Preticket.OK", "Preticket"),
+    ("CartonLabel.OK", "CartonLabel"), ("DistLabels.OK", "DistLabels"),
+    ("EUPreticket.OK", "EUPreticket"), ("EUStyleHeader.OK", "EUStyleHeader"),
+    ("EUCartonLabel.OK", "EUCartonLabel"),
+])
+def test_every_OK_name_reads_K_underscore(tmp_path, registry, sample, layout):
+    shipped = _shipped()
+    p = [x for x in shipped.rename_presets()
+         if not x["name"].startswith("Calgary")]
+    d = tmp_path / layout
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / sample
+    shutil.copy(DATA_DIR / sample, f)
+    for preset in p:
+        new = service.bulk_rename_preview([str(f)], preset["parts"], "_",
+                                          registry, shipped)["results"][0]["new"]
+        assert "_K_" in new, f"{preset['name']} -> {new}"
+
+
+# --------------------------------------- a derived field's CODE, for filenames
+
+def test_derived_code_takes_the_code_off_a_labelled_value():
+    assert service._derived_code("1 - Carton Label") == "1"
+    assert service._derived_code("5 - AD Masterpack") == "5"
+
+
+def test_derived_code_leaves_a_plain_value_alone():
+    """Every other layout's `format` is already a bare letter — the split must
+    not touch it, or `A` would have to be special-cased back."""
+    assert service._derived_code("A") == "A"
+    assert service._derived_code("") == ""
+    assert service._derived_code(None) is None
+
+
+def test_the_derived_FIELD_still_carries_its_full_label(registry, config):
+    """Deliberately unchanged. The editor shows this value and TOSCA matches it
+    against a workbook Key column, so the field keeps the wording — only the
+    filename takes the code. Changing the field would have been the easy fix
+    and the wrong one."""
+    okf = service.parse_okfile(DATA_DIR / "EUCartonLabel.OK", registry=registry)
+    toks = service._tokens_from_okf(okf, config, orig_stem="x", custom={})
+    assert toks["format"] == "1 - Carton Label"
+    assert toks["format_code"] == "1"
+
+
+def test_the_eu_carton_name_carries_the_code_not_the_wording(tmp_path, registry):
+    shipped = _shipped()
+    p = [x for x in shipped.rename_presets()
+         if x["name"] == "EUCartonLabel naming convension"][0]
+    f = tmp_path / "EUCartonLabel.OK"
+    shutil.copy(DATA_DIR / "EUCartonLabel.OK", f)
+    new = service.bulk_rename_preview([str(f)], p["parts"], "_",
+                                      registry, shipped)["results"][0]["new"]
+    assert "FMT1_" in new
+    assert "Carton_Label" not in new
+    assert len(new) < 55, new          # was 61 with the wording inlined
+
+
+def test_the_code_token_is_offered_for_a_derived_field(tmp_path, registry, config):
+    f = tmp_path / "EUCartonLabel.OK"
+    shutil.copy(DATA_DIR / "EUCartonLabel.OK", f)
+    fields = service.rename_scope([str(f)], registry, config)["palette"]["header_fields"]
+    assert "format" in fields and "format_code" in fields

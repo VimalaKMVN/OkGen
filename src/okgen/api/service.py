@@ -3673,10 +3673,38 @@ def _tokens_from_okf(okf: OkFile, config: Config, orig_stem: str, custom: dict) 
     # Derived (computed) fields — e.g. EUCartonLabel's `format` — aren't in the
     # raw record; resolve them from the driving fields already in ``toks``.
     for spec in config.derived_fields(layout):
-        toks[spec["name"]] = config.eval_derived(spec, toks)
+        val = config.eval_derived(spec, toks)
+        toks[spec["name"]] = val
+        # ...and a `<name>_code` companion carrying just the code. A derived
+        # value is a DISPLAY string — EUCartonLabel's `format` is
+        # "1 - Carton Label" — which the editor shows and TOSCA matches against
+        # a workbook Key column, so both want the wording. A FILENAME wants the
+        # code alone: unsplit it sanitised to `1_-_Carton_Label`, 17 characters
+        # where every other layout contributes one.
+        #
+        # Split HERE and nowhere else. The derived field itself is deliberately
+        # untouched: it is the value two confirmed-working consumers read, and
+        # this is a naming concern, not a change to what the field means.
+        toks[f"{spec['name']}_code"] = _derived_code(val)
     for cname, cval in (custom or {}).items():
         toks[cname] = cval
     return toks
+
+
+def _derived_code(value):
+    """The bare code from a derived value that carries its label with it —
+    `"1 - Carton Label"` -> `"1"`. A value with no label is returned unchanged,
+    so a one-letter format stays a one-letter format.
+
+    Rename-only. `okgen.tosca` has its own `_format_code` doing the same split
+    for the workbook lookup; the two are kept separate on purpose — that path
+    is confirmed working on the user's Windows box and is not worth
+    destabilising to share three lines (the same call as the duplicated
+    Explorer P/Invoke, PLAN §6).
+    """
+    if value in (None, ""):
+        return value
+    return str(value).split(" -", 1)[0].strip()
 
 
 def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None,
@@ -3788,9 +3816,12 @@ def rename_scope(paths, registry, config) -> dict:
         # Derived fields (e.g. EUCartonLabel `format`) aren't layout fields but
         # are valid rename tokens — offer them in the palette too.
         for spec in config.derived_fields(lay):
-            if spec.get("name") and spec["name"] not in seen:
-                seen.add(spec["name"])
-                header_union.append(spec["name"])
+            if not spec.get("name"):
+                continue
+            for nm in (spec["name"], f"{spec['name']}_code"):
+                if nm not in seen:
+                    seen.add(nm)
+                    header_union.append(nm)
 
     groups = config.rename_token_groups()
     if groups is None:
@@ -3799,11 +3830,17 @@ def rename_scope(paths, registry, config) -> dict:
         ad, ah = set(groups["derived"]), set(groups["header_fields"])
         palette = {
             "derived": [t for t in DERIVED_TOKENS if t in ad],
-            # `Details.type` is offered exactly when `type` is: a config lists
-            # FIELDS, not sections, so requiring both spellings would make
-            # every qualified token invisible until someone edited YAML.
-            "header_fields": [f for f in header_union
-                              if f in ah or f.split(".")[-1] in ah],
+            # `Details.type` is offered exactly when `type` is, and
+            # `format_code` exactly when `format` is: a config lists FIELDS, so
+            # requiring every derived spelling to be listed separately would
+            # make each one invisible until someone edited YAML.
+            "header_fields": [
+                f for f in header_union
+                if f in ah
+                or f.split(".")[-1] in ah
+                or (f.endswith("_code") and f[:-len("_code")] in ah)
+                or (f.endswith("_code") and f[:-len("_code")].split(".")[-1] in ah)
+            ],
             "custom": dict(groups["custom"]),
         }
 

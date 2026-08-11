@@ -17,9 +17,15 @@
 #   1. `sl` first        — 01, 02, 03 …, padded to the size of the batch.
 #   2. `brand_short`     — the tree badge text (HG, TJM, WN, EU, HS).
 #   3. `layout_short`    — SH / PT / CL / DL.
-#   4. A LABEL is GLUED to its own value: FMTA, T2, K550000, D78, CP000000,
-#      UPN, RP002099. The label and the value are one thing, and a separator
+#   4. A LABEL is GLUED to its own value: FMTA, T2, D78, CP000000, UPN,
+#      RP002099. The label and the value are one thing, and a separator
 #      between them was pure length.
+#      THE KEY IS THE EXCEPTION: `K_550000P1A`, with an underscore. A key can
+#      be long and unpunctuated — a Calgary WMS key is a 17-character ASN
+#      (`KS403821608940739A`) — and glued to its label the run has no visible
+#      start, so the separator earns its character there. Anything glued AFTER
+#      the key (suffix, hsuffix, picklist_seq) stays glued: those are part of
+#      the key, not a new field.
 #   5. Order of the labelled pairs: FMT, T, K, D, CP, UP, RP — the ticket
 #      format, then what kind of ticket, then WHICH order it is, then the
 #      merchandising values.
@@ -60,7 +66,6 @@ presets:
       - no_delim
       - type           #   2
       - KEY            # label "K"
-      - no_delim
       - key            #   550000 — the LAYOUT'S OWN key field (keytrol here),
                        #   not the field named directly: a preset naming
                        #   `keytrol` writes no key at all on a layout keyed by
@@ -94,7 +99,6 @@ presets:
       - no_delim
       - type
       - KEY
-      - no_delim
       - key            # the layout's own key field (po here)
       - DEPT
       - no_delim
@@ -120,7 +124,6 @@ presets:
       - no_delim
       - format
       - KEY
-      - no_delim
       - C              # the "C:" picklist marker
       - no_delim
       - key            # the layout's own key field (picklist_id here)
@@ -138,7 +141,6 @@ presets:
       - no_delim
       - format
       - KEY
-      - no_delim
       - key            # the layout's own key field (keytrol here)
       - no_delim
       - hsuffix
@@ -166,7 +168,6 @@ presets:
       - no_delim
       - type
       - KEY
-      - no_delim
       - key            # the layout's own key field (po here)
       - DEPT
       - no_delim
@@ -195,7 +196,6 @@ presets:
       - no_delim
       - type
       - KEY
-      - no_delim
       - key            # the layout's own key field (keytrol here)
       - DEPT
       - no_delim
@@ -207,9 +207,15 @@ presets:
       - no_delim
       - zone_retail
 
-  # 01_EU_CL_FMT1_-_Carton_Label_T7_K8881333_D89_CP9300_RP5999.OK
-  # NOTE `format` here is a DERIVED field (derived_fields.yaml) that expands to
-  # a descriptive string, not a letter — see PLAN §6.
+  # 01_EU_CL_FMT1_T7_K_8881333_D89_CP9300_RP5999.OK
+  #
+  # `format_code`, not `format`. On this layout `format` is a DERIVED field
+  # (derived_fields.yaml) whose value is a DISPLAY string — "1 - Carton Label",
+  # "2 - AD Carton Label", "4 - Masterpack", "5 - AD Masterpack" — which the
+  # editor shows and TOSCA matches against a workbook Key column, so the field
+  # itself must keep the wording. A filename wants the code: unsplit it
+  # sanitised to `FMT1_-_Carton_Label`, 17 characters where every other layout
+  # contributes one.
   - name: "EUCartonLabel naming convension"
     separator: "_"
     parts:
@@ -218,12 +224,11 @@ presets:
       - layout_short   # CL
       - FMT
       - no_delim
-      - format
+      - format_code    #   1 / 2 / 4 / 5 — the code, not "1 - Carton Label"
       - T
       - no_delim
       - type
       - KEY
-      - no_delim
       - key            # the layout's own key field (keytrol here)
       - DEPT
       - no_delim
@@ -266,7 +271,6 @@ presets:
       - Details.type   #   2  — NOT the header `type`, which is the document
                        #        discriminator (`styleHeaders`) and shadows it
       - KEY
-      - no_delim
       - key            # source-aware: keytrol on SCAN, headerASNid on WMS
       - DEPT
       - no_delim
@@ -294,7 +298,6 @@ presets:
       - no_delim
       - format
       - KEY
-      - no_delim
       - key
       - DEPT
       - no_delim
@@ -313,7 +316,6 @@ presets:
       - no_delim
       - format
       - KEY
-      - no_delim
       - key
       - DEPT
       - no_delim

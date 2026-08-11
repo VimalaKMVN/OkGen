@@ -184,11 +184,21 @@ def test_no_shipped_preset_uses_the_wording(prod):
         return [p if isinstance(p, str) else (p or {}).get("name")
                 for p in (parts or [])]
 
+    # `format_label` is the hazard: it drags the FRIENDLY WORDING ("Regular
+    # Tag", "Purple Rat Tail") into a filename, spaces and all. Anything else
+    # beginning `format` is caught too, so a future `format_name`-style token
+    # cannot slip in — but `format_code` is explicitly allowed, because it is
+    # the opposite of the wording: the bare code off a derived value
+    # ("1 - Carton Label" -> "1"), which is what EUCartonLabel's filename
+    # needs. An earlier version of this guard rejected any token merely
+    # CONTAINING "format" and so refused that too.
+    ALLOWED = {"format", "format_code"}
     for preset in prod.rename_presets():
         used = names(preset.get("parts"))
         assert "format_label" not in used, preset.get("name")
-        assert "format" in used or not any(n and "format" in str(n) for n in used), \
-            preset.get("name")
+        offenders = [n for n in used
+                     if n and str(n).startswith("format") and n not in ALLOWED]
+        assert not offenders, f"{preset.get('name')}: {offenders}"
 
 
 @shipped
