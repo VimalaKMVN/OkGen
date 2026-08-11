@@ -578,3 +578,83 @@ def test_ladderplan_is_not_treated_as_a_date(config):
     """It looks like one and is not declared as one — so it must not acquire
     date coercion by accident, which would rewrite `20260401` into a stamp."""
     assert not config.date_format("CalgaryStyleHeader", "ladderPlan")
+
+
+# ------------------------------------------- every declared width, every path
+
+# A consolidated guard over ALL the widths declared for the Calgary layouts, so
+# a future spec edit that drops one is caught wherever it would show. The gap
+# this closes is the rows & sequences bulk panel (`bulk_op_apply`, set/list):
+# the other paths were already covered field by field above, that one was not.
+_STAMP = "2026-03-04T05:06:07.123456789Z"
+DECLARED = [
+    # layout, section, field, width, a value that fits (≠ the sample's own)
+    ("CalgaryStyleHeader", "Sizes",   "size",       6,  "MED"),
+    ("CalgaryStyleHeader", "Lanes",   "lane",       8,  "LANE0007"),
+    ("CalgaryStyleHeader", "Details", "pageNumber", 3,  "007"),
+    ("CalgaryStyleHeader", "Details", "lineNumber", 3,  "042"),
+    ("CalgaryStyleHeader", "Details", "ladderPlan", 8,  "20251231"),
+    ("CalgaryStyleHeader", "Header",  "locator",    20, "LOC1234567890123456"),
+    ("CalgaryDistLabel",   "Header",  "locator",    20, "LOC1234567890123456"),
+    ("CalgaryCartonLabel", "Header",  "locator",    20, "LOC1234567890123456"),
+    ("CalgaryStyleHeader", "Header",  "timestamp",  30, _STAMP),
+    ("CalgaryDistLabel",   "Header",  "timestamp",  30, _STAMP),
+    ("CalgaryCartonLabel", "Header",  "timestamp",  30, _STAMP),
+    ("CalgaryStyleHeader", "Stores",  "date",       30, _STAMP),
+    ("CalgaryDistLabel",   "Stores",  "date",       30, _STAMP),
+    ("CalgaryCartonLabel", "Stores",  "date",       30, _STAMP),
+]
+
+
+@pytest.mark.parametrize("layout,section,field,width,value", DECLARED)
+def test_declared_width_is_visible_everywhere(registry, config,
+                                              layout, section, field, width, value):
+    """The editor view and BOTH scope payloads must carry the number — a null
+    is what the panels render as `(?)`, which is what the whole run was about."""
+    sample = str(FIX / _SAMPLE_FOR[layout])
+
+    view = service.parse_file_view(sample, registry, config)
+    vsec = next(s for s in view["sections"] if s["name"] == section)
+    vfd = next(f for f in vsec["fields"] if f["name"] == field)
+    assert vfd["size"] == width
+    assert vfd.get("editable") is not False and not vfd.get("hidden")
+
+    scope = service.bulk_scope([sample], registry, config)
+    if section == "Header":
+        bfd = next(f for f in scope["header_fields"][layout] if f["name"] == field)
+    else:
+        bfd = next(f for s in scope["detail_sections"][layout] if s["name"] == section
+                   for f in s["fields"] if f["name"] == field)
+    assert bfd["size"] == width
+
+    gs = service.generate_scope([sample], registry, config)
+    if section == "Header":
+        assert any(f["name"] == field for f in gs["header_fields"])
+    else:
+        assert any(f["name"] == field for s in gs["sections"]
+                   if s["name"] == section for f in s["fields"])
+
+
+@pytest.mark.parametrize("op", ["set", "list"])
+@pytest.mark.parametrize("layout,section,field,width,value", DECLARED)
+def test_rows_and_sequences_panel_can_write_it(tmp_path, registry, config, op,
+                                               layout, section, field, width, value):
+    """The single-op bulk panel — the path the other tests here did not cover.
+    Before a width was declared this answered `<field> has no fixed width`."""
+    p = tmp_path / f"{op}_{field}_{layout}.json"
+    shutil.copy2(FIX / _SAMPLE_FOR[layout], p)
+    spec = ({"type": "set", "field": field, "value": value} if op == "set"
+            else {"type": "list", "field": field, "values": [value]})
+    res = service.bulk_op_apply([str(p)], layout, section, spec,
+                                registry, config, backup=False)
+    entry = res["results"][0]
+    # `unchanged` is legitimate if the sample already holds the value.
+    assert entry["status"] in ("changed", "unchanged"), entry
+    assert "no fixed width" not in str(entry)
+
+    okf = service.parse_okfile(p, registry=registry)
+    stored = next(r for r in okf.records if r.section.name == section).get(field)
+    if field in ("date", "timestamp"):
+        assert stored.startswith(value.rstrip("Z"))   # normalised on write
+    else:
+        assert stored == value
