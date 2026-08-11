@@ -7,12 +7,20 @@ value — every other field in the row empty — and **no message at all**.
 An "empty" section is not empty in either engine, and the two differ:
 
     JSON   emptying leaves ONE BLANK MARKER ROW (D45), because the array must
-           keep its key. A value lands on that row and yields a half-filled
-           one. The engine sees `rows: 1`, so nothing downstream could tell it
-           apart from a section holding one real row.
+           keep its key. A value USED to land on that row and yield a
+           half-filled one. The engine sees `rows: 1`, so nothing downstream
+           could tell it apart from a section holding one real row.
     .OK    a section can genuinely hold ZERO rows (`DistLabels` ships
-           `TSticker` that way). A value lands NOWHERE and the run still
-           reports success — worse, because nothing is produced to look at.
+           `TSticker` that way). A value landed NOWHERE and the run still
+           reported success.
+
+Both are now SKIPPED with a message rather than written, in Generate and in
+both bulk panels. The half-filled row was worse than nothing: it flipped the
+section to "has data", so the marker stopped being replaced when rows were
+added, and it became the CLONE TEMPLATE — every row added afterwards inherited
+its emptiness instead of the seed. The single editor is deliberately unchanged:
+there the row is visible and typing into it is how you populate a section by
+hand.
 
 A third shape is already handled correctly and must stay that way: a zero-fill
 section (`Preticket.Lane`) whose trailing all-zero rows are structural padding.
@@ -178,7 +186,7 @@ def test_a_blank_json_section_is_reported_as_blank(tmp_path, registry, config):
     assert res["written"] == 2
     note = next(n for n in res["no_data"] if n["section"] == "Sizes")
     assert note["kind"] == "blank"
-    assert "placeholder" in note["message"]
+    assert "SKIPPED" in note["message"]
     assert "size" in note["fields"]
 
 
@@ -190,12 +198,13 @@ def test_an_empty_OK_section_is_reported_as_empty(tmp_path, registry, config):
     assert res["written"] == 2
     note = next(n for n in res["no_data"] if n["section"] == "TSticker")
     assert note["kind"] == "empty"
-    assert "not written" in note["message"]
+    assert "SKIPPED" in note["message"]
 
 
 def test_the_two_outcomes_do_not_share_a_message(tmp_path, registry, config):
-    """They are different things and a user has to be able to tell them apart:
-    one produced a half-filled row, the other produced nothing."""
+    """Both are skipped now, so the OUTCOME is the same — but the message still
+    distinguishes why, because what the user sees in the editor differs: a
+    blank placeholder row, or no rows at all."""
     blank = _empty(_copy(tmp_path, FIX / "styleheader_fmtS.json", "b.json"),
                    "CalgaryStyleHeader", "Sizes", registry, config)
     empty = _copy(tmp_path, DATA_DIR / "DistLabels.OK")
@@ -261,3 +270,156 @@ def test_every_layout_that_can_have_an_empty_section_is_covered(registry, config
                  "CalgaryStyleHeader", "CalgaryDistLabel", "CalgaryCartonLabel"):
         layout = registry[name]
         assert layout.sections, name
+
+
+# --------------------------------------------- skipped, not written (D75)
+
+def test_generate_leaves_the_placeholder_row_untouched(tmp_path, registry, config):
+    """The heart of it: the value is not written onto the blank row."""
+    p = _empty(_copy(tmp_path, FIX / "styleheader_fmtS.json"),
+               "CalgaryStyleHeader", "Sizes", registry, config)
+    before = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["sizes"]
+    res = _generate(tmp_path, p, "Sizes", "size", "MED", registry, config)
+    made = sorted(Path(res["folder"]).glob("*.json"))
+    for m in made:
+        after = json.loads(m.read_text(encoding="utf-8"))["data"]["header"]["sizes"]
+        assert after == before, "the placeholder row was written into"
+
+
+@pytest.mark.parametrize("apply_fn", ["multi", "single"])
+def test_bulk_skips_the_field_and_leaves_the_row(tmp_path, registry, config, apply_fn):
+    p = _empty(_copy(tmp_path, FIX / f"styleheader_fmtS.json", f"{apply_fn}.json"),
+               "CalgaryStyleHeader", "Sizes", registry, config)
+    before = p.read_bytes()
+    if apply_fn == "multi":
+        res = service.bulk_multi_apply(
+            [str(p)], "CalgaryStyleHeader",
+            [{"section": "Sizes", "type": "list", "field": "size",
+              "values": ["MED"]}], registry, config, backup=False)
+        entry = res["results"][0]["fields"][0]
+        assert entry["status"] == "skipped"
+        msg = entry["error"]
+    else:
+        res = service.bulk_op_apply(
+            [str(p)], "CalgaryStyleHeader", "Sizes",
+            {"type": "set", "field": "size", "value": "MED"},
+            registry, config, backup=False)
+        entry = res["results"][0]
+        assert entry["status"] == "no_data"
+        msg = entry["detail"]
+    assert p.read_bytes() == before, "the file was written"
+    # A status is a value the code branches on; the user gets a sentence.
+    assert "Add rows" in msg and "Sizes" in msg
+    assert len(msg.split()) > 5
+
+
+def test_bulk_skips_only_the_FIELD_not_the_whole_file(tmp_path, registry, config):
+    """The refinement that matters: one field targeting a dataless section must
+    not cost the file its other edits — the rule already used when a file has
+    no such section at all."""
+    p = _empty(_copy(tmp_path, FIX / "styleheader_fmtS.json"),
+               "CalgaryStyleHeader", "Sizes", registry, config)
+    res = service.bulk_multi_apply(
+        [str(p)], "CalgaryStyleHeader",
+        [{"section": "Sizes", "type": "list", "field": "size", "values": ["MED"]},
+         {"section": "Header", "type": "list", "field": "department",
+          "values": ["77"]}],
+        registry, config, backup=False)
+    entry = res["results"][0]
+    by_field = {f["field"]: f for f in entry["fields"]}
+    assert by_field["size"]["status"] == "skipped"
+    assert by_field["department"]["status"] == "change"
+
+    okf = service.parse_okfile(p, registry=registry)
+    header = next(r for r in okf.records if r.section.name == "Header")
+    assert header.get("department") == "77", "the other edit did not land"
+
+
+def test_adding_rows_still_works_on_a_dataless_section(tmp_path, registry, config):
+    """The remedy the message names. Row ops are deliberately NOT guarded — if
+    adding rows were skipped too there would be no way out."""
+    p = _empty(_copy(tmp_path, FIX / "styleheader_fmtS.json"),
+               "CalgaryStyleHeader", "Sizes", registry, config)
+    res = service.bulk_op_apply([str(p)], "CalgaryStyleHeader", "Sizes",
+                                {"type": "add", "count": 2},
+                                registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed"
+    rows = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["sizes"]
+    assert len(rows) == 2
+    assert all(r["quantity"] not in (None, "") for r in rows), "rows are seeded"
+
+
+def test_the_single_EDITOR_still_writes_into_the_placeholder(tmp_path, registry, config):
+    """Deliberately unchanged. There the row is visible and typing into it is
+    how a section gets populated by hand; bulk and Generate act on rows the
+    user cannot see, which is the whole reason they skip."""
+    p = _empty(_copy(tmp_path, FIX / "styleheader_fmtS.json"),
+               "CalgaryStyleHeader", "Sizes", registry, config)
+    okf = service.parse_okfile(p, registry=registry)
+    ri = next(r.index for r in okf.records if r.section.name == "Sizes")
+    service.apply_edits(p, [{"record_index": ri, "field": "size",
+                             "value": "MED"}], registry, config=config,
+                        backup=False)
+    rows = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["sizes"]
+    assert rows[0]["size"] == "MED"
+
+
+def test_the_poisoning_this_prevents(tmp_path, registry, config):
+    """Why skipping beats writing. Setting one field onto the marker used to
+    make it a REAL row, so a later add stacked on it AND cloned its emptiness
+    instead of seeding. With the skip, add still replaces and still seeds."""
+    p = _empty(_copy(tmp_path, FIX / "styleheader_fmtS.json"),
+               "CalgaryStyleHeader", "Sizes", registry, config)
+    service.bulk_multi_apply(
+        [str(p)], "CalgaryStyleHeader",
+        [{"section": "Sizes", "type": "list", "field": "size", "values": ["MED"]}],
+        registry, config, backup=False)
+    service.bulk_op_apply([str(p)], "CalgaryStyleHeader", "Sizes",
+                          {"type": "add", "count": 2}, registry, config,
+                          backup=False)
+    rows = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["sizes"]
+    assert len(rows) == 2, "the marker should still have been replaced"
+    assert all(r["quantity"] == "100" for r in rows), "rows should be seeded"
+
+
+def test_a_SINGLE_field_section_is_not_skipped(tmp_path, registry, config):
+    """`CalgaryStyleHeader.Lanes` has one field, so setting it FULLY populates
+    the row — there is nothing left empty and none of the harm applies.
+
+    Skipping it would take back the `lane` editing that was asked for and
+    built, so the rule stops short of a one-field section deliberately. This is
+    the boundary between two of the user's requests and is easy to lose.
+    """
+    p = _copy(tmp_path, FIX / "styleheader_fmtS.json")
+    assert _has_data(p, "Lanes", registry, config) is False   # blank as shipped
+
+    res = service.bulk_multi_apply(
+        [str(p)], "CalgaryStyleHeader",
+        [{"section": "Lanes", "type": "list", "field": "lane",
+          "values": ["LANE0007"]}], registry, config, backup=False)
+    assert res["results"][0]["status"] == "changed", res["results"][0]
+    lanes = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["lanes"]
+    assert lanes == [{"lane": "LANE0007"}], "a one-field row is complete"
+
+
+def test_the_exemption_is_about_FIELD_COUNT_not_the_section_name(registry):
+    """Stated as a rule, not a special case for `Lanes`: any single-field
+    section qualifies, and `StyleHeader.Lane` on the fixed-width side is the
+    other one today."""
+    singles = [(lay, sec.name)
+               for lay in ("CalgaryStyleHeader", "StyleHeader")
+               for sec in registry[lay].sections[1:] if len(sec.fields) == 1]
+    assert ("CalgaryStyleHeader", "Lanes") in singles
+    assert ("StyleHeader", "Lane") in singles
+
+
+def test_a_two_field_section_IS_still_skipped(tmp_path, registry, config):
+    """The contrast that makes the rule meaningful — `Sizes` has `size` and
+    `quantity`, so setting one leaves the other empty."""
+    p = _empty(_copy(tmp_path, FIX / "styleheader_fmtS.json"),
+               "CalgaryStyleHeader", "Sizes", registry, config)
+    res = service.bulk_multi_apply(
+        [str(p)], "CalgaryStyleHeader",
+        [{"section": "Sizes", "type": "list", "field": "size",
+          "values": ["MED"]}], registry, config, backup=False)
+    assert res["results"][0]["fields"][0]["status"] == "skipped"

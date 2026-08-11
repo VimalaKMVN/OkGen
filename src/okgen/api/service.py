@@ -1267,6 +1267,26 @@ def _is_blank_row(rec, hidden: set) -> bool:
     return True
 
 
+def _skip_field_on_dataless(okf, sec, config) -> bool:
+    """Should a FIELD-VALUE op on this section be skipped as pointless?
+
+    Only when the section holds no data AND has more than one field. The harm
+    being prevented is a PARTIALLY populated row — a `size` with no `quantity`
+    — which is worse than nothing: it flips the section to "has data", so the
+    blank marker stops being replaced when rows are added (D52), and it becomes
+    the CLONE TEMPLATE (D53), so every row added later inherits its emptiness
+    instead of the seed.
+
+    A section with a SINGLE field cannot be partially populated: setting it
+    fully specifies the row. `CalgaryStyleHeader.Lanes` and `StyleHeader.Lane`
+    are the two, and skipping them would take away the `lane` editing that was
+    asked for and built — so the rule stops short of them deliberately.
+    """
+    if len(sec.fields) < 2:
+        return False
+    return not _section_has_data(okf, sec, config)
+
+
 def _section_has_data(okf, sec, config: Config = None) -> bool:
     """Does this section hold any REAL row?
 
@@ -3097,6 +3117,30 @@ def _apply_bulk_op_raw(okf, name, layout_name, section_name, op, config):
         fdef = next((x for x in sec.fields if x.name == field), None)
         if fdef is None:
             return {"name": name, "status": "missing_field"}
+        # A section holding NO DATA takes a field value nowhere useful: with no
+        # rows the write lands nowhere, and with only a blank placeholder row
+        # (D45's marker, or one a vendor shipped) it lands on that row and
+        # leaves a half-filled one. That row is worse than nothing — it flips
+        # the section to "has data", so the marker is no longer REPLACED when
+        # rows are added (D52), and it becomes the CLONE TEMPLATE (D53), so
+        # every row added afterwards inherits its emptiness instead of the
+        # seed. One field written this way poisons the whole section.
+        #
+        # Skipped per FIELD, never per file: a section this file has no data in
+        # is a field that does not APPLY, not a failure, and the file's other
+        # edits must still land — the rule already used for a missing section.
+        # ROW ops (add/keep) are deliberately not guarded here: adding rows is
+        # the remedy, and it must keep working on exactly these sections.
+        if _skip_field_on_dataless(okf, sec, config):
+            kind = "empty" if not recs else "blank"
+            return {"name": name, "status": "no_data", "kind": kind,
+                    # A ready sentence, not just a token: a status is a value
+                    # the code branches on and must never reach the screen.
+                    "detail": (f"{section_name} has "
+                               + ("no rows" if kind == "empty"
+                                  else "no rows with data")
+                               + f" — {field} skipped. Add rows to "
+                                 f"{section_name} first, then set its fields.")}
         # A temporal field's typed value is normalized to its format first.
         if t == "set" and config is not None and config.date_format(layout_name, field):
             try:
@@ -3414,6 +3458,10 @@ def _bulk_multi_eval(sp: Path, layout_name, ops, registry, config):
         if status == "no_section":
             entry.update(status="skipped",
                          error=f"no {section} rows in this file — field skipped")
+            fields.append(entry)
+            continue
+        if status == "no_data":
+            entry.update(status="skipped", error=r.get("detail"))
             fields.append(entry)
             continue
         if status in ("error", "too_wide", "missing_field"):
@@ -4409,15 +4457,23 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         # left with a blank marker row takes it onto that row and yields a
         # half-filled row. Both used to happen in silence, with the run still
         # reporting success. Recorded per file so the caller can say so.
-        if no_data is not None and not _section_has_data(okf, sec, config):
-            # WHICH kind of nothing, because the outcomes differ: with no rows
-            # the value is not written anywhere, with a blank placeholder row
-            # it IS written — onto that row, leaving every other field empty.
-            kind = ("empty" if not any(r.section is sec for r in okf.records)
-                    else "blank")
-            entry = no_data.setdefault(df["section"], {"kind": kind, "fields": set()})
-            entry["fields"].add(df["name"])
-            entry["kind"] = kind
+        # A section with no DATA is SKIPPED, not written into. Writing onto a
+        # blank placeholder row leaves a half-filled one, and that row is worse
+        # than nothing: it flips the section to "has data", so the marker is no
+        # longer replaced when rows are added (D52), and it becomes the CLONE
+        # TEMPLATE (D53) — every row added afterwards inherits its emptiness
+        # instead of the seed. One field written this way poisons the section.
+        # Skipping also makes the two engines agree: a fixed-width section with
+        # no rows already wrote nothing.
+        if _skip_field_on_dataless(okf, sec, config):
+            if no_data is not None:
+                kind = ("empty" if not any(r.section is sec for r in okf.records)
+                        else "blank")
+                entry = no_data.setdefault(df["section"],
+                                           {"kind": kind, "fields": set()})
+                entry["fields"].add(df["name"])
+                entry["kind"] = kind
+            continue
         fm = config is not None and config.zero_fill(okf.layout.name, df["section"])
         base = config is not None and config.is_literal(okf.layout.name, df["name"])
         for r in (r for r in okf.records if r.section is sec):
@@ -4530,13 +4586,10 @@ def _no_data_notes(no_data: dict) -> list:
         entry = no_data[section]
         names = sorted(entry["fields"])
         fields = ", ".join(names)
-        if entry["kind"] == "empty":
-            msg = (f"{section} has no rows — {fields} was not written to any "
-                   f"file. Set a row count for {section} to create rows.")
-        else:
-            msg = (f"{section} has only a blank placeholder row — {fields} was "
-                   f"written onto it, leaving its other fields empty. Set a row "
-                   f"count for {section} to create real rows.")
+        what = "no rows" if entry["kind"] == "empty" else "no rows with data"
+        msg = (f"{section} has {what} — {fields} was SKIPPED, not written. "
+               f"Set a row count for {section} to create rows, then the value "
+               f"will land on them.")
         out.append({"section": section, "fields": names,
                     "kind": entry["kind"], "message": msg})
     return out
