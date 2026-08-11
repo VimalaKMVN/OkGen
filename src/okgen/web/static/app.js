@@ -513,6 +513,25 @@ function closeAllPanels(keep) {
 // one — the rows differ (a values box is primary here, and there are no row
 // counts), and parameterising a working panel was the riskier move. They can
 // drift; see PLAN §6.
+// The sentence a panel shows when a section holds no rows with data. A field
+// value aimed at one is SKIPPED (D75), and nothing in the panel could say so
+// until `bulk_scope` began carrying the counts — so the user found out only
+// after applying to the whole selection.
+//
+// Worded from the COUNT, because blankness is per FILE: a section can be blank
+// in some of a selection and full in the rest, and one ticked field applies to
+// all of them.
+function noDataNote(sec) {
+  if (!sec || sec.no_data_files === undefined || !sec.no_data_files) return null;
+  const n = sec.no_data_files;
+  const total = sec.files || n;
+  const scope = n >= total ? (total === 1 ? "this file" : `all ${total} files`)
+                           : `${n} of ${total} files`;
+  return `⚠ ${sec.name} has no rows with data in ${scope}. `
+       + `A value here is skipped for ${n === 1 && total === 1 ? "it" : "those"} `
+       + `— add rows first (Bulk Edit — rows & sequences → Add rows).`;
+}
+
 function renderBulkFieldsPanel(scope) {
   const panel = $("#bulkPanel");
   panel.innerHTML = "";
@@ -652,8 +671,11 @@ function renderBulkFieldsPanel(scope) {
     groups.appendChild(group("Header fields", "Header",
                              scope.header_fields[selectedLayout] || []));
     (scope.detail_sections[selectedLayout] || []).forEach((d) => {
-      groups.appendChild(group(`“${d.name}” row fields`, d.name, d.fields || [],
-                               "applies to every row"));
+      const box = group(`“${d.name}” row fields`, d.name, d.fields || [],
+                        "applies to every row");
+      const note = noDataNote(d);
+      if (note) box.appendChild(el("div", "bulk-nodata-note", note));
+      groups.appendChild(box);
     });
     renderSources();
     reset();
@@ -852,6 +874,10 @@ function renderBulkPanel(scope) {
   // ---- Dynamic inputs (field/value or count) ----
   const row2 = el("div", "bulk-edit-row");
   panel.appendChild(row2);
+  // Sits under the Section/Operation row and is refilled by rebuildOps, so it
+  // always describes the section currently chosen.
+  const noteBox = el("div", "bulk-nodata-host");
+  panel.appendChild(noteBox);
 
   // A roll-up header field (config/rollup_fields.yaml) is not written as typed:
   // where the detail section HAS rows the sum wins, so the value only lands on
@@ -1009,6 +1035,13 @@ function renderBulkPanel(scope) {
     const sec = curSection();
     opSel.innerHTML = "";
     opsForSection(sec).forEach((o) => opSel.appendChild(new Option(o.t, o.v)));
+    // Follows the SECTION dropdown, so switching sections re-answers it.
+    // Shown here as well as in the field-values panel because a field VALUE op
+    // (set / list / random) lives in both, and it is the value ops that get
+    // skipped — the row ops right beside them are the remedy and still work.
+    noteBox.innerHTML = "";
+    const msg = noDataNote(sec);
+    if (msg) noteBox.appendChild(el("div", "bulk-nodata-note", msg));
     rebuildInputs();
   }
   function rebuildSections() {

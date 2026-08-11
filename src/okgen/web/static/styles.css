@@ -837,6 +837,21 @@ input.fval[role="combobox"] { padding-right: 22px; }
   border-radius: 2px;
 }
 
+/* Bulk Edit: a section that holds no rows with data. Same amber voice as the
+   Generate panel's note and the roll-up warning — it never blocks, because the
+   row ops beside it are the remedy. */
+.bulk-nodata-note {
+  margin: 4px 0 2px;
+  padding: 4px 7px;
+  border-left: 3px solid #d7ba7d;
+  background: rgba(215, 186, 125, 0.10);
+  color: #d7ba7d;
+  font-size: 11px;
+  line-height: 1.45;
+  border-radius: 2px;
+}
+.bulk-nodata-host:empty { display: none; }
+
 /* ----- Send run report (the log, shown in-app) ----- */
 .send-report-text {
   margin: 0; padding: 12px 14px;

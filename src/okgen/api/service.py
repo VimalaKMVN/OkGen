@@ -2842,6 +2842,11 @@ def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
     files, layouts = [], {}
     sources: Dict[str, Dict[str, int]] = {}       # layout -> {SCAN: n, WMS: n}
     key_sources: Dict[str, Dict[str, set]] = {}   # layout -> {key field: {sources}}
+    # layout -> section -> how many of THIS layout's files hold no data there.
+    # Per FILE, because a section can be blank in some of a selection and full
+    # in others, and one ticked field applies to all of them — the same reason
+    # the key is resolved per file rather than per layout.
+    no_data: Dict[str, Dict[str, int]] = {}
     for p in paths or []:
         sp = Path(p)
         layout = chain = source = None
@@ -2865,6 +2870,21 @@ def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
             key = config.unique_field(layout)
             if key:
                 key_sources.setdefault(layout, {}).setdefault(key, set())
+        if layout:
+            # Whether each detail section actually holds rows with data. A
+            # field set on one that does not is SKIPPED (D75), and until now
+            # the panel had no way to say so before the user applied it.
+            # Measured at ~57ms per 100 files, so every file is read rather
+            # than a sample — a partial answer here would be worse than none.
+            try:
+                fokf = parse_okfile(sp, registry=registry)
+                for fsec in fokf.layout.sections[1:]:
+                    if not _section_has_data(fokf, fsec, config):
+                        no_data.setdefault(layout, {})
+                        no_data[layout][fsec.name] = \
+                            no_data[layout].get(fsec.name, 0) + 1
+            except Exception:                     # noqa: BLE001 — unreadable
+                pass
         files.append({"path": str(sp), "name": sp.name, "layout": layout,
                       "chain": chain, "source": source})
         if layout:
@@ -2881,6 +2901,13 @@ def bulk_scope(paths, registry: LayoutRegistry, config: Config) -> dict:
             header_fields[name] = _header_fields_for_layout(
                 lay, config, _key_locks(name, key_sources.get(name), config))
             detail_sections[name] = _detail_sections_for_layout(lay, config)
+            for sec in detail_sections[name]:
+                blank = no_data.get(name, {}).get(sec["name"], 0)
+                sec["no_data_files"] = blank
+                sec["files"] = layouts[name]
+                # False only when EVERY file of this layout lacks data there;
+                # the panel words the partial case with the count.
+                sec["has_data"] = blank < layouts[name]
             # Which header fields are roll-ups (config/rollup_fields.yaml), so
             # the panel can warn the moment one is picked rather than after the
             # user has built the whole operation. Nothing else can tell it: a

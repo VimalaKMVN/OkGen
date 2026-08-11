@@ -487,3 +487,91 @@ def test_a_two_field_section_IS_still_skipped(tmp_path, registry, config):
         [{"section": "Sizes", "type": "list", "field": "size",
           "values": ["MED"]}], registry, config, backup=False)
     assert res["results"][0]["fields"][0]["status"] == "skipped"
+
+
+# ------------------------------------------- BULK gets the up-front warning
+
+# Generate warned in its panel from v0.113.0; bulk skipped correctly but said
+# nothing until AFTER the apply, because `bulk_scope` carried no such fact.
+# Blankness here is per FILE across the selection — a section can be blank in
+# some files and full in others, and one ticked field applies to all of them —
+# so the scope carries a COUNT, not a yes/no.
+
+def _sel(tmp_path, n, blank_first=0, registry=None, config=None):
+    paths = []
+    for i in range(n):
+        p = _copy(tmp_path, FIX / "styleheader_fmtS.json", f"sel{i}.json")
+        if i < blank_first:
+            _empty(p, "CalgaryStyleHeader", "Sizes", registry, config)
+        paths.append(str(p))
+    return paths
+
+
+def test_bulk_scope_reports_no_data_per_section(tmp_path, registry, config):
+    paths = _sel(tmp_path, 4, blank_first=2, registry=registry, config=config)
+    scope = service.bulk_scope(paths, registry, config)
+    sizes = next(s for s in scope["detail_sections"]["CalgaryStyleHeader"]
+                 if s["name"] == "Sizes")
+    assert sizes["no_data_files"] == 2
+    assert sizes["files"] == 4
+    assert sizes["has_data"] is True     # true of at least one file
+
+
+def test_bulk_scope_counts_per_FILE_not_per_layout(tmp_path, registry, config):
+    """The whole reason it is a count: 0, some, or all of a selection."""
+    for blank, expected in ((0, 0), (1, 1), (3, 3)):
+        paths = _sel(tmp_path / f"b{blank}", 3, blank_first=blank,
+                     registry=registry, config=config)
+        scope = service.bulk_scope(paths, registry, config)
+        sizes = next(s for s in scope["detail_sections"]["CalgaryStyleHeader"]
+                     if s["name"] == "Sizes")
+        assert sizes["no_data_files"] == expected
+        assert sizes["has_data"] is (expected < 3)
+
+
+def test_bulk_scope_flags_a_section_blank_in_EVERY_file(tmp_path, registry, config):
+    """`Lanes` ships blank, so a whole selection of untouched files has none."""
+    paths = _sel(tmp_path, 3, registry=registry, config=config)
+    scope = service.bulk_scope(paths, registry, config)
+    lanes = next(s for s in scope["detail_sections"]["CalgaryStyleHeader"]
+                 if s["name"] == "Lanes")
+    assert lanes["no_data_files"] == 3 and lanes["files"] == 3
+    assert lanes["has_data"] is False
+
+
+def test_a_section_with_data_everywhere_is_not_flagged(tmp_path, registry, config):
+    paths = _sel(tmp_path, 3, registry=registry, config=config)
+    scope = service.bulk_scope(paths, registry, config)
+    details = next(s for s in scope["detail_sections"]["CalgaryStyleHeader"]
+                   if s["name"] == "Details")
+    assert details["no_data_files"] == 0 and details["has_data"] is True
+
+
+def test_an_OK_layout_is_counted_the_same_way(tmp_path, registry, config):
+    """The predicate is engine-agnostic — `DistLabels` ships `TSticker` empty."""
+    paths = [str(_copy(tmp_path, DATA_DIR / "DistLabels.OK", f"d{i}.OK"))
+             for i in range(2)]
+    scope = service.bulk_scope(paths, registry, config)
+    ts = next(s for s in scope["detail_sections"]["DistLabels"]
+              if s["name"] == "TSticker")
+    assert ts["no_data_files"] == 2 and ts["has_data"] is False
+    store = next(s for s in scope["detail_sections"]["DistLabels"]
+                 if s["name"] == "Store")
+    assert store["no_data_files"] == 0
+
+
+def test_the_warning_agrees_with_what_the_apply_actually_does(tmp_path, registry, config):
+    """The point of a warning: the count it shows must match the number of
+    files the apply then skips, or it is worse than silence."""
+    paths = _sel(tmp_path, 4, blank_first=2, registry=registry, config=config)
+    scope = service.bulk_scope(paths, registry, config)
+    sizes = next(s for s in scope["detail_sections"]["CalgaryStyleHeader"]
+                 if s["name"] == "Sizes")
+
+    res = service.bulk_multi_apply(
+        paths, "CalgaryStyleHeader",
+        [{"section": "Sizes", "type": "list", "field": "size",
+          "values": ["MED"]}], registry, config, backup=False)
+    skipped = sum(1 for r in res["results"]
+                  if r["fields"][0]["status"] == "skipped")
+    assert skipped == sizes["no_data_files"] == 2
