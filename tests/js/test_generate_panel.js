@@ -57,6 +57,15 @@ const scope = {
     { name: "Lane", rows: 10, max_records: 10, fields: [{ name: "lane1", size: 4 }] },
     { name: "Size", rows: 4, max_records: null, fields: [{ name: "qty", size: 5 }] },
     { name: "NoNumeric", rows: 0, max_records: null, fields: [] },
+    // A section with NO DATA, in both shapes the server reports:
+    //  * `Blank` — a JSON section left with one blank marker row, so `rows: 1`
+    //    reads exactly like a section holding one real row. This is the case
+    //    that made the whole thing invisible.
+    //  * `Gone`  — a fixed-width section with no rows at all.
+    { name: "Blank", rows: 1, max_records: null, has_data: false,
+      no_data_templates: 1, fields: [{ name: "size", size: 6 }] },
+    { name: "Gone", rows: 0, max_records: null, has_data: false,
+      no_data_templates: 1, fields: [{ name: "packs", size: 5 }] },
   ],
   palette: { derived: ["brand", "layout"], header_fields: ["chain", "dept"], custom: {} },
   template_count: 1,
@@ -76,8 +85,31 @@ const buttons = all.filter((e) => e.tagName === "BUTTON");
 const labels = buttons.map((b) => b.textContent);
 const gen = buttons.filter((b) => /generate/i.test(b.textContent));
 
+const noteOf = (name) => {
+  const box = all.filter((e) => e.dataset && e.dataset.section === name)[0];
+  return (box && descendants(box)
+    .filter((e) => (e.className || "").includes("gen-nodata-note"))[0]) || null;
+};
+// Reading `.textContent` off a missing note would THROW and abort the run,
+// hiding every check after it — the truncated-run trap. A missing note must
+// FAIL the check it belongs to and nothing else.
+const noteText = (name) => (noteOf(name) || {}).textContent || "";
+
 const checks = [
   ["panel rendered something", all.length > 10],
+  // A section holding no data is warned about BEFORE the run — the whole point
+  // is not finding out after 200 files are written. `rows: 1` cannot carry
+  // this: an emptied JSON section reports one row just like a real one does.
+  ["a section with no data is flagged in the panel", !!noteOf("Blank")],
+  ["...and so is one with no rows at all", !!noteOf("Gone")],
+  ["the warning names the section", noteText("Blank").includes("Blank")],
+  ["...and names the remedy the note tells you to use",
+   /row count/i.test(noteText("Blank"))],
+  ["a section WITH data is not flagged", !noteOf("Lane") && !noteOf("Size")],
+  ["the warning does not disable the field picker",
+   (() => { const box = all.filter((e) => e.dataset && e.dataset.section === "Blank")[0];
+            return !!box && descendants(box)
+              .some((e) => e.tagName === "INPUT" && !e.disabled); })()],
   ["a Generate button exists", gen.length >= 1],
   ["Generate has a click handler", gen.some((b) => (b._handlers.click || []).length > 0)],
   ["sticky action bar rendered", all.some((e) => e.classList.contains("gen-actions"))],
@@ -86,8 +118,12 @@ const checks = [
     panel.children.findIndex((e) => e.classList.contains("gen-results")) <
     panel.children.findIndex((e) => e.classList.contains("gen-actions"))],
   ["build marker present", all.some((e) => /build v/.test(e.textContent))],
-  ["a section with no numeric fields still gets .gen-detail",
-    all.filter((e) => e.classList.contains("gen-detail")).length === 3],
+  // Every section gets a picker box, including one with no numeric fields and
+  // one holding no data — the count follows `scope.sections` rather than a
+  // literal, so adding a fixture section cannot silently break this.
+  ["every section gets a .gen-detail box",
+    all.filter((e) => e.classList.contains("gen-detail")).length
+      === scope.sections.length],
   // A locked field is shown so it cannot read as missing, greyed, saying why —
   // and its checkbox is disabled so it can never reach the spec.
   ["a locked field is shown, not omitted",

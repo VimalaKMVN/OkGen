@@ -822,6 +822,21 @@ input.fval[role="combobox"] { padding-right: 22px; }
 .form-badge-name { color: #e3c07e; border: 1px solid #8a6d33; }
 .form-badge-unknown { color: #e39a9a; border: 1px solid #8a3d3d; }
 
+
+/* Volume Generate: a section that holds no data. Amber = "this will not do
+   what it looks like", the same voice as the roll-up warning — it never
+   blocks, because writing into a placeholder row is legitimate. */
+.gen-nodata-note {
+  margin: 4px 0 2px 22px;
+  padding: 4px 7px;
+  border-left: 3px solid #d7ba7d;
+  background: rgba(215, 186, 125, 0.10);
+  color: #d7ba7d;
+  font-size: 11px;
+  line-height: 1.45;
+  border-radius: 2px;
+}
+
 /* ----- Send run report (the log, shown in-app) ----- */
 .send-report-text {
   margin: 0; padding: 12px 14px;

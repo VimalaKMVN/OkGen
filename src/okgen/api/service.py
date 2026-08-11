@@ -1267,6 +1267,40 @@ def _is_blank_row(rec, hidden: set) -> bool:
     return True
 
 
+def _section_has_data(okf, sec, config: Config = None) -> bool:
+    """Does this section hold any REAL row?
+
+    Three ways a section can hold none, one per engine shape, and a user asking
+    to vary a field in one has asked for something that cannot happen:
+
+    * **no rows at all** — a fixed-width section that is empty (`DistLabels`
+      ships `TSticker` that way) or was emptied. A value written here lands
+      NOWHERE: generation reports success and the field never appears.
+    * **every row blank** — a JSON section left with D45's tag-carrying marker,
+      or one a vendor shipped with a placeholder row. The two are the same
+      bytes and are deliberately not distinguished (D52); a value here lands on
+      the blank row and produces a half-filled one.
+    * **every row filler** — a zero-filled section (Preticket `Lane`) whose
+      trailing all-zero rows are structural padding. Generation already skips
+      these on purpose, so a value here reaches only the real rows — and if
+      there are none, nothing.
+
+    Deliberately all-or-nothing, matching `_json_blank_rows_to_replace`: one
+    blank row among real ones is the user's own data and means the section
+    HAS data.
+    """
+    rows = [r for r in okf.records if r.section is sec]
+    if not rows:
+        return False
+    if _json_blank_rows_to_replace(okf, sec, config):
+        return False
+    if config is not None and config.zero_fill(okf.layout.name, sec.name):
+        hidden = config.hidden_fields(okf.layout.name)
+        if all(_is_blank_row(r, hidden) for r in rows):
+            return False
+    return True
+
+
 def _json_blank_rows_to_replace(okf, sec, config: Config = None) -> list:
     """The rows a JSON section should shed when its first real row is added.
 
@@ -4089,6 +4123,21 @@ def generate_scope(paths, registry: LayoutRegistry, config: Config,
             out.append(entry)
         return out
 
+    # Which sections hold no DATA, counted across EVERY template — not just
+    # the first. `sections` below describes tpaths[0], but generation draws a
+    # RANDOM template per file, so a section blank in one and populated in
+    # another must still be reported. Same lesson as resolving the key per file
+    # rather than per layout: this is a property of a FILE.
+    no_data = {}
+    for tp in tpaths:
+        try:
+            tokf = parse_okfile(tp, registry=registry)
+        except Exception:                        # noqa: BLE001 — unreadable
+            continue
+        for tsec in tokf.layout.sections[1:]:
+            if not _section_has_data(tokf, tsec, config):
+                no_data[tsec.name] = no_data.get(tsec.name, 0) + 1
+
     sections = []
     for sec in view["sections"]:
         if sec["is_header"]:
@@ -4097,6 +4146,11 @@ def generate_scope(paths, registry: LayoutRegistry, config: Config,
             "name": sec["name"],
             "rows": len(sec["records"]),
             "max_records": sec["max_records"],
+            # `rows` alone cannot answer "is this section empty?": an emptied
+            # JSON section still holds ONE blank marker row, so it reports
+            # rows: 1 exactly like a section with one real row.
+            "no_data_templates": no_data.get(sec["name"], 0),
+            "has_data": no_data.get(sec["name"], 0) < len(tpaths),
             "fields": numeric_fields(sec["fields"]),
         })
 
@@ -4269,7 +4323,8 @@ def _set_row_count(okf: OkFile, config: Config, section_name: str, target: int) 
 
 def _generate_one(okf: OkFile, spec: dict, config: Config,
                   key_field: str, key_size: int, key_int: int,
-                  key_parts: "Optional[KeyParts]" = None) -> None:
+                  key_parts: "Optional[KeyParts]" = None,
+                  no_data: "Optional[dict]" = None) -> None:
     """Apply one generated file's variations to a freshly parsed template."""
     # 1. row counts first — new rows then get their own random values
     for rc in spec.get("row_counts") or []:
@@ -4349,6 +4404,20 @@ def _generate_one(okf: OkFile, spec: dict, config: Config,
         if f is None or (not f.size and not dfmt):
             continue
         sec = next(s for s in okf.layout.sections if s.name == df["section"])
+        # A section with no DATA cannot take the value the way the user meant:
+        # a fixed-width section with no rows takes it NOWHERE, and a JSON one
+        # left with a blank marker row takes it onto that row and yields a
+        # half-filled row. Both used to happen in silence, with the run still
+        # reporting success. Recorded per file so the caller can say so.
+        if no_data is not None and not _section_has_data(okf, sec, config):
+            # WHICH kind of nothing, because the outcomes differ: with no rows
+            # the value is not written anywhere, with a blank placeholder row
+            # it IS written — onto that row, leaving every other field empty.
+            kind = ("empty" if not any(r.section is sec for r in okf.records)
+                    else "blank")
+            entry = no_data.setdefault(df["section"], {"kind": kind, "fields": set()})
+            entry["fields"].add(df["name"])
+            entry["kind"] = kind
         fm = config is not None and config.zero_fill(okf.layout.name, df["section"])
         base = config is not None and config.is_literal(okf.layout.name, df["name"])
         for r in (r for r in okf.records if r.section is sec):
@@ -4397,6 +4466,10 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
             maxv[key] = max(maxv.get(key, -1), hi)
     next_key: Dict[tuple, int] = {}     # (layout, prefix, suffix) -> next int
 
+    # section -> {field names} the user asked to vary where the file held no
+    # data. Accumulated across every generated file so one note covers the run.
+    no_data: Dict[str, set] = {}
+
     parts = spec.get("name_parts") or [{"type": "token", "name": "orig"},
                                        {"type": "token", "name": "seq"}]
     separator = spec.get("separator", "_")
@@ -4413,7 +4486,8 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
         next_key[space] += 1
 
         okf = parse_okfile(src, layout=layout, registry=registry)
-        _generate_one(okf, spec, config, key_field, key_size, k, key_parts=key_parts)
+        _generate_one(okf, spec, config, key_field, key_size, k, key_parts=key_parts,
+                      no_data=no_data)
         _apply_detail_fill(okf, config)          # keep Preticket-style filler rows
         _apply_json_empty_rows(okf, config)
         _apply_rollups(okf, config)     # header totals follow their detail rows
@@ -4437,7 +4511,35 @@ def _generate_batch(paths, spec: dict, registry, config, count: int, dest_folder
             _atomic_write_okf(okf, Path(dest_folder) / name, backup=False)
         yield name, okf, {"key": _format_key(key_parts.prefix, k, key_size,
                                              key_parts.suffix, key_parts.width)
-                          if key_size else "", "template": src.name}
+                          if key_size else "", "template": src.name,
+                          # The SAME dict object each time: it is still filling
+                          # while the generator runs, and holds the whole run
+                          # once the caller has consumed it.
+                          "_no_data": no_data}
+
+
+def _no_data_notes(no_data: dict) -> list:
+    """Turn the per-run record into sentences the panel can show.
+
+    Says what HAPPENED, not what the value was — "no rows, so the value was
+    not written" and "written onto a blank placeholder row" are different
+    outcomes and a user needs to tell them apart. Both used to be silent.
+    """
+    out = []
+    for section in sorted(no_data):
+        entry = no_data[section]
+        names = sorted(entry["fields"])
+        fields = ", ".join(names)
+        if entry["kind"] == "empty":
+            msg = (f"{section} has no rows — {fields} was not written to any "
+                   f"file. Set a row count for {section} to create rows.")
+        else:
+            msg = (f"{section} has only a blank placeholder row — {fields} was "
+                   f"written onto it, leaving its other fields empty. Set a row "
+                   f"count for {section} to create real rows.")
+        out.append({"section": section, "fields": names,
+                    "kind": entry["kind"], "message": msg})
+    return out
 
 
 def generate_preview(paths, spec, registry: LayoutRegistry, config: Config,
@@ -4452,9 +4554,11 @@ def generate_preview(paths, spec, registry: LayoutRegistry, config: Config,
     tpaths = _as_paths(paths)
     layout_name = _templates_layout(tpaths, registry, config)
     rows = []
+    no_data_seen: dict = {}
     for name, okf, note in _generate_batch(tpaths, spec, registry, config,
                                            min(sample, count), write=False,
                                            source=source):
+        no_data_seen = note.get("_no_data") or no_data_seen
         header = okf.records[0] if okf.records else None
         shown = {}
         for hf in spec.get("header_fields") or []:
@@ -4483,6 +4587,7 @@ def generate_preview(paths, spec, registry: LayoutRegistry, config: Config,
         "folder": str(_generate_folder(tpaths, count, layout_name, spec.get("dest"), dry=True)),
         "sample": rows,
         "truncated": count > len(rows),
+        "no_data": _no_data_notes(no_data_seen),
     }
 
 
@@ -4511,16 +4616,21 @@ def generate_apply(paths, spec, registry: LayoutRegistry, config: Config,
     fs.mkdir(folder, parents=True, exist_ok=True)
 
     written, errors = [], []
+    no_data_seen: dict = {}
     for name, _okf, note in _generate_batch(tpaths, spec, registry, config, count,
                                             dest_folder=folder, write=True,
                                             source=source):
         written.append({"name": name, "key": note["key"]})
+        no_data_seen = note.get("_no_data") or no_data_seen
     return {
         "folder": str(folder),
         "written": len(written),
         "files": written[:50],          # a sample for the results table
         "errors": errors,
         "templates": [p.name for p in tpaths],
+        # A run that could not apply a field the user asked for must SAY so.
+        # It reported `written: N` and nothing else, which reads as complete.
+        "no_data": _no_data_notes(no_data_seen),
     }
 
 

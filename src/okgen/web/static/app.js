@@ -3750,6 +3750,21 @@ function renderGeneratePanel(panel, paths, scope) {
       `Vary row count (now ${sec.rows}${sec.max_records ? `, max ${sec.max_records}` : ""})`));
     rc.appendChild(lo); rc.appendChild(hi);
     box.insertBefore(rc, box.children[1] || null);
+
+    // A section with no DATA cannot take a field value the way it looks like
+    // it will, and `rows` alone does not reveal that: an emptied JSON section
+    // still holds ONE blank marker row, so it reports `rows: 1` exactly like a
+    // section with one real row. Said up front, because the alternative is
+    // finding out after generating the whole batch.
+    if (sec.has_data === false) {
+      const n = sec.no_data_templates || 0;
+      const many = (scope.template_count || 1) > 1;
+      box.appendChild(el("div", "gen-nodata-note",
+        `⚠ ${sec.name} has no rows with data`
+        + (many ? ` in ${n} of ${scope.template_count} templates` : "")
+        + `. A value here lands on a blank placeholder row (or nowhere, if the `
+        + `section is empty) — tick “Vary row count” above to create real rows.`));
+    }
     fieldsWrap.appendChild(box);
   });
   panel.appendChild(fieldsWrap);
@@ -3958,6 +3973,10 @@ function renderGeneratePanel(panel, paths, scope) {
       setStatus(`Generated ${res.written} file(s)`, "ok");
       activityResult(`Generated ${res.written} files`, "ok");
       panelMessage(`Wrote ${res.written} file(s) into ${res.folder}`);
+      // A run that could not apply a field as asked must SAY so. It used to
+      // report only the file count, which reads as "everything you asked for".
+      (res.no_data || []).forEach((n) =>
+        results.appendChild(el("div", "gen-nodata-note", "⚠ " + n.message)));
       await refreshFolder(folderOf(paths[0]));   // the source files' folder
     } catch (e) {
       setStatus("Generate failed: " + e.message, "err");
