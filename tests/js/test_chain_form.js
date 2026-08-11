@@ -73,10 +73,14 @@ try {
 function render(value) {
   const nodes = descendants(api.renderForm(section(value)));
   const cls = (e, c) => (e.className || "").split(/\s+/).includes(c);
-  const menu = nodes.filter((e) => cls(e, "fval-menu"))[0];
+  const input = nodes.filter((e) => e.dataset && e.dataset.field === "chain")[0];
+  // The menu is NOT in the rendered form: it is attached to <body> only while
+  // open, so that `.rec-table`'s overflow cannot clip it. Reached the way the
+  // app itself holds it.
+  const menu = input && input.okgenMenu;
   return {
     nodes,
-    input: nodes.filter((e) => e.dataset && e.dataset.field === "chain")[0],
+    input,
     pick: nodes.filter((e) => cls(e, "fval-pick"))[0],
     // The badge beside the box — NOT the per-row tags inside the menu, which
     // carry the same class. Taking [0] blindly would silently assert a row.
@@ -167,6 +171,51 @@ check("...including values that do not start with what is in the box",
       && visible(r.rows).some((x) => rowText(x) === "Winners"));
 check("the arrow closes it again",
       (fire(r.arrow, "mousedown"), or(r.menu).classList.contains("hidden")));
+
+// --------------------------------------------------------------------------
+// The menu escapes the scrolling table it lives in
+// --------------------------------------------------------------------------
+// A detail-line control sits inside `.rec-table` (`overflow: auto`), and an
+// overflow container CLIPS absolutely-positioned descendants on both axes — so
+// a menu anchored in the cell was cut off wherever it left the table's box,
+// worst on the last rows, which is where a dropdown opens downward. It is
+// therefore attached to <body>, and only while open.
+const esc = render("04");
+check("the menu is NOT in the field while closed",
+      !esc.nodes.some((e) => e === esc.input.okgenMenu));
+fire(esc.arrow, "mousedown");
+check("opening attaches it to <body>, outside every scroller",
+      esc.input.okgenMenu.parentNode === doc.body);
+check("closing takes it back off <body>, so they cannot accumulate",
+      (fire(esc.arrow, "mousedown"), esc.input.okgenMenu.parentNode !== doc.body));
+
+// It is positioned from the box's own rect, so it tracks the field on screen.
+const pos = render("04");
+pos.input._rect = { top: 100, bottom: 124, left: 40, right: 240,
+                    width: 200, height: 24 };
+fire(pos.arrow, "mousedown");
+check("it opens directly under the box", pos.input.okgenMenu.style.top === "124px");
+check("...aligned to its left edge", pos.input.okgenMenu.style.left === "40px");
+check("...and at least as wide as it", pos.input.okgenMenu.style.minWidth === "200px");
+
+// A field near the bottom of the window must not open into nothing.
+const flip = render("04");
+flip.input._rect = { top: 760, bottom: 784, left: 40, right: 240,
+                     width: 200, height: 24 };      // window.innerHeight = 800
+fire(flip.arrow, "mousedown");
+check("a box near the bottom of the window flips the menu ABOVE it",
+      flip.input.okgenMenu.style.bottom === "40px"
+      && !flip.input.okgenMenu.style.top);
+
+// Re-rendering the editor destroys the box without a blur, which would leave
+// the menu orphaned on <body>, outliving the field it belongs to.
+const orphan = render("04");
+fire(orphan.arrow, "mousedown");
+check("an open menu is on <body> before a re-render",
+      orphan.input.okgenMenu.parentNode === doc.body);
+render("Winners");                       // any re-render sweeps strays
+check("re-rendering the editor sweeps it away",
+      orphan.input.okgenMenu.parentNode !== doc.body);
 
 // --------------------------------------------------------------------------
 // What each row SAYS — the code, its brand name, and which form it is
@@ -276,9 +325,12 @@ check("no .fval-pick rule is left in the stylesheet",
 // positioned, it escapes to the corner of the PAGE instead of hanging under
 // the field — a defect no DOM assertion can see, and the exact class that made
 // the `NoSzLines` chip unreadable while its tests passed.
-check("the menu is positioned, and hangs below the field",
-      /\.fval-menu\s*\{[^}]*position:\s*absolute/m.test(CSS)
-      && /\.fval-menu\s*\{[^}]*top:\s*100%/m.test(CSS));
+// FIXED, not absolute: the detail-line control sits inside `.rec-table`, which
+// is `overflow: auto`, and an overflow container clips absolutely-positioned
+// descendants — so an anchored menu was cut off wherever it left the table.
+check("the menu is fixed, so no scrolling ancestor can clip it",
+      /\.fval-menu\s*\{[^}]*position:\s*fixed/m.test(CSS)
+      && !/\.fval-menu\s*\{[^}]*position:\s*absolute/m.test(CSS));
 check("its wrapper is the positioning context, not the flex-column field",
       /\.fval-wrap\s*\{[^}]*position:\s*relative/m.test(CSS));
 check("it stacks above the fields below it",

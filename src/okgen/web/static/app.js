@@ -1956,11 +1956,44 @@ function makeControl(sec, rec, field) {
     const rows = [];
     let active = -1;
 
+    // The menu hangs off <body>, not off the field, and is only there while
+    // OPEN. A detail-line control lives inside `.rec-table`, which is
+    // `overflow: auto` — and an overflow container CLIPS absolutely-positioned
+    // descendants on both axes, so a menu anchored in the cell would be cut off
+    // wherever it extended past the table's box (worst on the last rows, which
+    // is exactly where a dropdown opens downward). `position: fixed` on <body>
+    // is outside every scroller. Removing it on close rather than leaving it
+    // parked is what stops one accumulating per rendered row.
+    const detach = () => {
+      if (menu.parentNode && menu.parentNode.removeChild) {
+        menu.parentNode.removeChild(menu);
+      }
+    };
     const closeMenu = () => {
       menu.classList.add("hidden");
+      detach();
       ctrl.setAttribute("aria-expanded", "false");
       active = -1;
       rows.forEach((r) => r.row.classList.remove("active"));
+    };
+    // Fixed coordinates are read from the box itself, so the menu tracks the
+    // field wherever it is on screen. Flips ABOVE when there is not enough room
+    // below — a field near the bottom of the window would otherwise open into
+    // nothing.
+    const placeMenu = () => {
+      if (!ctrl.getBoundingClientRect) return;
+      const r = ctrl.getBoundingClientRect();
+      const vh = (typeof window !== "undefined" && window.innerHeight) || 0;
+      menu.style.left = r.left + "px";
+      menu.style.minWidth = r.width + "px";
+      const below = vh - r.bottom;
+      if (vh && below < 160 && r.top > below) {
+        menu.style.top = "";
+        menu.style.bottom = (vh - r.top) + "px";
+      } else {
+        menu.style.bottom = "";
+        menu.style.top = r.bottom + "px";
+      }
     };
     const commit = (v) => {
       ctrl.value = v;
@@ -2008,7 +2041,11 @@ function makeControl(sec, rec, field) {
     };
     const openMenu = (filtered) => {
       applyFilter(filtered ? ctrl.value : "");   // ▾ always shows EVERYTHING
+      if (document.body && menu.parentNode !== document.body) {
+        document.body.appendChild(menu);
+      }
       menu.classList.remove("hidden");
+      placeMenu();
       ctrl.setAttribute("aria-expanded", "true");
     };
 
@@ -2090,8 +2127,7 @@ function makeControl(sec, rec, field) {
     // every `.fval[data-section=…]` lookup still finds it through the wrapper.
     const wrap = el("div", "fval-wrap");
     wrap.appendChild(ctrl);
-    wrap.appendChild(arrow);
-    wrap.appendChild(menu);
+    wrap.appendChild(arrow);      // the menu is attached to <body> when opened
     ctrl.okgenWrap = wrap;
     ctrl.okgenMenu = menu;
     ctrl.okgenArrow = arrow;
@@ -2148,7 +2184,21 @@ function makeControl(sec, rec, field) {
   return ctrl;
 }
 
+// A freeform menu lives on <body> while open (see makeControl). Anything that
+// REPLACES the editor — loading another file, switching section, adding a row —
+// destroys the box the menu belongs to without the blur that would close it, so
+// the menu would be orphaned on <body> and outlive its own field. Swept before
+// each render rather than tracked, because the sweep is correct however the
+// menu got there.
+function closeStrayFieldMenus() {
+  const body = document.body;
+  if (!body || !body.querySelectorAll) return;
+  Array.prototype.slice.call(body.querySelectorAll(".fval-menu"))
+    .forEach((m) => { if (m.parentNode) m.parentNode.removeChild(m); });
+}
+
 function renderForm(sec) {
+  closeStrayFieldMenus();
   const grid = el("div", "form-grid");
   const rec = sec.records[0];
   const keyField = state.view && state.view.key_field;
@@ -2198,6 +2248,7 @@ function renderForm(sec) {
 }
 
 function renderTable(sec) {
+  closeStrayFieldMenus();
   const box = el("div", "rec-table");
   const table = el("table");
   const thead = el("thead");

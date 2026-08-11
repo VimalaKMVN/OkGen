@@ -34,6 +34,18 @@ function mkEl(tag = "div") {
       }
       return c;
     },
+    // Detaching was missing entirely, so a control that MOVES a node (the
+    // freeform menu, which lives on <body> only while open) could not be
+    // exercised: the removal silently did nothing and any assertion about the
+    // node being gone would have passed or failed for the wrong reason.
+    removeChild(c) {
+      const i = this.children.indexOf(c);
+      if (i >= 0) { this.children.splice(i, 1); }
+      const j = this.childNodes.indexOf(c);
+      if (j >= 0) { this.childNodes.splice(j, 1); }
+      if (c && c.parentNode === this) c.parentNode = null;
+      return c;
+    },
     // The options of a <select>, as a browser exposes them.
     get options() { return this.children.filter((c) => c.tagName === "OPTION"); },
     // Variadic sibling of appendChild. renderTable builds its row-action cell
@@ -60,7 +72,13 @@ function mkEl(tag = "div") {
         f({ type, target: this, preventDefault() {}, stopPropagation() {} }));
       return true;
     },
-    getBoundingClientRect() { return { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }; },
+    // Settable via `el._rect`: a control that positions itself from its own
+    // box cannot be tested against a rect that is always zeros — every
+    // coordinate would compare equal by accident.
+    getBoundingClientRect() {
+      return this._rect
+          || { top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
+    },
     // Returns the first real match, else a detached element. innerHTML is not
     // parsed by this stub, so code that writes markup then queries into it
     // would otherwise hit null — a harness limitation, not an app bug.
@@ -187,6 +205,7 @@ function install() {
   global.window = {
     addEventListener(ev, fn) { if (ev === "error" || ev === "unhandledrejection") errors.push(fn); },
     matchMedia: () => ({ matches: false, addEventListener() {} }),
+    innerHeight: 800, innerWidth: 1200,
   };
   // A REAL in-memory store, not a no-op: anything the app remembers across
   // calls (the per-folder SCAN/WMS answer, toggles) can't be tested if reads

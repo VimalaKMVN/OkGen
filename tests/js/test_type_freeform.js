@@ -101,7 +101,10 @@ const cls = (e, c) => (e.className || "").split(/\s+/).includes(c);
 const MISSING = { classList: { contains: () => false, remove() {}, add() {} },
                   className: "", textContent: "", value: null, maxLength: null };
 const or = (x) => x || MISSING;
-const menus = nodes.filter((e) => cls(e, "fval-menu"));
+// The menu is attached to <body> only while OPEN (so `.rec-table`'s overflow
+// cannot clip it), so it is never among the rendered nodes. Reached as the app
+// holds it, off the control itself.
+const menus = [typeCtl && typeCtl.okgenMenu].filter(Boolean);
 const rowsOf = (m) => (m ? descendants(m) : []).filter((e) => cls(e, "fval-opt"));
 const textOf = (r) => descendants(r)
   .filter((e) => (e.className || "").includes("fval-opt-text"))
@@ -111,7 +114,7 @@ check("an arrow opens it from inside the box",
       nodes.filter((e) => cls(e, "fval-arrow")).length === 1);
 check("the dropdown offers the layout's own type word",
       rowsOf(menus[0]).some((r) => textOf(r) === "styleHeaders"));
-check("the menu is a SIBLING, never a child of the void <input>",
+check("the menu is never a child of the void <input>",
       typeCtl && !descendants(typeCtl).some((e) => cls(e, "fval-menu")));
 check("no native <datalist> is used — it cannot show a populated field's values",
       !nodes.some((e) => e.tagName === "DATALIST"));
@@ -126,7 +129,8 @@ check("the coded dropdown still offers its labelled values",
 check("a plain field is still a plain text input",
       keyCtl && keyCtl.tagName === "INPUT"
       && (keyCtl.attrs || {}).role !== "combobox");
-check("only the freeform field gets a dropdown", menus.length === 1);
+check("only the freeform field gets a dropdown",
+      menus.length === 1 && !chainCtl.okgenMenu && !keyCtl.okgenMenu);
 
 // --------------------------------------------------------------------------
 // Edits are still collected from it
@@ -164,7 +168,7 @@ const detailNodes = descendants(tableApi.renderTable({
   records: [{ index: 4, values: { type: "1" } }],
 }));
 const dCtl = detailNodes.filter((e) => e.dataset && e.dataset.field === "type")[0];
-const dMenu = detailNodes.filter((e) => cls(e, "fval-menu"))[0];
+const dMenu = dCtl && dCtl.okgenMenu;
 const dArrow = detailNodes.filter((e) => cls(e, "fval-arrow"))[0];
 const dRows = rowsOf(dMenu);
 const dVisible = () => dRows.filter((r) => !r.classList.contains("hidden"));
@@ -174,7 +178,15 @@ check("the detail-line type is a typeable box",
 check("no picker survives in the detail TABLE either",
       !detailNodes.some((e) => e.tagName === "SELECT")
       && !detailNodes.some((e) => cls(e, "fval-pick")));
-check("it has its own arrow and menu inside the cell", !!dArrow && !!dMenu);
+check("it has its own arrow and menu", !!dArrow && !!dMenu);
+
+// THE reason the menu is not anchored in the cell. `.rec-table` is
+// `overflow: auto`, and an overflow container clips absolutely-positioned
+// descendants on both axes — so a menu living in the <td> was cut off wherever
+// it left the table's box, worst on the last row, which is where it opens
+// downward. On <body> with `position: fixed` it is outside every scroller.
+check("the menu is not inside the scrolling table",
+      !detailNodes.some((e) => e === dMenu));
 
 // The regression, on the field where it bit hardest: the box holds "1", and a
 // native datalist would have offered only the option "1".

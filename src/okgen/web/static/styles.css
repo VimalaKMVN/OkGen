@@ -770,12 +770,14 @@ input.dirty, select.dirty { border-color: var(--dirty); background: #3a3422; }
 /* Keep typed text clear of the arrow. */
 input.fval[role="combobox"] { padding-right: 22px; }
 
+/* FIXED, and attached to <body> while open: the detail-line control sits inside
+   `.rec-table`, which is `overflow: auto`, and an overflow container clips
+   absolutely-positioned descendants on both axes — so a menu anchored in the
+   cell was cut off wherever it left the table's box. Coordinates are set from
+   the input's own rect when it opens. */
 .fval-menu {
-  position: absolute;
-  z-index: 40;
-  left: 0;
-  top: 100%;
-  min-width: 100%;
+  position: fixed;
+  z-index: 400;
   max-height: 240px;
   overflow-y: auto;
   background: #252526;
