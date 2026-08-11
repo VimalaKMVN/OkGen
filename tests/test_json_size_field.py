@@ -416,6 +416,8 @@ TEMPORAL = [
     ("CalgaryDistLabel", "Header", "timestamp"),
     ("CalgaryCartonLabel", "Header", "timestamp"),
     ("CalgaryDistLabel", "Stores", "date"),
+    ("CalgaryStyleHeader", "Stores", "date"),
+    ("CalgaryCartonLabel", "Stores", "date"),
 ]
 RFC3339_NANO_Z = "2026-03-04T05:06:07.123456789Z"      # 30
 RFC3339_NANO = "2026-05-01T10:44:53.161740778"         # 29
@@ -481,3 +483,66 @@ def test_the_stamp_is_still_treated_as_a_DATE(config):
     format is what makes `now` and date ranges work (D29/D54)."""
     for layout, _sec, field in TEMPORAL:
         assert config.date_format(layout, field), f"{layout}.{field} lost its format"
+
+
+def test_declaring_a_width_moves_no_VALUE(tmp_path, registry, config):
+    """The user's condition, in the user's words: "leave the values like ' '
+    and null how they were before. Just we are removing ?".
+
+    `CalgaryStyleHeader` store rows carry `" "` and `CalgaryCartonLabel`'s
+    carry `null` — two forms that D34/D39 exist to keep distinct — so the risk
+    of declaring a width on a temporal field is that a save starts COERCING
+    them into a stamp. Open and save every sample with no edits and require the
+    bytes back unchanged.
+    """
+    checked = 0
+    for src in sorted(FIX.glob("*.json")):
+        p = tmp_path / src.name
+        shutil.copy2(src, p)
+        before = p.read_bytes()
+        service.apply_edits(p, [], registry, config=config, backup=False)
+        assert p.read_bytes() == before, f"{src.name} changed on a no-op save"
+        checked += 1
+    assert checked >= 5, "not enough samples exercised"
+
+
+def test_the_blank_and_null_store_dates_survive_specifically(tmp_path, registry, config):
+    """The byte check above would also pass if these files had no date at all;
+    this names the two values so the assertion cannot go vacuous."""
+    seen = {}
+    for src, want in (("styleheader_fmtS.json", " "),
+                      ("cartonlabel_minified.json", None)):
+        p = tmp_path / src
+        shutil.copy2(FIX / src, p)
+        service.apply_edits(p, [], registry, config=config, backup=False)
+        doc = json.loads(p.read_text(encoding="utf-8"))
+        stores = (doc.get("data", {}).get("header", {}) or {}).get("stores") or []
+        assert stores, f"{src} has no store rows to check"
+        assert all(s.get("date") == want for s in stores), (
+            f"{src}: store date is no longer {want!r}")
+        seen[src] = want
+    assert seen == {"styleheader_fmtS.json": " ",
+                    "cartonlabel_minified.json": None}
+
+
+@pytest.mark.parametrize("layout", ["CalgaryStyleHeader", "CalgaryDistLabel",
+                                    "CalgaryCartonLabel"])
+def test_no_calgary_date_or_timestamp_still_reads_as_a_question_mark(
+        registry, config, layout):
+    """`size: null` in the descriptor is what the panel renders as `(?)`."""
+    scope = service.bulk_scope([str(FIX / _SAMPLE_FOR[layout])], registry, config)
+    ts = next(f for f in scope["header_fields"][layout] if f["name"] == "timestamp")
+    dt = next(f for s in scope["detail_sections"][layout] if s["name"] == "Stores"
+              for f in s["fields"] if f["name"] == "date")
+    assert ts["size"] == 30 and dt["size"] == 30
+
+
+def test_the_OK_date_fields_are_untouched(registry):
+    """Six `.OK` layouts also have a field called `date`. It is a plain 8-char
+    fixed-width header field with NO date format — a different thing entirely,
+    and on a fixed-width layout the size IS the format, so widening it would
+    shift every field after it."""
+    for lay in ("StyleHeader", "Preticket", "DistLabels", "EUPreticket",
+                "EUStyleHeader", "EUCartonLabel"):
+        sec = next(s for s in registry[lay].sections if s.name == "Header")
+        assert next(f for f in sec.fields if f.name == "date").size == 8
