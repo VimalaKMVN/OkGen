@@ -603,7 +603,11 @@ function renderBulkFieldsPanel(scope) {
   const reset = () => { applyBtn.disabled = true; previewBox.innerHTML = ""; resultsBox.innerHTML = ""; };
 
   // One row per field: tick it, then fill EITHER the values box or the range.
-  function fieldRow(sectionName, f) {
+  // Appends into `box` rather than returning the row, because a field can carry
+  // a roll-up note and that note is a SIBLING of the row, not a child of it —
+  // the same shape Volume Generate uses. Held inside the row it needed
+  // `flex-wrap: wrap`, which is what let the row itself break across two lines.
+  function fieldRow(sectionName, f, box) {
     const row = el("label", "bulkf-field");
     const cb = el("input", "bulkf-on"); cb.type = "checkbox";
     cb.dataset.section = sectionName;
@@ -617,12 +621,18 @@ function renderBulkFieldsPanel(scope) {
                        f.date ? `${f.name} (date)` : `${f.name} (${f.size != null ? f.size : "?"})`));
     const isDate = !!f.date;
     const vals = el("input", "bulkf-vals"); vals.type = "text";
-    vals.placeholder = isDate ? "2024-06-30  (or a list)"
-                              : "value, or 10,20,30   (' ' = blank)";
+    // Short placeholder, full meaning in the tooltip — the box is Volume
+    // Generate's width now, and a long hint would simply be clipped there.
+    vals.placeholder = isDate ? "2024-06-30" : "value or list";
+    vals.title = isDate
+      ? "One date sets it on every file; a comma list gives each file a random pick."
+      : "One value sets it on every file; a comma list (10,20,30) gives each file "
+        + "(or row) a random pick. Use ' ' for a blank value.";
     const mn = el("input", "bulkf-min"); mn.type = "text";
     const mx = el("input", "bulkf-max"); mx.type = "text";
-    mn.placeholder = isDate ? "from 2024-01-01" : "min";
-    mx.placeholder = isDate ? "to 2024-12-31" : "max";
+    mn.placeholder = isDate ? "from" : "min";
+    mx.placeholder = isDate ? "to" : "max";
+    if (isDate) { mn.title = "from  e.g. 2024-01-01"; mx.title = "to  e.g. 2024-12-31"; }
     [vals, mn, mx].forEach((i) => { i.disabled = true; });
     // NO option list here, deliberately. Volume Generate offers none either, and
     // a field's known values are inconsistent across layouts today (some lists
@@ -646,12 +656,13 @@ function renderBulkFieldsPanel(scope) {
     if (locked) {
       row.appendChild(el("span", "bulkf-lockreason", f.locked_reason || "read-only"));
     }
+    box.appendChild(row);
 
     // A roll-up field is not written as typed — say so here too, in the same
-    // words as the editor badge and the single-op panel.
+    // words as the editor badge and the single-op panel. Placed straight AFTER
+    // its own row, so which field it belongs to is still unambiguous.
     const rspec = rollupSpecFor(scope.rollups, selectedLayout, f.name);
-    if (rspec) row.appendChild(el("div", "bulk-rollup-note", rollupWarning(rspec)));
-    return row;
+    if (rspec) box.appendChild(el("div", "bulk-rollup-note", rollupWarning(rspec)));
   }
 
   function group(title, sectionName, fields, note) {
@@ -662,7 +673,7 @@ function renderBulkFieldsPanel(scope) {
       box.appendChild(el("div", "bulk-note", "No editable fields here."));
       return box;
     }
-    fields.forEach((f) => box.appendChild(fieldRow(sectionName, f)));
+    fields.forEach((f) => fieldRow(sectionName, f, box));
     return box;
   }
 

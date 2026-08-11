@@ -127,12 +127,21 @@ const totRow = rowsOf().find((r) => descendants(r).some(
   (c) => c.dataset && c.dataset.field === "tot_qty"));
 const deptRow = rowsOf().find((r) => descendants(r).some(
   (c) => c.dataset && c.dataset.field === "dept"));
-check("the note is on the tot_qty row",
-      totRow && descendants(totRow).some(
-        (c) => c.classList && c.classList.contains("bulk-rollup-note")));
-check("...and NOT on a plain field's row",
-      deptRow && !descendants(deptRow).some(
-        (c) => c.classList && c.classList.contains("bulk-rollup-note")));
+// The note is a SIBLING of its row, not a child of it — a block element inside
+// the flex row needed `flex-wrap: wrap`, and that wrap is what let the ROW
+// itself break across two lines. Which field it belongs to is now carried by
+// position: it is the element immediately after that field's row.
+const afterRow = (row) => {
+  if (!row || !row.parentNode) return null;
+  const sibs = row.parentNode.childNodes;
+  const i = Array.prototype.indexOf.call(sibs, row);
+  return i >= 0 ? sibs[i + 1] || null : null;
+};
+const isNote = (n) => !!(n && n.classList && n.classList.contains("bulk-rollup-note"));
+check("the note is not INSIDE any field row",
+      !rowsOf().some((r) => descendants(r).some(isNote)));
+check("the note follows the tot_qty row", isNote(afterRow(totRow)));
+check("...and does NOT follow a plain field's row", !isNote(afterRow(deptRow)));
 
 // --------------------------------------------------------------------------
 // The RESULT line: `(sum of N size lines)` is the shipped phrase, identical to
