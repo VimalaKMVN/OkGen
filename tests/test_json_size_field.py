@@ -391,3 +391,93 @@ def test_volume_generate_offers_AND_writes_it(tmp_path, registry, config,
     node = (doc["header"]["lanes"][0] if section == "Lanes"
             else doc["details"][0] if section == "Details" else doc["header"])
     assert node.get(field) == val, "reported success but did not write the value"
+
+
+# --------------------------------------------------- the temporal fields
+
+# `timestamp` (all three Calgary layouts) and `date` on the DistLabel store row
+# are declared 30. Unlike `lane`/`locator` these were NEVER broken — a temporal
+# field carries a date FORMAT, and both the Generate skip (`not f.size and not
+# dfmt`) and the bulk write path let a formatted field through without a width.
+# The only fault was the panel rendering `timestamp (?)`.
+#
+# That makes the width a NEW CAP on a path that had none, which is why it is 30
+# and not the 29 first proposed: the samples carry BOTH forms, and the
+# Z-terminated one is the majority.
+#
+#     2026-05-01T10:44:53.161740778     29 — CalgaryCartonLabel, no Z
+#     2026-02-10T14:47:45.394277988Z    30 — DistLabel + StyleHeader, with Z
+#
+# 29 would have refused 26 of the 28 real values in the shipped samples and
+# templates — D48 again, and the third time in this session that a proposed
+# width was shorter than the data it had to hold.
+TEMPORAL = [
+    ("CalgaryStyleHeader", "Header", "timestamp"),
+    ("CalgaryDistLabel", "Header", "timestamp"),
+    ("CalgaryCartonLabel", "Header", "timestamp"),
+    ("CalgaryDistLabel", "Stores", "date"),
+]
+RFC3339_NANO_Z = "2026-03-04T05:06:07.123456789Z"      # 30
+RFC3339_NANO = "2026-05-01T10:44:53.161740778"         # 29
+
+
+@pytest.mark.parametrize("layout,section,field", TEMPORAL)
+def test_temporal_width_is_thirty(registry, layout, section, field):
+    sec = next(s for s in registry[layout].sections if s.name == section)
+    assert next(f for f in sec.fields if f.name == field).size == 30
+
+
+def test_thirty_is_what_the_Z_FORM_needs():
+    """The number is not arbitrary: it is the length of the form the vendor
+    actually sends. If this ever reads 29 again, 26 shipped values break."""
+    assert len(RFC3339_NANO_Z) == 30
+    assert len(RFC3339_NANO) == 29
+
+
+@pytest.mark.parametrize("layout,section,field", TEMPORAL)
+def test_both_stamp_forms_are_accepted_and_stored_canonically(
+        tmp_path, registry, config, layout, section, field):
+    """Both forms save — and a temporal field NORMALISES on write (D29:
+    forgiving input, exact output), so the no-Z form is stored WITH the Z.
+
+    That is the sharpest argument for 30 over 29: the canonical output is
+    always 30 characters, so even a file whose sample carries the 29-char form
+    becomes 30 the moment anyone edits it. A 29 cap would have refused the
+    field's own normalised value.
+    """
+    p = _copy(tmp_path, _SAMPLE_FOR[layout])
+    okf = service.parse_okfile(p, registry=registry)
+    ri = next(r.index for r in okf.records if r.section.name == section)
+    for stamp in (RFC3339_NANO_Z, RFC3339_NANO):
+        service.apply_edits(p, [{"record_index": ri, "field": field,
+                                 "value": stamp}],
+                            registry, config=config, backup=False)
+        okf2 = service.parse_okfile(p, registry=registry)
+        stored = next(r for r in okf2.records
+                      if r.section.name == section).get(field)
+        assert stored.startswith(stamp.rstrip("Z")), (
+            f"{layout}.{field}: {stamp!r} -> {stored!r}")
+        assert len(stored) <= 30
+    # the canonical form is the 30-char one, which is what makes 29 impossible
+    assert len(stored) == 30
+
+
+@pytest.mark.parametrize("layout,section,field", TEMPORAL)
+def test_the_panel_shows_a_width_not_a_question_mark(registry, config,
+                                                     layout, section, field):
+    """The actual report — these fields worked, they just read as `(?)`."""
+    scope = service.bulk_scope([str(FIX / _SAMPLE_FOR[layout])], registry, config)
+    if section == "Header":
+        fd = next(f for f in scope["header_fields"][layout] if f["name"] == field)
+    else:
+        fd = next(f for s in scope["detail_sections"][layout]
+                  if s["name"] == section
+                  for f in s["fields"] if f["name"] == field)
+    assert fd["size"] == 30
+
+
+def test_the_stamp_is_still_treated_as_a_DATE(config):
+    """Declaring a width must not turn a temporal field into a plain one — the
+    format is what makes `now` and date ranges work (D29/D54)."""
+    for layout, _sec, field in TEMPORAL:
+        assert config.date_format(layout, field), f"{layout}.{field} lost its format"

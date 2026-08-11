@@ -19,6 +19,7 @@
         },
         {
           "name": "timestamp",
+          "size": 30,
           "json_path": [
             "timestamp"
           ]
