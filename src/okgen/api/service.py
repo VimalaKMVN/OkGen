@@ -3626,7 +3626,7 @@ def _tokens_from_okf(okf: OkFile, config: Config, orig_stem: str, custom: dict) 
     """
     layout = okf.layout.name
     toks: dict = {}
-    for _secname, recs in okf.sections().items():   # header section comes first
+    for secname, recs in okf.sections().items():   # header section comes first
         if not recs or recs[0].section is None:
             continue
         first = recs[0]
@@ -3634,6 +3634,15 @@ def _tokens_from_okf(okf: OkFile, config: Config, orig_stem: str, custom: dict) 
             v = first.get(f.name)
             if v is not None:
                 toks.setdefault(f.name, v.strip())   # don't override a header value
+                # ...and the SECTION-QUALIFIED name, always, so a field the
+                # header shadows is still reachable. On a Calgary StyleHeader
+                # NINE names appear in two sections — `type` is the one that
+                # matters, because the header's is the document discriminator
+                # (`styleHeaders`) while the ticket type digit lives on the
+                # detail row under the same name, so the bare token put the
+                # word `styleHeaders` into a filename. `.OK` layouts have no
+                # such collision at all, which is why this only ever bit JSON.
+                toks[f"{secname}.{f.name}"] = v.strip()
     chain = toks.get("chain", "")
     toks["chain"] = chain
     toks["brand"] = config.chain_name(chain)
@@ -3755,11 +3764,27 @@ def rename_scope(paths, registry, config) -> dict:
         L = registry.get(lay)
         if not L:
             continue
+        # A field name that appears in MORE THAN ONE section of this layout is
+        # shadowed: the bare token takes the header's value, so the detail one
+        # is unreachable by name (on a Calgary StyleHeader that is nine names,
+        # including `type`). Those get a section-qualified entry offered
+        # alongside, so the builder can express what a preset already could.
+        # Only the colliding names are qualified — qualifying everything would
+        # double a palette of 90-odd fields to say nothing new.
+        where = {}
+        for sec in L.sections:
+            for f in sec.fields:
+                where.setdefault(f.name, []).append(sec.name)
         for sec in L.sections:
             for f in sec.fields:
                 if f.name not in seen:
                     seen.add(f.name)
                     header_union.append(f.name)
+                if len(where.get(f.name, [])) > 1:
+                    q = f"{sec.name}.{f.name}"
+                    if q not in seen:
+                        seen.add(q)
+                        header_union.append(q)
         # Derived fields (e.g. EUCartonLabel `format`) aren't layout fields but
         # are valid rename tokens — offer them in the palette too.
         for spec in config.derived_fields(lay):
@@ -3774,7 +3799,11 @@ def rename_scope(paths, registry, config) -> dict:
         ad, ah = set(groups["derived"]), set(groups["header_fields"])
         palette = {
             "derived": [t for t in DERIVED_TOKENS if t in ad],
-            "header_fields": [f for f in header_union if f in ah],
+            # `Details.type` is offered exactly when `type` is: a config lists
+            # FIELDS, not sections, so requiring both spellings would make
+            # every qualified token invisible until someone edited YAML.
+            "header_fields": [f for f in header_union
+                              if f in ah or f.split(".")[-1] in ah],
             "custom": dict(groups["custom"]),
         }
 

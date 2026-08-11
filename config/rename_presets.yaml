@@ -234,13 +234,15 @@ presets:
   # survive, which reads as `…_D_CP_UP_RP.json` — the D43 empty-segment
   # failure — so these exist rather than being a nicety.
   #
-  # `type` is deliberately ABSENT. On a Calgary file the header `type` is the
-  # DOCUMENT discriminator (`styleHeaders`), not a ticket type digit — the
-  # ticket type lives on the detail row and is shadowed by the header field of
-  # the same name. Including it would put the word `styleHeaders` in every
-  # filename. See PLAN §6.
+  # `type` is written SECTION-QUALIFIED here. On a Calgary file the header
+  # `type` is the DOCUMENT discriminator (`styleHeaders`) and it shadows the
+  # ticket type digit of the same name on the detail row — a bare `type` would
+  # put the word `styleHeaders` into every filename. `Details.type` names the
+  # section it reads from and resolves to the digit. Nine field names are
+  # shadowed this way on a Calgary StyleHeader; `.OK` layouts have none, which
+  # is why only these presets need the qualified form.
 
-  # 01_WN_SH_FMTS_K140251A_D92_CP000999999_UPtrue_RP7999.99.json
+  # 01_WN_SH_FMTS_T2_KS403821608940739A_D92_CP000999999_UPtrue_RP7999.99.json
   - name: "Calgary StyleHeader (JSON)"
     separator: "_"
     parts:
@@ -250,6 +252,10 @@ presets:
       - FMT
       - no_delim
       - format
+      - T
+      - no_delim
+      - Details.type   #   2  — NOT the header `type`, which is the document
+                       #        discriminator (`styleHeaders`) and shadows it
       - KEY
       - no_delim
       - key            # source-aware: keytrol on SCAN, headerASNid on WMS
@@ -266,7 +272,9 @@ presets:
       - no_delim
       - retailPrice
 
-  # 01_WN_DL_FMTA_K….json
+  # 01_HS_DL_FMT7_KJ000827498941044J_D92.json
+  # No `T` pair: CalgaryDistLabel has no Details section, so there is no ticket
+  # type to name — its only sections are Header and Stores.
   - name: "Calgary DistLabel (JSON)"
     separator: "_"
     parts:
@@ -283,7 +291,9 @@ presets:
       - no_delim
       - department
 
-  # 01_WN_CL_FMTA_K….json  (key is pickListId either way — not source-dependent)
+  # 01_WN_CL_FMT1_K10000_D87.json
+  # Key is pickListId either way — CalgaryCartonLabel is not source-dependent.
+  # No `T` pair, for the same reason as DistLabel: no Details section.
   - name: "Calgary CartonLabel (JSON)"
     separator: "_"
     parts:

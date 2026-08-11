@@ -306,3 +306,98 @@ def test_the_key_pair_comes_after_the_type_pair():
             assert names.index("T") < names.index("KEY"), p["name"]
             checked += 1
     assert checked >= 4, "expected several presets to carry both pairs"
+
+
+# ------------------------------------------- section-qualified field tokens
+
+# On a Calgary StyleHeader NINE field names appear in two sections, and the
+# token resolver fills header-first with setdefault — so the header wins and
+# the detail one is unreachable by name. `type` is the one that matters: the
+# header's is the DOCUMENT discriminator (`styleHeaders`) while the ticket type
+# digit lives on the detail row, so a bare `type` put a word where a digit
+# belonged. `.OK` layouts have NO such collision, which is why it only bit JSON.
+CALGARY = Path(__file__).resolve().parent / "fixtures" / "calgary"
+
+pytestmark_json = pytest.mark.skipif(not CALGARY.is_dir(),
+                                     reason="no calgary fixtures")
+
+
+def _json_copy(tmp_path, name="styleheader_fmtS.json"):
+    d = tmp_path / "j"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / name
+    shutil.copy(CALGARY / name, p)
+    return [str(p)]
+
+
+@pytestmark_json
+def test_bare_type_still_takes_the_header_value(tmp_path, registry, config):
+    """Unchanged on purpose: `type` means the header field everywhere else in
+    OkGen, and a preset that already says `type` must keep meaning that."""
+    got = _names(_json_copy(tmp_path), [{"name": "type"}], registry, config)
+    assert got == ["styleHeaders.json"]
+
+
+@pytestmark_json
+def test_a_qualified_token_reads_its_own_section(tmp_path, registry, config):
+    got = _names(_json_copy(tmp_path), [{"name": "Details.type"}], registry, config)
+    assert got == ["2.json"]
+
+
+@pytestmark_json
+def test_the_header_can_be_named_explicitly_too(tmp_path, registry, config):
+    got = _names(_json_copy(tmp_path), [{"name": "Header.type"}], registry, config)
+    assert got == ["styleHeaders.json"]
+
+
+@pytestmark_json
+def test_qualified_tokens_are_OFFERED_for_shadowed_fields(tmp_path, registry, config):
+    """A preset could always name one (an unoffered token still resolves, D43),
+    but the builder could not — so the palette has to carry them."""
+    scope = service.rename_scope(_json_copy(tmp_path), registry, config)
+    fields = scope["palette"]["header_fields"]
+    assert "Details.type" in fields and "Header.type" in fields
+
+
+@pytestmark_json
+def test_only_SHADOWED_fields_are_qualified(tmp_path, registry, config):
+    """Qualifying all 90-odd fields would double the palette to say nothing."""
+    scope = service.rename_scope(_json_copy(tmp_path), registry, config)
+    qualified = [f for f in scope["palette"]["header_fields"] if "." in f]
+    assert qualified, "expected some"
+    layout = registry["CalgaryStyleHeader"]
+    where = {}
+    for sec in layout.sections:
+        for f in sec.fields:
+            where.setdefault(f.name, set()).add(sec.name)
+    for q in qualified:
+        assert len(where[q.split(".", 1)[1]]) > 1, f"{q} is not shadowed"
+
+
+def test_an_OK_layout_gets_no_qualified_tokens(tmp_path, registry, config):
+    """The `.OK` layouts have zero shadowed names, so the palette must not grow
+    for them — this is a JSON-shaped problem and the fix stays proportional."""
+    scope = service.rename_scope(_copies(tmp_path, 1), registry, config)
+    assert [f for f in scope["palette"]["header_fields"] if "." in f] == []
+
+
+@pytestmark_json
+def test_the_calgary_styleheader_preset_uses_the_detail_type():
+    shipped = Config.load(Path(__file__).resolve().parents[1] / "config")
+    p = [x for x in shipped.rename_presets()
+         if x["name"] == "Calgary StyleHeader (JSON)"][0]
+    names = [x if isinstance(x, str) else (x.get("name") or x.get("value"))
+             for x in p["parts"]]
+    assert "Details.type" in names
+    assert "type" not in names, "the bare token would write 'styleHeaders'"
+
+
+def test_the_two_other_calgary_presets_carry_no_type():
+    """Not an oversight: CalgaryDistLabel and CalgaryCartonLabel have only
+    Header and Stores sections, so there is no ticket type to name."""
+    shipped = Config.load(Path(__file__).resolve().parents[1] / "config")
+    for nm in ("Calgary DistLabel (JSON)", "Calgary CartonLabel (JSON)"):
+        p = [x for x in shipped.rename_presets() if x["name"] == nm][0]
+        names = [x if isinstance(x, str) else (x.get("name") or x.get("value"))
+                 for x in p["parts"]]
+        assert not any(n and n.endswith("type") for n in names)
