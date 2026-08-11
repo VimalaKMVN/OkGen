@@ -15,10 +15,10 @@ rename_tokens:
   # like. Example: a token "FMT" that inserts "FMT" so you can build FMT_A.
   custom:
     FMT: "FMT"
-    KEY: "KEY"
-    DEPT: "DEPT"
+    KEY: "K"
+    DEPT: "D"
     CP: "CP"
-    CU: "CU"
+    CU: "CUP"
     RP: "RP"
     T: "T"
     C: "C"
@@ -28,7 +28,10 @@ rename_tokens:
 
   # ---- derived (computed) tokens ----
   derived:
+    - sl             # serial for THIS batch: 01, 02, 03 ... (see below)
     - brand          # chain name from chains.yaml (e.g. Homegoods)
+    - brand_short    # the tree BADGE text (HG, TJM, WN, EU, HS) — chains.yaml `short`
+    - layout_short   # short layout code (SH / PT / CL / DL) — layout_codes.yaml
     # format_label — the FRIENDLY format wording from display.yaml ("Regular
     # Tag", "Purple Rat Tail"). Deliberately NOT offered: filenames carry the
     # format LETTER (the `format` header token below — A, B, W, X, 1, 7), which
@@ -45,6 +48,13 @@ rename_tokens:
     - region         # region label from regions.yaml, keyed off `zone` (e.g. Reg2)
     - layout         # CartonLabel / DistLabels / Preticket / StyleHeader
     - key            # the layout's unique key value (keytrol / po / picklist_id)
+    # `sl` vs `seq`: both count 1, 2, 3 and both RESTART PER FOLDER. They differ
+    # only in width. `seq` is fixed at four digits (0001) and is what Volume
+    # Generate stamps on the files it creates. `sl` is padded to the width of
+    # the batch being renamed — 7 files give 01..07, 150 give 001..150 — so a
+    # name is never longer than it needs to be and never sorts 1, 10, 11, 2 in
+    # Explorer. Use `sl` for renaming; `seq` is kept so existing presets and
+    # generated names are untouched.
     - seq            # running counter 0001, 0002, ...
     - orig           # the file's current name (handy for second-pass renames)
 

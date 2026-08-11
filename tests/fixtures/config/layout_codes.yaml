@@ -1,0 +1,13 @@
+# Short layout codes for the Bulk Rename `layout_short` token (see the shipped
+# config/layout_codes.yaml). The EU layouts deliberately share the NA codes —
+# a filename already carries the brand badge, so `EU` says what `E` would only
+# repeat. `CartonLabel` is deliberately ABSENT here so the tests can prove an
+# unlisted layout falls back to its FULL name rather than to a blank.
+layout_codes:
+  StyleHeader: SH
+  Preticket: PT
+  DistLabels: DL
+  EUStyleHeader: SH
+  EUPreticket: PT
+  EUCartonLabel: CL
+  CalgaryStyleHeader: SH

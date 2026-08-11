@@ -42,9 +42,11 @@ presets:
   - name: "Styleheader naming convension"
     separator: "_"
     parts:
-      - brand          # Homegoods
-      - layout         # StyleHeader
+      - sl             # 01, 02, 03 ... (padded to the batch size)
+      - brand_short    # HG  (the tree badge text)
+      - layout_short   # SH / PT / CL / DL
       - FMT            # label "FMT"
+      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
       - format         #   value A
       - KEY
       - keytrol
@@ -68,9 +70,11 @@ presets:
   - name: "Preticket naming convension"
     separator: "_"
     parts:
-      - brand          # Homegoods
-      - layout         # StyleHeader
+      - sl             # 01, 02, 03 ... (padded to the batch size)
+      - brand_short    # HG  (the tree badge text)
+      - layout_short   # SH / PT / CL / DL
       - FMT            # label "FMT"
+      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
       - format         #   value A
       - KEY
       - po
@@ -96,9 +100,11 @@ presets:
   - name: "EUPreticket naming convension"
     separator: "_"
     parts:
-      - brand          # Europe
-      - layout         # EUPreticket
+      - sl             # 01, 02, 03 ... (padded to the batch size)
+      - brand_short    # EU  (the tree badge text)
+      - layout_short   # SH / PT / CL / DL
       - FMT            # label "FMT"
+      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
       - format         #   value A
       - region         #   Reg1/Reg2 mapped from zone (regions.yaml)
       - Z              # label "Z"
@@ -128,9 +134,11 @@ presets:
   - name: "EUCartonLabel naming convension"
     separator: "_"
     parts:
-      - brand          # Europe
-      - layout         # EUPreticket
+      - sl             # 01, 02, 03 ... (padded to the batch size)
+      - brand_short    # EU  (the tree badge text)
+      - layout_short   # SH / PT / CL / DL
       - FMT            # label "FMT"
+      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
       - format         #   value A
       - KEY            # label "KEY"
       - keytrol             #   value 10021888
@@ -153,9 +161,11 @@ presets:
   - name: "EUStyle Header naming convension"
     separator: "_"
     parts:
-      - brand          # Europe
-      - layout         # EUPreticket
+      - sl             # 01, 02, 03 ... (padded to the batch size)
+      - brand_short    # EU  (the tree badge text)
+      - layout_short   # SH / PT / CL / DL
       - FMT            # label "FMT"
+      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
       - format                #   value A  (EUStyleHeader's ticket format)
       - KEY            # label "KEY"
       - keytrol             #   value 10021888
@@ -178,9 +188,11 @@ presets:
   - name: "Carton Label naming convension"
     separator: "_"
     parts:
-      - brand          # Homegoods
-      - layout         # StyleHeader
+      - sl             # 01, 02, 03 ... (padded to the batch size)
+      - brand_short    # HG  (the tree badge text)
+      - layout_short   # SH / PT / CL / DL
       - FMT            # label "FMT"
+      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
       - format         #   value A
       - KEY
       - C
@@ -197,9 +209,11 @@ presets:
   - name: "Distribution Label naming convension"
     separator: "_"
     parts:
-      - brand          # Homegoods
-      - layout         # StyleHeader
+      - sl             # 01, 02, 03 ... (padded to the batch size)
+      - brand_short    # HG  (the tree badge text)
+      - layout_short   # SH / PT / CL / DL
       - FMT            # label "FMT"
+      - no_delim       # FMT joins its value directly: FMTA, not FMT_A
       - format         #   value A
       - KEY
       - keytrol

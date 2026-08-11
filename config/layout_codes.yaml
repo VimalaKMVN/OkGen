@@ -1,0 +1,28 @@
+# Short codes for layout names, used by the Bulk Rename `layout_short` token.
+#
+# The full layout name (StyleHeader, EUCartonLabel, …) is what OkGen shows
+# everywhere else; these are purely to keep FILENAMES short, which is the whole
+# point of the token. `layout` still gives the full name if you want it.
+#
+# The EU layouts deliberately share the NA codes (EUStyleHeader is `SH`, not
+# `ESH`): a renamed file already carries the brand badge, and `EU` there says
+# everything `E` would repeat. That is the user's call — if the two ever need
+# telling apart by filename alone, give the EU rows their own codes here and
+# nothing else has to change.
+#
+# A layout with no entry falls back to its FULL name rather than to a blank,
+# so adding a layout can never silently produce a nameless segment (the D43
+# failure, where a token resolved to nothing and the filename quietly lost a
+# part). Add a row here when a new layout arrives.
+layout_codes:
+  StyleHeader: SH
+  Preticket: PT
+  CartonLabel: CL
+  DistLabels: DL
+  EUStyleHeader: SH
+  EUPreticket: PT
+  EUCartonLabel: CL
+  # Calgary JSON layouts — same three shapes, so the same three codes.
+  CalgaryStyleHeader: SH
+  CalgaryDistLabel: DL
+  CalgaryCartonLabel: CL

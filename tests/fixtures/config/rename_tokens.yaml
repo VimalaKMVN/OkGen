@@ -3,9 +3,12 @@ rename_tokens:
   custom:
     FMT: "FMT"
   derived:
+    - sl
     - brand
+    - brand_short
     - format_label
     - layout
+    - layout_short
     - key
     - seq
     - orig

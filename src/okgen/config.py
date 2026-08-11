@@ -129,6 +129,7 @@ class Config:
         send_quips: Optional[List[str]] = None,
         send_done_quips: Optional[List[str]] = None,
         regions: Optional[Dict[str, str]] = None,
+        layout_codes: Optional[Dict[str, str]] = None,
         hidden_fields: Optional[Dict[str, set]] = None,
         readonly_fields: Optional[Dict[str, set]] = None,
         literal_fields: Optional[Dict[str, set]] = None,
@@ -190,6 +191,7 @@ class Config:
         self._unique_fields = unique_fields or {}
         # {zone_value: region_label}, inverted from the region->zones config.
         self._regions = regions or {}
+        self._layout_codes = layout_codes or {}
         self._field_colors = field_colors or {}
         self._section_counts = section_counts or {}
         self._nicelabel_path = nicelabel_path
@@ -429,6 +431,19 @@ class Config:
         if zone is None:
             return ""
         return self._regions.get(str(zone).strip(), "")
+
+    def layout_code(self, layout: Optional[str]) -> str:
+        """Short filename code for a layout (StyleHeader -> SH).
+
+        Falls back to the FULL layout name, never to a blank: an unlisted
+        layout must not silently drop a segment out of a filename (D43).
+        """
+        if not layout:
+            return ""
+        return self._layout_codes.get(str(layout), str(layout))
+
+    def layout_codes(self) -> Dict[str, str]:
+        return dict(self._layout_codes)
 
     def regions(self) -> Dict[str, str]:
         """The full {zone: region} map (copy)."""
@@ -878,6 +893,13 @@ class Config:
                 for z in (zones or []):
                     regions[str(z).strip()] = str(region)
 
+        layout_codes: Dict[str, str] = {}
+        lc_path = cdir / "layout_codes.yaml"
+        if lc_path.is_file():
+            data = yaml.safe_load(lc_path.read_text(encoding="utf-8")) or {}
+            for lay, code in (data.get("layout_codes") or {}).items():
+                layout_codes[str(lay)] = str(code)
+
         hidden_fields: Dict[str, set] = {}
         readonly_fields: Dict[str, set] = {}
         literal_fields: Dict[str, set] = {}
@@ -1030,6 +1052,7 @@ class Config:
         return cls(chains, rules, limits, unique_fields, field_colors,
                    section_counts, nicelabel_path, rename_tokens, rename_presets,
                    nicelabel_warning, send_quips, send_done_quips, regions,
+                   layout_codes,
                    hidden_fields, readonly_fields, literal_fields, detail_fill,
                    json_empty_rows, json_seed_rows, trim_trailing, derived_fields, isolated_chain_groups, tosca,
                    json_sources, json_source_default, date_fields, nicelabel_post,

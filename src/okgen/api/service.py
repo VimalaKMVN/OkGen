@@ -3593,7 +3593,8 @@ def bulk_apply(paths, layout_name, field, value, registry, config, backup=True) 
 # --------------------------------------------------------------------------- #
 # Bulk rename
 # --------------------------------------------------------------------------- #
-DERIVED_TOKENS = ["brand", "format_label", "region", "layout", "key", "seq", "orig"]
+DERIVED_TOKENS = ["brand", "brand_short", "format_label", "region", "layout",
+                  "layout_short", "key", "sl", "seq", "orig"]
 _INVALID_NAME = set('\\/:*?"<>|')
 
 
@@ -3636,7 +3637,11 @@ def _tokens_from_okf(okf: OkFile, config: Config, orig_stem: str, custom: dict) 
     chain = toks.get("chain", "")
     toks["chain"] = chain
     toks["brand"] = config.chain_name(chain)
+    # The badge text the tree already shows (HG, TJM, EU) — one source, so a
+    # filename and the badge beside it can never disagree about a brand.
+    toks["brand_short"] = getattr(config.chain(chain), "short", "") or ""
     toks["layout"] = layout
+    toks["layout_short"] = config.layout_code(layout)
     fmt = toks.get("format", "")
     toks["format_label"] = config.label("format", fmt, chain=chain, layout=layout, fmt=fmt) if fmt else ""
     kf = config.unique_field(layout)
@@ -3652,7 +3657,8 @@ def _tokens_from_okf(okf: OkFile, config: Config, orig_stem: str, custom: dict) 
     return toks
 
 
-def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None) -> str:
+def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None,
+                sl_pad=2) -> str:
     """Join ordered parts into a filename stem. A {'type': 'glue'} part means the
     next value attaches with NO separator. Empty values are skipped.
 
@@ -3672,6 +3678,14 @@ def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None) -> str
             name = part.get("name") or part.get("value", "")
             if name == "seq":
                 v = str(seq).zfill(seq_pad)
+            elif name == "sl":
+                # The serial the user reads as "1, 2, 3". Padded, because an
+                # unpadded run sorts 1, 10, 11, 2 in Explorer and in the hot
+                # folder — the two places these names are actually read. Width
+                # is the BATCH's, not a constant: 7 files stay 1..7, 12 become
+                # 01..12, 150 become 001..150, so the name is never longer than
+                # the batch requires and never sorts wrongly.
+                v = str(seq).zfill(sl_pad)
             elif name in label_names:
                 v = _sanitize_label(toks.get(name, ""))
             else:
@@ -3745,12 +3759,18 @@ def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:
     for p in paths or []:
         by_folder[str(Path(p).parent)].append(Path(p))
 
-    label_names = {"brand", "format_label"} | config.all_derived_names()
+    label_names = ({"brand", "brand_short", "format_label", "layout_short"}
+                   | config.all_derived_names())
     results = []
     for folder, files in by_folder.items():
         folder = Path(folder)
         selected = {f.name for f in files}
         used = {e.name for e in folder.iterdir() if e.is_file()} - selected
+        # Serial width is this FOLDER's batch, matching the counter, which also
+        # restarts per folder — so each folder is numbered 1..n independently
+        # and each is padded to its own size. A floor of 2 keeps a small batch
+        # reading 01, 02 rather than 1, 2.
+        sl_pad = max(2, len(str(len(files))))
         seq = 0
         for f in files:
             seq += 1
@@ -3759,7 +3779,8 @@ def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:
             except Exception as exc:
                 results.append({"path": str(f), "old": f.name, "new": None, "status": "error", "error": str(exc)})
                 continue
-            base = _build_name(parts, toks, separator, seq, label_names=label_names)
+            base = _build_name(parts, toks, separator, seq,
+                               label_names=label_names, sl_pad=sl_pad)
             if not base:
                 results.append({"path": str(f), "old": f.name, "new": None, "status": "empty"})
                 continue
