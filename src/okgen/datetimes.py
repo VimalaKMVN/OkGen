@@ -120,6 +120,24 @@ def render(dt: datetime, fmt: str, frac: Optional[str] = None) -> str:
     return dt.strftime(fmt)
 
 
+# ONE reference instant, rendered through whichever format a field declares.
+# The panels show this as the hint in a temporal field's value box, so the hint
+# is always the shape THAT field actually stores: `rfc3339_nano` reads
+# 2026-01-08T11:36:21.944107946Z, while a field declared "%Y%m%d" reads
+# 20260108. A hardcoded stamp in the client would be a lie the day a second
+# format is declared — which config/date_fields.yaml explicitly allows.
+#
+# Fixed rather than `now`, so the hint is identical on every render and can be
+# asserted by a test. The value matches the shape of the real Calgary samples.
+_EXAMPLE_INSTANT = datetime(2026, 1, 8, 11, 36, 21, tzinfo=timezone.utc)
+_EXAMPLE_FRAC = "944107946"
+
+
+def example(fmt: str) -> str:
+    """A specimen value in ``fmt`` — what this field looks like when stored."""
+    return render(_EXAMPLE_INSTANT, fmt, _EXAMPLE_FRAC)
+
+
 def normalize(value: str, fmt: str) -> str:
     """A user-typed value as it should be STORED. Raises :class:`DateError`."""
     dt, frac = parse_input(value)

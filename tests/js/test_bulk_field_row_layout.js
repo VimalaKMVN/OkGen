@@ -183,8 +183,8 @@ check("the values box explains itself on hover",
       dept && /comma list/i.test((valsOf(dept) || {}).title || ""));
 check("...including how to write a blank",
       dept && /blank/i.test((valsOf(dept) || {}).title || ""));
-const dateRow = rows.find((r) => partsOf(r).some((c) => c.dataset && c.dataset.field === "transmitDate"));
-check("a date field still says it takes a date",
-      dateRow && /^\d{4}-\d{2}-\d{2}$/.test((valsOf(dateRow) || {}).placeholder || ""));
+// What a temporal field SAYS — its label, its specimen hint and the op it
+// produces — is owned by tests/js/test_date_field_hint.js, not by this suite,
+// which is about the row's geometry.
 
 process.exit(failures ? 1 : 0);

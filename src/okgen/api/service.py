@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional
 
 from okgen.config import Config
+from okgen import datetimes
 from okgen import detect
 from okgen.detect import detect_from_header, detect_layout, read_chain, read_header_line
 from okgen.jsonsource import resolve_source, source_from_header
@@ -2825,8 +2826,12 @@ def _header_fields_for_layout(layout, config: Config,
         if blocked:
             entry["editable"] = False
             entry["locked_reason"] = blocked
-        if config.date_format(layout.name, f.name):
+        _dfmt = config.date_format(layout.name, f.name)
+        if _dfmt:
             entry["date"] = True        # offer a date range, not a numeric one
+            # A specimen in the field's OWN format, so the panel's hint cannot
+            # describe a shape the field does not store.
+            entry["date_example"] = datetimes.example(_dfmt)
         out.append(entry)
     return out
 
@@ -2961,7 +2966,10 @@ def _detail_sections_for_layout(layout, config: Config) -> List[dict]:
             "name": f.name, "size": f.size, "type": f.field_type,
             "options": config.options(f.name, layout=layout.name,
                                       section=sec.name) or None,
-            **({"date": True} if config.date_format(layout.name, f.name) else {}),
+            **({"date": True,
+                "date_example": datetimes.example(
+                    config.date_format(layout.name, f.name))}
+               if config.date_format(layout.name, f.name) else {}),
             **({"editable": False,
                 "locked_reason": "read-only — it identifies the layout"}
                if (f.name in locked or getattr(f, "readonly", False)) else {}),
@@ -4205,6 +4213,7 @@ def generate_scope(paths, registry: LayoutRegistry, config: Config,
             entry = {"name": f["name"], "size": f["size"]}
             if dfmt:
                 entry["date"] = True
+                entry["date_example"] = datetimes.example(dfmt)
             if blocked:
                 entry["editable"] = False
                 entry["locked_reason"] = blocked

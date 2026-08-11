@@ -48,7 +48,12 @@ const scope = {
   path: "/tmp/StyleHeader.OK", name: "StyleHeader.OK", layout: "StyleHeader",
   key_field: "keytrol", key_size: 6, max_count: 5000,
   header_fields: [{ name: "dept", size: 2 }, { name: "date", size: 8 },
-                  { name: "timestamp", size: null, date: true },
+                  // 30 and a specimen, as the server really sends it: the
+                  // width was declared at v0.110.0 and this fixture still said
+                  // `size: null`, which is why the panel could label it
+                  // `(date)` here and nobody noticed the width was missing.
+                  { name: "timestamp", size: 30, date: true,
+                    date_example: "2026-01-08T11:36:21.944107946Z" },
                   // Locked fields are LISTED now, greyed — the panel must show
                   // them without ever letting them into the spec.
                   { name: "keytrol", size: 6, editable: false,
@@ -176,8 +181,19 @@ const dmin = dateRow.children.find((e) => e.classList.contains("gen-min"));
 const dmax = dateRow.children.find((e) => e.classList.contains("gen-max"));
 const dateChecks = [
   ["a date field renders text inputs, not number", dmin.type === "text"],
-  ["the date row is labelled as a date",
-   dateRow.children.some((e) => /timestamp \(date\)/.test(e.textContent || ""))],
+  // Labelled by its WIDTH like every other field — it read `timestamp (date)`
+  // until now, which hid the 30 it declares. What it takes is shown by the
+  // specimen in the list box instead.
+  ["the date row is labelled with its width",
+   dateRow.children.some((e) => /timestamp \(30\)/.test(e.textContent || ""))],
+  ["...and not as a bare (date)",
+   !dateRow.children.some((e) => /\(date\)/.test(e.textContent || ""))],
+  ["the list box shows the field's OWN stored shape, not a generic date",
+   (dateRow.children.find((e) => e.classList.contains("gen-list")) || {})
+     .placeholder === "2026-01-08T11:36:21.944107946Z"],
+  ["the range boxes name the same specimen on hover",
+   /2026-01-08T11:36:21\.944107946Z/.test(dmin.title || "")
+   && /2026-01-08T11:36:21\.944107946Z/.test(dmax.title || "")],
 ];
 dcb.checked = true;
 (dcb._handlers.change || []).forEach((f) => f({}));

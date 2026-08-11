@@ -617,22 +617,36 @@ function renderBulkFieldsPanel(scope) {
     const locked = f.editable === false;
     if (locked) { cb.disabled = true; row.classList.add("bulkf-locked"); }
     row.appendChild(cb);
+    // Every field reads `name (width)`, temporal ones included — a date field
+    // used to read `(date)` instead, which hid the width it declares and made
+    // it the one field in the panel labelled differently from its neighbours.
+    // What it takes is now shown by the EXAMPLE in the box beside it.
     row.appendChild(el("span", "bulkf-name",
-                       f.date ? `${f.name} (date)` : `${f.name} (${f.size != null ? f.size : "?"})`));
+                       `${f.name} (${f.size != null ? f.size : "?"})`));
     const isDate = !!f.date;
+    if (isDate) cb.dataset.date = "1";
     const vals = el("input", "bulkf-vals"); vals.type = "text";
-    // Short placeholder, full meaning in the tooltip — the box is Volume
-    // Generate's width now, and a long hint would simply be clipped there.
-    vals.placeholder = isDate ? "2024-06-30" : "value or list";
+    // A temporal field shows a SPECIMEN of what it stores, in its own declared
+    // format (the server renders one reference instant through it) — so the
+    // box says `2026-01-08T11:36:21.944107946Z`, not a generic "a date". At
+    // 120px it is clipped to roughly its first 15 characters; the whole value
+    // is on hover, which is the trade the user chose over widening the box.
+    const example = f.date_example || "";
+    vals.placeholder = isDate ? (example || "a date") : "value or list";
     vals.title = isDate
-      ? "One date sets it on every file; a comma list gives each file a random pick."
+      ? `One date sets it on every file; a comma list gives each file a random `
+        + `pick. Stored as ${example || "this field's date format"} — you can `
+        + `type just 2026-01-08, or "now".`
       : "One value sets it on every file; a comma list (10,20,30) gives each file "
         + "(or row) a random pick. Use ' ' for a blank value.";
     const mn = el("input", "bulkf-min"); mn.type = "text";
     const mx = el("input", "bulkf-max"); mx.type = "text";
     mn.placeholder = isDate ? "from" : "min";
     mx.placeholder = isDate ? "to" : "max";
-    if (isDate) { mn.title = "from  e.g. 2024-01-01"; mx.title = "to  e.g. 2024-12-31"; }
+    if (isDate) {
+      mn.title = `earliest instant, e.g. ${example}`;
+      mx.title = `latest instant, e.g. ${example}`;
+    }
     [vals, mn, mx].forEach((i) => { i.disabled = true; });
     // NO option list here, deliberately. Volume Generate offers none either, and
     // a field's known values are inconsistent across layouts today (some lists
@@ -705,7 +719,12 @@ function renderBulkFieldsPanel(scope) {
       const vals = (row.querySelector(".bulkf-vals") || {}).value || "";
       const mn = (row.querySelector(".bulkf-min") || {}).value || "";
       const mx = (row.querySelector(".bulkf-max") || {}).value || "";
-      const isDate = /\(date\)/.test((row.querySelector(".bulkf-name") || {}).textContent || "");
+      // Read from the checkbox's own data, NOT from the label text. This used
+      // to regex the rendered name for "(date)", so the op a field produced
+      // depended on how its label happened to be worded — renaming the label
+      // silently turned a date range into a numeric `random` with NaN bounds.
+      // Volume Generate has always read `dataset.date`; this now matches it.
+      const isDate = cb.dataset.date === "1";
       if (vals.trim() !== "") {
         // A single entry IS "set this value" — the server's list op picks from
         // a one-item list, so no separate `set` case is needed.
@@ -3744,21 +3763,33 @@ function renderGeneratePanel(panel, paths, scope) {
       // A temporal field (config/date_fields.yaml) takes a DATE range instead
       // of a numeric one — each generated file (or row) gets its own instant.
       const isDate = !!f.date;
+      // The field's own stored shape, rendered by the server from its declared
+      // format — the hardcoded "2024-01-01" hints that used to sit here were
+      // wrong for `timestamp`, which stores a 30-character nanosecond stamp.
+      const example = f.date_example || "";
       const min = el("input", "gen-min");
       const max = el("input", "gen-max");
       min.type = max.type = isDate ? "text" : "number";
-      min.placeholder = isDate ? "from  2024-01-01" : "min";
-      max.placeholder = isDate ? "to  2024-12-31" : "max";
+      min.placeholder = isDate ? "from" : "min";
+      max.placeholder = isDate ? "to" : "max";
       min.disabled = max.disabled = true;
-      if (isDate) { min.style.width = max.style.width = "140px"; }
+      if (isDate) {
+        min.style.width = max.style.width = "140px";
+        min.title = `earliest instant, e.g. ${example}`;
+        max.title = `latest instant, e.g. ${example}`;
+      }
       // A value list wins over the min/max range when it is filled in, so the
       // generated files only ever contain values the user allowed.
       const list = el("input", "gen-list"); list.type = "text";
-      list.placeholder = isDate ? "or list: 2024-01-01, 2024-06-30"
+      list.placeholder = isDate ? (example || "or list: a date")
                                 : "or list: 10,20,'  msg',' '";
       list.disabled = true;
-      list.title = "Comma-separated. When filled, values are picked from this "
-                 + "list instead of the min/max range. Use ' ' for a blank value.";
+      list.title = isDate
+        ? `Comma-separated dates. When filled, values are picked from this list `
+          + `instead of the range. Stored as ${example || "this field's date "
+          + "format"} — you can type just 2026-01-08, or "now".`
+        : "Comma-separated. When filled, values are picked from this "
+          + "list instead of the min/max range. Use ' ' for a blank value.";
       // A roll-up field's generated value is DISCARDED on any template that has
       // detail rows (the sum wins), so warn as soon as it is ticked rather than
       // letting the user read the sum in the preview and think it a glitch.
@@ -3787,8 +3818,10 @@ function renderGeneratePanel(panel, paths, scope) {
       max.addEventListener("input", refresh);
       list.addEventListener("input", () => { syncRange(); refresh(); });
       row.appendChild(cb);
+      // `name (width)` for every field, temporal ones included — see the same
+      // change in the bulk field-values panel.
       row.appendChild(el("span", "gen-name",
-                         isDate ? `${f.name} (date)` : `${f.name} (${f.size})`));
+                         `${f.name} (${f.size != null ? f.size : "?"})`));
       row.appendChild(min); row.appendChild(max); row.appendChild(list);
       if (genLocked) {
         row.appendChild(el("span", "gen-lockreason", f.locked_reason || "read-only"));
