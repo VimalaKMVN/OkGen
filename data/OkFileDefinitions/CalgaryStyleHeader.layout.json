@@ -437,7 +437,8 @@
       ],
       "fields": [
         {
-          "name": "size"
+          "name": "size",
+          "size": 6
         },
         {
           "name": "quantity",
