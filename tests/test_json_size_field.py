@@ -241,3 +241,121 @@ def test_every_sample_size_value_still_fits(registry):
             if isinstance(val, str):
                 assert len(val) <= SIZE_WIDTH, f"{path.name}: {val!r}"
     assert checked, "no size rows found — the assertion would be vacuous"
+
+
+# ---------------------------------------------- the same class, four more fields
+
+# `v0.97.0` declared `Sizes.size` and fixed ONE field. The class remained: any
+# Calgary field with no declared width is refused by Bulk Edit ("has no fixed
+# width"), omitted from the Volume Generate panel, and SILENTLY SKIPPED by
+# Generate through the API — while the single editor accepts it. 44 fields were
+# in that state. These four are declared at the user's widths; the rest stay
+# open because their widths are not knowable from the samples (see PLAN §6).
+MORE = [
+    ("CalgaryStyleHeader", "Lanes", "lane", 8),
+    ("CalgaryStyleHeader", "Details", "pageNumber", 3),
+    ("CalgaryStyleHeader", "Details", "lineNumber", 3),
+    ("CalgaryStyleHeader", "Header", "locator", 7),
+    ("CalgaryDistLabel", "Header", "locator", 7),
+]
+
+
+@pytest.mark.parametrize("layout,section,field,width", MORE)
+def test_the_width_is_declared(registry, layout, section, field, width):
+    lay = registry[layout]
+    sec = next(s for s in lay.sections if s.name == section)
+    f = next(x for x in sec.fields if x.name == field)
+    assert f.size == width
+
+
+def test_calgary_cartonlabel_locator_is_deliberately_NOT_declared(registry):
+    """The user asked for locator 7, taken from the `.OK` CartonLabel field of
+    that name. It does NOT hold on the Calgary carton label: its own vendor
+    sample and the shipped template both carry a 15-character value
+    ('289430000204787'), so declaring 7 would make OkGen refuse to write back a
+    value it had just read — the exact D48 defect. Same name, different field.
+    """
+    lay = registry["CalgaryCartonLabel"]
+    sec = next(s for s in lay.sections if s.name == "Header")
+    f = next(x for x in sec.fields if x.name == "locator")
+    assert f.size is None
+
+
+def test_every_declared_width_holds_every_sample_value(registry):
+    """D48's rule, re-run for the new declarations: no shipped sample or
+    template may carry a value that its own declared size refuses."""
+    import glob
+    widths = {(lay, field): w for lay, _sec, field, w in MORE}
+    checked = 0
+    for path in sorted(glob.glob(str(FIX / "*.json"))) + \
+            sorted(glob.glob(str(FIXTURE_CONFIG / "templates" / "Calgary*.json"))):
+        doc = json.loads(Path(path).read_text(encoding="utf-8"))
+        layout = {"styleHeaders": "CalgaryStyleHeader",
+                  "distributionLabels": "CalgaryDistLabel",
+                  "cartonLabels": "CalgaryCartonLabel"}.get((doc.get("data") or {}).get("type"))
+        if not layout:
+            continue
+
+        def walk(node):
+            nonlocal checked
+            if isinstance(node, dict):
+                for k, v in node.items():
+                    w = widths.get((layout, k))
+                    if w is not None and not isinstance(v, (dict, list)):
+                        s = "" if v is None else str(v)
+                        assert len(s) <= w, f"{Path(path).name}: {k}={s!r} exceeds {w}"
+                        checked += 1
+                    walk(v)
+            elif isinstance(node, list):
+                for x in node:
+                    walk(x)
+        walk(doc)
+    assert checked, "no values checked — the assertion would be vacuous"
+
+
+@pytest.mark.parametrize("layout,section,field,width", MORE)
+def test_bulk_edit_can_now_write_it(tmp_path, registry, config,
+                                    layout, section, field, width):
+    """It used to answer `<field> has no fixed width` — offered in the panel,
+    then refused on apply, which is exactly what was reported for `size`."""
+    sample = "styleheader_fmtS.json" if layout == "CalgaryStyleHeader" else "distlabel.json"
+    p = _copy(tmp_path, sample)
+    val = "7" * width
+    res = service.bulk_multi_apply(
+        [str(p)], layout,
+        [{"section": section, "type": "list", "field": field, "values": [val]}],
+        registry, config, backup=False)
+    entry = res["results"][0]
+    assert entry["status"] == "changed", entry
+    assert "no fixed width" not in str(entry)
+
+
+@pytest.mark.parametrize("layout,section,field,width", MORE)
+def test_volume_generate_offers_AND_writes_it(tmp_path, registry, config,
+                                              layout, section, field, width):
+    """Both halves. It was omitted from the panel (so it read as forgotten) and
+    silently skipped by the API path while reporting success."""
+    sample = "styleheader_fmtS.json" if layout == "CalgaryStyleHeader" else "distlabel.json"
+    p = _copy(tmp_path, sample)
+    scope = service.generate_scope([str(p)], registry, config)
+    if section == "Header":
+        offered = [x["name"] for x in scope["header_fields"]]
+    else:
+        offered = [x["name"] for s in scope["sections"] if s["name"] == section
+                   for x in s["fields"]]
+    assert field in offered, f"{field} not offered by the Generate panel"
+
+    val = "5" * width
+    key = "header_fields" if section == "Header" else "detail_fields"
+    entry = {"name": field, "type": "list", "values": [val]}
+    if section != "Header":
+        entry["section"] = section
+    res = service.generate_apply(
+        [str(p)], {"count": 1, "folder": str(tmp_path / "out"), key: [entry]},
+        registry, config)
+    made = sorted(Path(res["folder"]).glob("*.json"))
+    assert len(made) == 1
+    doc = json.loads(made[0].read_text(encoding="utf-8"))["data"]
+    node = (doc["header"]["lanes"][0] if section == "Lanes"
+            else doc["details"][0] if section == "Details" else doc["header"])
+    assert node.get(field) == val, "reported success but did not write the value"

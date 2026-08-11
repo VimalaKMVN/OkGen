@@ -306,6 +306,7 @@
         },
         {
           "name": "locator",
+          "size": 7,
           "json_path": [
             "header",
             "locator"

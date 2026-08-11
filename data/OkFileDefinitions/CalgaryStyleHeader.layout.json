@@ -306,6 +306,7 @@
         },
         {
           "name": "locator",
+          "size": 7,
           "json_path": [
             "header",
             "locator"
@@ -424,7 +425,8 @@
       ],
       "fields": [
         {
-          "name": "lane"
+          "name": "lane",
+          "size": 8
         }
       ]
     },
@@ -513,10 +515,12 @@
       ],
       "fields": [
         {
-          "name": "pageNumber"
+          "name": "pageNumber",
+          "size": 3
         },
         {
-          "name": "lineNumber"
+          "name": "lineNumber",
+          "size": 3
         },
         {
           "name": "style",
