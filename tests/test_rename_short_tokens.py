@@ -543,3 +543,74 @@ def test_the_code_token_is_offered_for_a_derived_field(tmp_path, registry, confi
     shutil.copy(DATA_DIR / "EUCartonLabel.OK", f)
     fields = service.rename_scope([str(f)], registry, config)["palette"]["header_fields"]
     assert "format" in fields and "format_code" in fields
+
+
+# ------------------------------------------- price length + which section
+
+def test_the_calgary_styleheader_takes_its_retail_price_from_the_DETAIL_line():
+    """A bare `retailPrice` resolves to the HEADER field, which shadows the
+    detail one (D70) and carries a different FORM: `7999.99` dotted against the
+    detail's zero-padded `000799999`. The preset must name the section."""
+    p = [x for x in _shipped().rename_presets()
+         if x["name"] == "Calgary StyleHeader (JSON)"][0]
+    names = [x if isinstance(x, str) else (x.get("name") or x.get("value"))
+             for x in p["parts"]]
+    assert "Details.retailPrice" in names
+    assert "retailPrice" not in names, "the bare token is the HEADER's field"
+
+
+@pytestmark_json
+def test_prices_are_trimmed_to_six_characters(tmp_path, registry, config):
+    got = _names(_json_copy(tmp_path),
+                 [{"name": "Details.retailPrice"}], registry, config)
+    assert got == ["799999.json"]      # 000799999 -> last 6
+
+
+@pytestmark_json
+def test_the_trim_keeps_the_LAST_characters_not_the_first(tmp_path, registry, config):
+    """The whole point. These are zero-PADDED values — 6 significant digits in
+    a 9-wide field — so trimming from the front keeps the padding and throws
+    the number away: `000799999` would become `000799`, a different price."""
+    got = _names(_json_copy(tmp_path),
+                 [{"name": "Details.compareAtPrice"}], registry, config)
+    assert got == ["999999.json"]
+    assert got != ["000999.json"]
+
+
+@pytestmark_json
+def test_a_value_already_short_enough_is_untouched(tmp_path, registry, config):
+    """`.OK` prices are already 6 characters, so the limit must be a ceiling,
+    not a fixed width — otherwise it would start padding or cutting them."""
+    assert service._build_name(
+        [{"name": "comp_price"}], {"comp_price": "002099"}, "_", 1,
+        keep_last={"comp_price": 6}) == "002099"
+    assert service._build_name(
+        [{"name": "x"}], {"x": "12"}, "_", 1, keep_last={"x": 6}) == "12"
+
+
+def test_an_undeclared_token_is_never_trimmed():
+    assert service._build_name(
+        [{"name": "key"}], {"key": "S403821608940739A"}, "_", 1,
+        keep_last={"retailPrice": 6}) == "S403821608940739A"
+
+
+def test_the_OK_layouts_are_untouched_by_the_price_trim(tmp_path, registry):
+    """`.OK` spells them `comp_price`/`ret_price`, which are NOT declared — and
+    are already 6 characters anyway. Pinned so a future limit on the Calgary
+    names cannot quietly reach the fixed-width engine."""
+    shipped = _shipped()
+    limits = shipped.rename_keep_last()
+    assert "comp_price" not in limits and "ret_price" not in limits
+    p = [x for x in shipped.rename_presets()
+         if x["name"] == "Styleheader naming convension"][0]
+    f = tmp_path / "StyleHeader.OK"
+    shutil.copy(DATA_DIR / "StyleHeader.OK", f)
+    new = service.bulk_rename_preview([str(f)], p["parts"], "_",
+                                      registry, shipped)["results"][0]["new"]
+    assert new == "01_HG_SH_FMTA_T2_K_550000P1A_D78_CP000000_UPN_RP002099.OK"
+
+
+def test_the_declared_limits_are_all_six():
+    limits = _shipped().rename_keep_last()
+    assert limits, "nothing declared"
+    assert set(limits.values()) == {6}, limits

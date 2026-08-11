@@ -412,7 +412,17 @@ class Config:
             "derived": list(self._rename_tokens.get("derived", [])),
             "header_fields": list(self._rename_tokens.get("header_fields", [])),
             "custom": dict(self._rename_tokens.get("custom", {})),
+            "keep_last": dict(self._rename_tokens.get("keep_last", {})),
         }
+
+    def rename_keep_last(self) -> Dict[str, int]:
+        """{token: N} — keep only the LAST N characters of that token when it
+        goes into a FILENAME. The token's real value is untouched everywhere
+        else; this is purely about name length.
+        """
+        if self._rename_tokens is None:
+            return {}
+        return dict(self._rename_tokens.get("keep_last", {}))
 
     def rename_tokens(self) -> Optional[List[str]]:
         """Flat allowed-token names (derived + header_fields + custom), or None (all)."""
@@ -881,6 +891,8 @@ class Config:
                     "derived": [str(t) for t in (rt.get("derived") or [])],
                     "header_fields": [str(t) for t in (rt.get("header_fields") or [])],
                     "custom": {str(k): str(v) for k, v in (rt.get("custom") or {}).items()},
+                    "keep_last": {str(k): int(v)
+                                  for k, v in (rt.get("keep_last") or {}).items()},
                 }
             elif isinstance(rt, list):   # back-compat: a flat list = header fields
                 rename_tokens = {"derived": [], "header_fields": [str(t) for t in rt], "custom": {}}

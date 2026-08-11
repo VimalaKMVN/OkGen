@@ -3708,7 +3708,7 @@ def _derived_code(value):
 
 
 def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None,
-                sl_pad=2, literal_tokens=None) -> str:
+                sl_pad=2, literal_tokens=None, keep_last=None) -> str:
     """Join ordered parts into a filename stem. A {'type': 'glue'} part binds the
     next part onto the one before it with NO separator. Empty values are skipped.
 
@@ -3719,6 +3719,7 @@ def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None,
     """
     label_names = label_names or {"brand", "format_label"}
     literal_tokens = literal_tokens or set()
+    keep_last = keep_last or {}
 
     # Resolve every part first, grouped into GLUED RUNS, because whether a part
     # survives can depend on its neighbours: a label glued to an empty value has
@@ -3749,6 +3750,15 @@ def _build_name(parts, toks, separator, seq, seq_pad=4, label_names=None,
                 v = _sanitize_label(toks.get(name, ""))
             else:
                 v = _strip_invalid(toks.get(name, ""))
+            # A declared token keeps only its LAST n characters in a filename.
+            # The LAST, not the first: these are zero-PADDED values — a Calgary
+            # price is 6 significant digits in a 9-wide field — so trimming
+            # from the front would keep the padding and throw the number away
+            # (`000799999` -> `000799` instead of `799999`). The token's real
+            # value is untouched; this is only about the name's length.
+            n = keep_last.get(name)
+            if n and len(v) > n:
+                v = v[-n:]
         if glue and runs:
             runs[-1].append((v, lit))
         else:
@@ -3885,7 +3895,8 @@ def bulk_rename_preview(paths, parts, separator, registry, config) -> dict:
                 continue
             base = _build_name(parts, toks, separator, seq,
                                label_names=label_names, sl_pad=sl_pad,
-                               literal_tokens=set(custom or {}))
+                               literal_tokens=set(custom or {}),
+                               keep_last=config.rename_keep_last())
             if not base:
                 results.append({"path": str(f), "old": f.name, "new": None, "status": "empty"})
                 continue

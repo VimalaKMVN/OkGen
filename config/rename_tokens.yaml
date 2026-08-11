@@ -26,6 +26,18 @@ rename_tokens:
     # PROD: "PROD"
     # REPRINT: "RP"
 
+  # ---- filename length limits (token -> keep only the LAST n characters) ----
+  # Applied ONLY when a name is built; the field's real value is untouched.
+  # The LAST n, not the first: these are zero-PADDED values — a Calgary price
+  # is 6 significant digits in a 9-wide field — so trimming from the front
+  # would keep the padding and discard the number (`000799999` -> `000799`
+  # rather than `799999`).
+  keep_last:
+    Details.compareAtPrice: 6
+    Details.retailPrice: 6
+    compareAtPrice: 6
+    retailPrice: 6
+
   # ---- derived (computed) tokens ----
   derived:
     - sl             # serial for THIS batch: 01, 02, 03 ... (see below)

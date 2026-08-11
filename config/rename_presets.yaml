@@ -277,13 +277,17 @@ presets:
       - department
       - CP
       - no_delim
-      - compareAtPrice
+      - Details.compareAtPrice   # 999999 — last 6 of 000999999 (keep_last)
       - CU
       - no_delim
       - compareAtUp
       - RP
       - no_delim
-      - retailPrice
+      - Details.retailPrice      # 799999 — the DETAIL line's price, not the
+                                 # header's. A bare `retailPrice` resolves to
+                                 # the HEADER field, which shadows it (D70) and
+                                 # carries a different form: `7999.99` dotted
+                                 # against the detail's zero-padded `000799999`.
 
   # 01_HS_DL_FMT7_KJ000827498941044J_D92.json
   # No `T` pair: CalgaryDistLabel has no Details section, so there is no ticket
