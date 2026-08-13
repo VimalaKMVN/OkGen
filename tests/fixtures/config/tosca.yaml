@@ -52,6 +52,7 @@ process_names:
   CalgaryStyleHeader: "Style Header"
   CalgaryCartonLabel: "Carton Label"
   CalgaryDistLabel: "Distribution Label"
+  CalgaryPreticket: "Pre-Ticket"
   StyleHeader: "Style Header"
   Preticket: "Pre-Ticket"
   CartonLabel: "Carton Label"

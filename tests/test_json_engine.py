@@ -31,6 +31,7 @@ CASES = {
     "styleheader_fmtT.json": "CalgaryStyleHeader",
     "cartonlabel_minified.json": "CalgaryCartonLabel",
     "distlabel.json": "CalgaryDistLabel",
+    "preticket.json": "CalgaryPreticket",
 }
 ALL_JSON = sorted(CASES)
 
@@ -47,8 +48,9 @@ def config():
     return Config.load(FIXTURE_CONFIG)
 
 
-def test_registry_loads_three_calgary_layouts(registry):
-    for name in ("CalgaryStyleHeader", "CalgaryCartonLabel", "CalgaryDistLabel"):
+def test_registry_loads_the_calgary_layouts(registry):
+    for name in ("CalgaryStyleHeader", "CalgaryCartonLabel", "CalgaryDistLabel",
+                 "CalgaryPreticket"):
         lay = registry.get(name)
         assert lay is not None and lay.json_mode is True
         assert lay.sections[0].name == "Header" and lay.sections[0].json_kind == "object"

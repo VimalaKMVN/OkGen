@@ -100,6 +100,7 @@ _JSON_TYPE_TO_LAYOUT = {
     "styleHeaders": "CalgaryStyleHeader",
     "cartonLabels": "CalgaryCartonLabel",
     "distributionLabels": "CalgaryDistLabel",
+    "preTickets": "CalgaryPreticket",
 }
 
 # Matched CASE-INSENSITIVELY. The discriminator is a word, not a positional
@@ -122,7 +123,7 @@ def json_type_is_known(value) -> bool:
 
 
 def canonical_json_types() -> list:
-    """The three type words in their canonical casing (for the editor list)."""
+    """Every type word in its canonical casing (for the editor list)."""
     return list(_JSON_TYPE_TO_LAYOUT)
 
 

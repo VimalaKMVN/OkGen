@@ -37,6 +37,8 @@ date_fields:
     date: rfc3339_nano
   CalgaryCartonLabel:
     date: rfc3339_nano
+  CalgaryPreticket:
+    date: rfc3339_nano
 
   # ---- add more as you need them ----
   # The other Calgary date fields are left as plain text for now, since their

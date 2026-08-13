@@ -91,15 +91,26 @@ def test_every_axis_produces_rows(audit_output):
     assert not short, f"axes collapsed below their floor (count, floor): {short}"
 
 
-def test_all_ten_layouts_are_reached(audit_output):
-    """Both engines, every layout — the question being answered is about all 10."""
+def test_every_layout_is_reached(audit_output):
+    """Both engines, every layout — the question being answered is about all of
+    them, so the set is asserted EXACTLY rather than as a subset.
+
+    It was `expected <= seen` while ten layouts existed, and an eleventh
+    (``CalgaryPreticket``) was added without this test noticing — a new layout
+    could join the registry and never be audited, which is the one thing this
+    file exists to prevent. Equality means adding a layout FAILS here until it
+    is listed, so the omission is loud instead of silent.
+    """
     seen = {line.split('"layout": "')[1].split('"')[0]
             for line in audit_output.splitlines()
             if line.startswith("sample|") and '"layout": "' in line}
     expected = {"StyleHeader", "Preticket", "CartonLabel", "DistLabels",
                 "EUPreticket", "EUStyleHeader", "EUCartonLabel",
-                "CalgaryStyleHeader", "CalgaryDistLabel", "CalgaryCartonLabel"}
-    assert expected <= seen, f"layouts never audited: {sorted(expected - seen)}"
+                "CalgaryStyleHeader", "CalgaryDistLabel", "CalgaryCartonLabel",
+                "CalgaryPreticket"}
+    assert expected == seen, (
+        f"layouts never audited: {sorted(expected - seen)}; "
+        f"audited but unlisted here: {sorted(seen - expected)}")
 
 
 def test_the_probes_get_real_answers_not_errors(audit_output):

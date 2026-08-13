@@ -65,3 +65,12 @@ empty_rows:
       size: null
       quantity: null
     Stores: *empty_store_row
+
+  # Pre-Tickets carry the same three nested arrays as a Style Header.
+  CalgaryPreticket:
+    Lanes:
+      lane: ""
+    Sizes:
+      size: null
+      quantity: null
+    Stores: *empty_store_row

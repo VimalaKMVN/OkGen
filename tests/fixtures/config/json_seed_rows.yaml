@@ -60,7 +60,7 @@ seed_rows:
     # blank, D52 reads the section as holding no data, so a single add replaces
     # the previous row rather than stacking (bulk add N and Generate n still
     # produce N blank rows). Nobody adds stores to a Style Header.
-    Stores:
+    Stores: &seed_store_row
       store: ""
       puertoRicoFlag: " "
       units: " "
@@ -99,6 +99,43 @@ seed_rows:
       fact1: ""
       fact2: ""
       fact3: ""
+
+  # Pre-Tickets follow the Style Header: Lanes/Sizes keep chosen values, Stores
+  # is the sample's blank row, and a new Details row is the vendor sample's OWN
+  # first detail line.
+  CalgaryPreticket:
+    Lanes:
+      lane: ""
+    Sizes:
+      size: null
+      quantity: "100"
+    Stores: *seed_store_row
+
+    Details:
+      pageNumber: "006"
+      lineNumber: "006"
+      style: "182517"
+      type: "2"
+      pastSeasonIndicator: "N"
+      messageCode1: "MSG1"
+      messageCode2: "MSG2"
+      compareAtPrice: "1999"
+      compareAtUp: "Y"
+      retailPrice: "799"
+      quantity: "00001"
+      houseNumber: "000000"
+      pieces: "00"
+      ladderPlanMMYY: "0826"
+      ladderPlan: "20260801"
+      frenchDescription: null
+      englishNoun: ""
+      frenchNoun: ""
+      category: "7715"
+      item: ""
+      fact1: ""
+      fact2: ""
+      fact3: ""
+      size: "SM"
 
   CalgaryDistLabel:
     Stores:

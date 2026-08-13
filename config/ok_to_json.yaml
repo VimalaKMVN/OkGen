@@ -318,6 +318,143 @@ conversions:
     # Unmapped on purpose: the .OK `sequence` field — the vendor spec says
     # Sequence is "calculated by GTA".
 
+  # ------------------------------------------------------------ Pre-Ticket ---
+  #
+  # THE FIRST CONVERSION WHOSE DETAIL ROWS ARE REAL ROWS. The other three
+  # synthesize ONE JSON detail line out of the .OK HEADER, because a Style
+  # Header, Dist Label and Carton Label have no repeating detail section. A
+  # Pre-Ticket does — the `.OK` section confusingly named `Lane` — and its rows
+  # map to the JSON's `details[]` one for one, which is what the user described
+  # as "OK file detail lines will match with JSON detail lines".
+  #
+  # `from_section: Lane` on `details` is the mechanism, and it already existed;
+  # this is simply the first config to use it against a section with rows.
+  Preticket:
+    target: CalgaryPreticket
+    template: templates/CalgaryPreticket.json
+    source: SCAN
+    # A Pre-Ticket is keyed by its PO number, the SAME field for SCAN and WMS
+    # (see keys.yaml) — the .OK side keys on `po`, which is the same value.
+    key: purchaseOrderNumber
+
+    # --- data.<field> ------------------------------------------------------
+    # `timestamp` sits BESIDE `data.header`, not inside it, so it is declared
+    # here rather than in the header block below.
+    #
+    # The document stamp is the .OK's transmit DATE and TIME joined — the user's
+    # call, over stamping the conversion moment, because the HHMM has nowhere
+    # else to go (`transmitDate` in the header is the date alone). Seconds and
+    # nanoseconds are zero-filled: see the transform for why they are not
+    # invented. This is a LIST `from:`, which only a multi-source transform
+    # accepts. If the .OK's date is unusable the TEMPLATE's stamp stands, since
+    # a half-formed stamp would be refused by the field's own date validator.
+    document:
+      timestamp:        { from: [date, time], transform: ok_datetime_to_stamp }
+
+    # --- data.header -------------------------------------------------------
+    header:
+      chain:            { from: chain }
+      format:           { from: format }
+      purchaseOrderNumber: { from: po }
+      department:       { from: dept }
+      transmitDate:     { from: date, transform: iso_date }
+      # Copied from the .OK rather than counted (the user's call, "copy from the
+      # .OK files for now"). Note `lineCount` therefore reports what the .OK
+      # header claims, which can disagree with the number of detail rows
+      # actually emitted — revisit if that turns out to matter.
+      lineCount:        { from: line_count }
+      blockNumber:      { from: block_num }
+      numberOfBlocks:   { from: num_block }
+      totalQuantity:    { from: tot_qty }
+      totalRetail:      { from: tot_ret }
+      # These two live on the DETAIL line in the .OK and on the HEADER in the
+      # JSON, so they are read from the first detail row (the user's call for
+      # both). Without this they would inherit the template — i.e. the sample
+      # order's own product data, in every converted file. That is D46 exactly.
+      vendorStyle:      { from: vendor_style, from_section: Lane }
+      category:         { from: category,     from_section: Lane }
+      # A converted file's source is decided by this field, exactly like the
+      # other three: the .OK Pre-Ticket has no ASN field, so it is null and the
+      # file is a SCAN file — which is what makes the PO its key.
+      headerASNid:      { from: header_asn_id, null_when_blank: true }
+      # Deliberately NOT mapped, and each for a reason worth keeping:
+      #   indicator  — says "this is a Pre-Ticket"; the JSON says that in
+      #                `data.type`, so it would be the same fact written twice.
+      #   add        — no JSON counterpart.
+      #   description — the .OK Pre-Ticket has no such field at all, so this
+      #                inherits the TEMPLATE's product text in every converted
+      #                file. Accepted for now on the user's explicit call
+      #                ("inherit from sample"); it is the one leaky value, and
+      #                blanking it is a one-line change here.
+
+    # Counted from the rows actually emitted. `lineCount` is deliberately absent
+    # — it is copied from the .OK above, so counting it here would overwrite the
+    # copy and silently make the two rules fight.
+    counts: {}
+
+    # A Pre-Ticket .OK has no lane/size/store sections, so all four are always
+    # the empty form. Declared rather than inherited so the value is visible
+    # here rather than dependent on whatever the template happens to carry.
+    empty_counts:
+      laneRecords:    { array: lanes,   value: 1 }
+      numberOfStores: { array: stores,  value: " " }
+      storeLines:     { array: stores,  value: " " }
+
+    # --- nested arrays -----------------------------------------------------
+    # lanes / sizes / stores are blank placeholders on a Pre-Ticket (the user
+    # confirmed they are "mostly blank placeholders only"), and the .OK has no
+    # section to fill them from — so none is declared and each keeps the
+    # template's single blank row. They are still fully EDITABLE in OkGen.
+
+    # --- data.details[] ----------------------------------------------------
+    # ONE JSON detail row per .OK detail row. Everything here is a straight
+    # field rename except the prices, the ladder pair and `size`.
+    details:
+      from_section: Lane
+      # Preticket.Lane is padded to a minimum of 10 rows with all-zero filler
+      # (detail_fill.yaml). Those are structure, not order lines — without this
+      # a file with one real detail converts to ELEVEN JSON details, ten of them
+      # zeros that look exactly like data. Only a TRAILING run is dropped.
+      skip_filler_rows: true
+      fields:
+        pageNumber:          { from: page }
+        lineNumber:          { from: line }
+        style:               { from: style }
+        type:                { from: type }
+        # The field this layout adds over the Style Header. 6 wide in the .OK
+        # and 6 in the JSON spec, so it needs no transform.
+        size:                { from: size }
+        # `raw` keeps a single space as a space: blank is a REAL value for this
+        # field (the user's explicit call), and trimming would collapse it to ''
+        # — the absent-vs-blank distinction D34/D39 exist to keep.
+        pastSeasonIndicator: { from: psi, raw: true }
+        messageCode1:        { from: message1 }
+        messageCode2:        { from: message2 }
+        # Zero-padded to 9 "with 0s in the front", exactly as styleHeaders does.
+        compareAtPrice:      { from: comp_price, transform: pad9 }
+        retailPrice:         { from: ret_price,  transform: pad9 }
+        compareAtUp:         { from: comp_up, transform: yn_to_bool }
+        quantity:            { from: qty,      raw: true }
+        houseNumber:         { from: housenum, raw: true }
+        pieces:              { from: pieces,   raw: true }
+        # The .OK splits the ladder plan across TWO fields — `ladder_mmdd` is
+        # MMDD and `ladder` is the 2-digit YEAR (user-corrected; the source CSV
+        # calls the second one "Ladder Plan", which reads as neither). The JSON
+        # joins them back two different ways, so both rules read both fields.
+        # The century comes from TODAY, not from a literal.
+        ladderPlanMMYY:      { from: [ladder_mmdd, ladder], transform: ladder_mmyy }
+        ladderPlan:          { from: [ladder_mmdd, ladder], transform: ladder_plan }
+        frenchDescription:   { from: frdesc,  null_when_blank: true }
+        englishNoun:         { from: engnoun }
+        frenchNoun:          { from: frnoun }
+        category:            { from: category }
+        item:                { from: item,  null_when_blank: true }
+        fact1:               { from: fact1, null_when_blank: true }
+        fact2:               { from: fact2, null_when_blank: true }
+        fact3:               { from: fact3, null_when_blank: true }
+        # `vendor_style` is not listed: it has no per-DETAIL home in the JSON
+        # and is lifted to the header above.
+
 # Available transforms (okgen/okjson.py):
 #   trim                    default — strip surrounding pad
 #   raw                     verbatim, padding kept (use `raw: true`)
@@ -329,3 +466,12 @@ conversions:
 #   mmyy_to_first_of_month  '0817'    -> '20170801'
 #   yn_to_bool              'Y'/'N'   -> 'true'/'false'
 #   blank_to_null           ''        -> null
+#
+# MULTI-source transforms — declared with a LIST `from:`, e.g.
+#   timestamp: { from: [date, time], transform: ok_datetime_to_stamp }
+# The values arrive in the order `from:` names them. A list `from:` with a
+# single-source transform (or the reverse) is an ERROR naming both, rather than
+# a silent wrong value:
+#   ok_datetime_to_stamp  '20260804'+'0718' -> '2026-08-04T07:18:00.000000000Z'
+#   ladder_mmyy           '0801'+'26'       -> '0826'
+#   ladder_plan           '0801'+'26'       -> '20260801'  (century = today's)

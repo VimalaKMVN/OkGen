@@ -17,3 +17,6 @@ unique_fields:
   CalgaryCartonLabel:
     SCAN: pickListId
     WMS: pickListId
+  # Pre-Tickets key on the PO number whichever system sent them, so this
+  # one is a PLAIN field rather than a source pair.
+  CalgaryPreticket: purchaseOrderNumber

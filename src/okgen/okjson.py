@@ -93,6 +93,89 @@ def _blank_to_null(v):
     return _trim(v) or None
 
 
+# --------------------------------------------------------------------------- #
+# MULTI-source transforms — one JSON field built from SEVERAL `.OK` fields.
+#
+# Declared with a LIST `from:`, so config still says where every character came
+# from. They exist because the Pre-Ticket mapping needs two values the .OK
+# splits across fields and the JSON joins back together, and inventing a
+# separate config key per pair would not generalise.
+#
+# Each receives the raw values in the order `from:` lists them.
+# --------------------------------------------------------------------------- #
+
+def _current_century() -> str:
+    """The century a 2-digit `.OK` year belongs to, e.g. '20'.
+
+    The `.OK` carries YY and the JSON wants CCYY, and nothing in the file says
+    which century — so it is TAKEN FROM TODAY (the user's call: "whatever is the
+    current century"). Deliberately a function rather than a literal: hard-coding
+    '20' would quietly produce wrong dates from 2100, and this is the only place
+    that assumption lives.
+    """
+    from datetime import datetime, timezone
+    return str(datetime.now(timezone.utc).year // 100).zfill(2)
+
+
+def _ok_datetime_to_stamp(date8, time4) -> str:
+    """`.OK` date + HHMM -> the JSON's 30-character RFC 3339 nanosecond stamp.
+
+    ``20260804`` + ``0718`` -> ``2026-08-04T07:18:00.000000000Z``.
+
+    The seconds and nanoseconds are ZERO-FILLED rather than stamped from the
+    clock: the value is meant to say when this order was TRANSMITTED, which the
+    .OK records only to the minute. Inventing a plausible fractional second
+    would make a converted file look more precise than its source. (The
+    alternative — a conversion-time `now` — was considered and rejected by the
+    user, because it discards the HHMM the .OK does carry.)
+
+    Anything the .OK cannot supply comes back blank rather than half-formed: a
+    partial stamp would be refused by the field's own date validator anyway,
+    and a clear blank is easier to spot than a wrong instant.
+    """
+    d, t = _trim(date8), _trim(time4)
+    if len(d) != 8 or not d.isdigit():
+        return ""
+    if len(t) != 4 or not t.isdigit():
+        t = "0000"
+    return f"{d[0:4]}-{d[4:6]}-{d[6:8]}T{t[0:2]}:{t[2:4]}:00.000000000Z"
+
+
+def _ladder_mmyy(mmdd, yy) -> str:
+    """`.OK` ladder MMDD + YY -> the JSON's `ladderPlanMMYY` ('0801' + '26' ->
+    '0826'). Blank when either half is missing — the user's call, over a null:
+    the field is a string everywhere else it appears."""
+    m, y = _trim(mmdd), _trim(yy)
+    if len(m) != 4 or not m.isdigit() or len(y) != 2 or not y.isdigit():
+        return ""
+    if m[0:2] == "00":
+        return ""      # '00' is not a month — the same guard `ladder_plan` uses
+    return f"{m[0:2]}{y}"
+
+
+def _ladder_plan(mmdd, yy) -> str:
+    """`.OK` ladder MMDD + YY -> the JSON's full `ladderPlan` date
+    ('0801' + '26' -> '20260801'), the century taken from today.
+
+    A month or day of ``00`` is not a date, so it comes back blank rather than
+    as ``20260000`` — the reference Preticket.OK really does carry ``0000``, so
+    this is the shipped case, not a hypothetical one.
+    """
+    m, y = _trim(mmdd), _trim(yy)
+    if len(m) != 4 or not m.isdigit() or len(y) != 2 or not y.isdigit():
+        return ""
+    if m[0:2] == "00" or m[2:4] == "00":
+        return ""
+    return f"{_current_century()}{y}{m[0:2]}{m[2:4]}"
+
+
+MULTI_TRANSFORMS = {
+    "ok_datetime_to_stamp": _ok_datetime_to_stamp,
+    "ladder_mmyy": _ladder_mmyy,
+    "ladder_plan": _ladder_plan,
+}
+
+
 TRANSFORMS = {
     "trim": _trim,
     "strip_zeros": _strip_zeros,
@@ -106,8 +189,26 @@ TRANSFORMS = {
 }
 
 
+def _is_multi(rule: dict) -> bool:
+    """Whether ``from:`` names SEVERAL .OK fields rather than one."""
+    return isinstance(rule.get("from"), (list, tuple))
+
+
 def _apply(rule: dict, raw_value) -> Tuple[object, str]:
-    """(value, provenance) for one mapped field."""
+    """(value, provenance) for one mapped field.
+
+    ``raw_value`` is a single value, or — when ``from:`` is a list — the list of
+    values in the order config names them, which only a MULTI transform accepts.
+    """
+    if _is_multi(rule):
+        name = rule.get("transform")
+        fn = MULTI_TRANSFORMS.get(name)
+        if fn is None:
+            raise ConvertError(
+                f"{name!r} is not a multi-source transform, but its `from:` names "
+                f"{len(rule['from'])} fields — check config/ok_to_json.yaml "
+                f"(available: {', '.join(sorted(MULTI_TRANSFORMS))})")
+        return fn(*raw_value), "derived"
     if rule.get("raw"):
         return ("" if raw_value is None else str(raw_value)), "ok"
     name = rule.get("transform")
@@ -121,6 +222,16 @@ def _apply(rule: dict, raw_value) -> Tuple[object, str]:
 
 def _is_blank(v) -> bool:
     return v is None or (isinstance(v, str) and v.strip() == "")
+
+
+def _is_filler(row: dict) -> bool:
+    """A structural padding row: every field blank or all zeros.
+
+    Deliberately NOT "every field blank": a fixed-width filler row is written as
+    zeros (`000`/`000000`), which is not blank at all, and treating it as data
+    is what put ten empty detail lines into a converted Pre-Ticket.
+    """
+    return all(_trim(v).strip("0") == "" for v in row.values())
 
 
 
@@ -254,29 +365,92 @@ def convert(okf, layout, spec: dict, template: dict,
         raise ConvertError("source file has no header record")
     H = hdr_rows[0]
 
+    # --- document-level fields (data.timestamp, …) -------------------------
+    #
+    # `data.timestamp` and `data.type` sit BESIDE `data.header`, not inside it,
+    # so the header block below cannot reach them — it writes into `header[…]`.
+    # Before this, a conversion could only inherit the template's stamp, and all
+    # three shipped conversions still do (none declares a `document:` block), so
+    # every converted Style Header, Dist Label and Carton Label carried the
+    # SAMPLE's timestamp. That is left exactly as it was; this only gives a
+    # layout the option, which the Pre-Ticket uses.
+    #
+    # `type` is deliberately reachable here but never declared: it is the
+    # detection discriminator, and the target layout's own spec already decides
+    # it. Writing it from the .OK could only ever make the file undetectable.
+    for field, rule in (spec.get("document") or {}).items():
+        if field == "type":
+            raise ConvertError(
+                "`document:` must not set `type` — it is the layout "
+                "discriminator and the template already carries the right one")
+        if field not in data:
+            raise ConvertError(
+                f"`document: {field}` is not a field of the template document "
+                f"(have: {', '.join(k for k in data if k != 'header')}) — "
+                f"check config/ok_to_json.yaml")
+        if "value" in rule:
+            data[field], prov = _generated(rule, date_formats, field)
+            note(field, prov, data[field], "declared in config")
+            continue
+        src = rule.get("from")
+        names = list(src) if _is_multi(rule) else [src]
+        missing = [n for n in names if n not in H]
+        if missing:
+            note(field, "template", data.get(field), f"no .OK field {missing[0]!r}")
+            continue
+        value, prov = _apply(rule, [H[n] for n in names] if _is_multi(rule) else H[src])
+        # A transform that cannot build the value returns blank rather than a
+        # half-formed one; the template's stamp is a better answer than "".
+        if value == "":
+            note(field, "template", data.get(field),
+                 f"{'+'.join(names)} could not make a value")
+            continue
+        data[field] = value
+        note(field, prov, value, "+".join(names))
+
     # --- header ------------------------------------------------------------
     for field, rule in (spec.get("header") or {}).items():
         if "value" in rule:                       # declared outright, no .OK source
             header[field], prov = _generated(rule, date_formats, field)
             note(field, prov, header[field], "declared in config")
             continue
+        # A header field may read from the FIRST ROW of a repeating section.
+        # A Pre-Ticket's `vendorStyle` and `category` live on the detail line in
+        # the .OK and on the header in the JSON, so without this they could only
+        # inherit the template — another order's values, the D46 leak. Default
+        # stays the header, so every existing conversion is untouched.
+        from_section = rule.get("from_section")
+        row = H
+        row_label = ""
+        if from_section and from_section != hdr_section:
+            srows = _section_values(okf, layout, from_section)
+            if not _has_real_rows(srows):
+                note(field, "template", header.get(field),
+                     f"no rows in .OK section {from_section!r}")
+                continue
+            row = srows[0]
+            row_label = f"{from_section}[0]."
         src = rule.get("from")
-        if src not in H:
+        names = list(src) if _is_multi(rule) else [src]
+        missing = [n for n in names if n not in row]
+        if missing:
             if rule.get("null_when_blank"):
                 header[field] = None
                 note(field, "null", None, "no .OK source")
             else:
-                note(field, "template", header.get(field), f"no .OK field {src!r}")
+                note(field, "template", header.get(field),
+                     f"no .OK field {missing[0]!r}")
             continue
         # Blankness is judged on the .OK VALUE, before any transform — an empty
         # price must read as null, not as the '0.00' a transform would invent.
-        if rule.get("null_when_blank") and _is_blank(H[src]):
+        if rule.get("null_when_blank") and all(_is_blank(row[n]) for n in names):
             header[field] = None
-            note(field, "null", None, f"{src} is blank in the .OK")
+            note(field, "null", None, f"{names[0]} is blank in the .OK")
             continue
-        value, prov = _apply(rule, H[src])
+        value, prov = _apply(rule, [row[n] for n in names] if _is_multi(rule)
+                             else row[src])
         header[field] = value
-        note(field, prov, value, src)
+        note(field, prov, value, row_label + "+".join(names))
 
     # --- nested arrays -----------------------------------------------------
     populated_arrays = set()          # arrays whose rows really came from the .OK
@@ -370,6 +544,20 @@ def convert(okf, layout, spec: dict, template: dict,
         from_section = det_spec.get("from_section", hdr_section)
         rows = hdr_rows if from_section == hdr_section else _section_values(
             okf, layout, from_section)
+        # A fixed-width detail section can be padded to a block size with
+        # STRUCTURAL all-zero rows — `detail_fill.yaml` keeps Preticket.Lane at
+        # a minimum of 10, so a file with one real line carries ten `000…` rows
+        # after it. Those are padding, not order lines: converting them produces
+        # ten junk JSON details that look exactly like real ones. The same rows
+        # are already skipped as "not data" by `_section_has_data` on the .OK
+        # side, so this makes conversion agree with the rest of OkGen rather
+        # than inventing a rule.
+        #
+        # Only TRAILING runs are dropped, and only when the whole row is zeros
+        # or blanks — a zero in the middle of real lines is somebody's data.
+        if det_spec.get("skip_filler_rows"):
+            while rows and _is_filler(rows[-1]):
+                rows = rows[:-1]
         proto = (data.get("details") or [{}])[0]
         out = []
         for row in rows:
@@ -382,21 +570,39 @@ def convert(okf, layout, spec: dict, template: dict,
                              "declared in config")
                     continue
                 src = rule.get("from")
-                if src not in row:
+                names = list(src) if _is_multi(rule) else [src]
+                missing = [n for n in names if n not in row]
+                if missing:
                     if rule.get("null_when_blank"):
                         item[field] = None
                         if not out:
                             note(f"details.{field}", "null", None, "no .OK source")
                     continue
-                if rule.get("null_when_blank") and _is_blank(row[src]):
+                if rule.get("null_when_blank") and all(_is_blank(row[n]) for n in names):
                     item[field] = None
                     if not out:
-                        note(f"details.{field}", "null", None, f"{src} is blank")
+                        note(f"details.{field}", "null", None,
+                             f"{names[0]} is blank")
                     continue
-                item[field], prov = _apply(rule, row[src])
+                item[field], prov = _apply(rule, [row[n] for n in names]
+                                           if _is_multi(rule) else row[src])
                 if not out:
-                    note(f"details.{field}", prov, item[field], src)
+                    note(f"details.{field}", prov, item[field], "+".join(names))
             out.append(item)
+        if not out:
+            # D43's boundary, arriving through conversion: an .OK whose detail
+            # section was emptied would otherwise produce a bare `"details": []`,
+            # which tells the consuming system nothing about the shape it should
+            # have had. Every nested array already keeps ONE row with every
+            # field present and empty; `details` is an array like the others and
+            # now behaves like them. Reachable only on a layout whose details
+            # come from a repeating section — the other three build their row
+            # from the header, which always exists.
+            out = [_empty_row([proto] if proto else [],
+                              set(det_spec.get("fields") or {}), set(),
+                              empty_rows, "details")]
+            note("details[]", "empty", "1 blank row",
+                 f"no rows in .OK section {from_section!r}")
         data["details"] = out
 
     # --- row counts --------------------------------------------------------

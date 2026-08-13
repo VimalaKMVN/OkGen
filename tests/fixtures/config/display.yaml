@@ -33,11 +33,13 @@ rules:
     values: {cartonLabels: "cartonLabels"}
   - match: {layout: CalgaryDistLabel, section: Header, field: type}
     values: {distributionLabels: "distributionLabels"}
+  - match: {layout: CalgaryPreticket, section: Header, field: type}
+    values: {preTickets: "preTickets"}
 
   # Calgary chain by CODE or by NAME (D41 — the samples carry both). Scoped to
   # the Calgary layouts so the .OK layouts keep the code-only chain registry.
   - match:
-      layout: [CalgaryStyleHeader, CalgaryCartonLabel, CalgaryDistLabel]
+      layout: [CalgaryStyleHeader, CalgaryCartonLabel, CalgaryDistLabel, CalgaryPreticket]
       section: Header
       field: chain
     values:
@@ -59,7 +61,10 @@ rules:
   # Every casing the documents use, blank first then upper then lower. Keys are
   # QUOTED because YAML 1.1 reads all of these as booleans unquoted — which is
   # also why six of the twelve would silently collapse onto two without quotes.
-  - match: {layout: CalgaryStyleHeader, section: Details, field: compareAtUp}
+  - match:
+      layout: [CalgaryStyleHeader, CalgaryPreticket]
+      section: Details
+      field: compareAtUp
     values:
       "": "(blank)"
       "TRUE": "TRUE"
@@ -77,8 +82,14 @@ rules:
   # ...and the DETAIL row's coded type, which must resolve independently of the
   # header rule above. In production this comes from the generic `field: type`
   # rule; pinned explicitly here so section scoping is proven in both directions.
-  - match: {layout: CalgaryStyleHeader, section: Details, field: type}
+  - match: {layout: [CalgaryStyleHeader, CalgaryPreticket], section: Details, field: type}
     values: {"1": "Detail Type 1", "2": "Detail Type 2"}
+
+  # Pre-Ticket past-season indicator: BLANK is a real value and is offered
+  # first (the user's call). CalgaryPreticket only — the Style Header has never
+  # had this dropdown and gains nothing from one here.
+  - match: {layout: CalgaryPreticket, section: Details, field: pastSeasonIndicator}
+    values: {"": "(blank)", "Y": "Yes", "N": "No"}
 
   # EU GTA: the read-only `process` field is labeled by layout name.
   - match: {layout: [EUStyleHeader, EUCartonLabel], field: process}

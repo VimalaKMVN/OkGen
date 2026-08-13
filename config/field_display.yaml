@@ -65,6 +65,7 @@ freeform:
   CalgaryStyleHeader: [type, chain]
   CalgaryCartonLabel: [type, chain]
   CalgaryDistLabel: [type, chain]
+  CalgaryPreticket: [type, chain]
 
 # Fields stored EXACTLY as the user typed them: never zero-padded, never
 # re-justified, leading/middle/trailing spaces preserved. Only the leftover
@@ -142,6 +143,8 @@ pad_zeros:
   CalgaryDistLabel:
     - store
   CalgaryCartonLabel:
+    - store
+  CalgaryPreticket:
     - store
 
 # --------------------------------------------------------------------------- #

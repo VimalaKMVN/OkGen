@@ -102,6 +102,9 @@ rules:
   - match: {layout: CalgaryDistLabel, section: Header, field: type}
     values:
       distributionLabels: "distributionLabels"
+  - match: {layout: CalgaryPreticket, section: Header, field: type}
+    values:
+      preTickets: "preTickets"
 
   # ---- Calgary JSON: chain by CODE or by NAME ----
   #
@@ -116,7 +119,7 @@ rules:
   # on an NA file and refused on save. (It did not, until this was written:
   # `05` was correctly refused while `Europe` was accepted.)
   - match:
-      layout: [CalgaryStyleHeader, CalgaryCartonLabel, CalgaryDistLabel]
+      layout: [CalgaryStyleHeader, CalgaryCartonLabel, CalgaryDistLabel, CalgaryPreticket]
       section: Header
       field: chain
     values:
@@ -151,7 +154,7 @@ rules:
   # `FALSE` is 5 characters and the field holds 5, so every entry fits: a
   # dropdown offering a value too long to SAVE is the D48 defect.
   - match:
-      layout: CalgaryStyleHeader
+      layout: [CalgaryStyleHeader, CalgaryPreticket]
       section: Details
       field: compareAtUp
     values:
@@ -169,6 +172,26 @@ rules:
       "y": "y"
       "n": "n"
 
+  # ---- Calgary JSON: the past-season indicator ----
+  #
+  # BLANK IS A REAL VALUE and is offered first (the user's explicit call): the
+  # vendor sample carries `N`, but a space is equally legitimate and a list
+  # that omitted it would make blank unreachable from the editor — the D56
+  # defect, where a correct value could not be selected.
+  #
+  # Scoped to CalgaryPreticket only. The Style Header has never had a
+  # pastSeasonIndicator dropdown and gains nothing here, so adding this to it
+  # would change an existing layout's editor on the way past. Add the name to
+  # the list if that turns out to be wanted.
+  - match:
+      layout: CalgaryPreticket
+      section: Details
+      field: pastSeasonIndicator
+    values:
+      "": "(blank)"
+      "Y": "Yes"
+      "N": "No"
+
   - match: {layout: StyleHeader, field: indicator}
     values:
       N: "StyleHeader"
@@ -179,7 +202,7 @@ rules:
   # TJMAXX formats
   - match:
       chain: ["01"]
-      layout: [StyleHeader, Preticket, CalgaryStyleHeader]
+      layout: [StyleHeader, Preticket, CalgaryStyleHeader, CalgaryPreticket]
       field: format
     values:
       A: "Purple Tag"
@@ -205,7 +228,7 @@ rules:
   # Marshalls formats
   - match:
       chain: ["02"]
-      layout: [StyleHeader, Preticket, CalgaryStyleHeader]
+      layout: [StyleHeader, Preticket, CalgaryStyleHeader, CalgaryPreticket]
       field: format
     values:
       A: "Purple Tag"
@@ -240,7 +263,7 @@ rules:
   # the split has to be expressed in the YAML rather than by layering rules.
   - match:
       chain: ["03"]
-      layout: [Preticket]
+      layout: [Preticket, CalgaryPreticket]
       field: format
     values: &homegoods_formats
       A: "Regular Tag"
@@ -271,7 +294,7 @@ rules:
   # Homegoods above; see that comment for what the anchor is doing.
   - match:
       chain: ["04", "06"]
-      layout: [Preticket]
+      layout: [Preticket, CalgaryPreticket]
       field: format
     values: &winners_homesense_formats
       A: "Coordinate Gum Label"

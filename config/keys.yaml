@@ -23,3 +23,10 @@ unique_fields:
   CalgaryCartonLabel:
     SCAN: pickListId
     WMS: pickListId
+  # Pre-Tickets are keyed by the PO number whichever system sent them (the
+  # user's call), so this one is a PLAIN field rather than a source pair —
+  # the same shape `Preticket` uses on the .OK side, where the key is `po`.
+  # Written as a scalar deliberately: a source-keyed map with both branches
+  # equal would still route every lookup through the SCAN/WMS resolution and
+  # make a missing source look like it mattered (D62).
+  CalgaryPreticket: purchaseOrderNumber

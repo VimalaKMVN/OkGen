@@ -279,6 +279,12 @@ process_names:
   CalgaryStyleHeader: "Style Header"
   CalgaryCartonLabel: "Carton Label"
   CalgaryDistLabel: "Distribution Label"
+  # A JSON Pre-Ticket resolves to the SAME process name as the .OK one, which is
+  # the whole mechanism: `format_columns` below already maps "Pre-Ticket" for
+  # every NA chain, the shipped JSON scripts are the `…_SH_PT_CL_DL_…` ones that
+  # already accept Pre-Tickets, and input staging addresses folders by
+  # {chain}\{process}\{format}. So this single line is the entire TOSCA change.
+  CalgaryPreticket: "Pre-Ticket"
   # Line-based .OK layouts
   StyleHeader: "Style Header"
   Preticket: "Pre-Ticket"

@@ -289,6 +289,38 @@ presets:
                                  # carries a different form: `7999.99` dotted
                                  # against the detail's zero-padded `000799999`.
 
+  # 01_MAR_PT_FMTB_T2_K40644701_D02_CP1999_UPY_RP799.json
+  # The Style Header preset's exact shape — a Pre-Ticket has the same Details
+  # section and the same nine shadowed field names, so `type`, `compareAtPrice`
+  # and `retailPrice` all need the SECTION-QUALIFIED form for the same reason.
+  # `key` resolves to purchaseOrderNumber here whichever source the folder is.
+  - name: "Calgary Preticket (JSON)"
+    separator: "_"
+    parts:
+      - sl
+      - brand_short
+      - layout_short   # PT
+      - FMT
+      - no_delim
+      - format
+      - T
+      - no_delim
+      - Details.type   #   2  — NOT the header `type` (`preTickets`)
+      - KEY
+      - key            # purchaseOrderNumber, SCAN or WMS alike
+      - DEPT
+      - no_delim
+      - department
+      - CP
+      - no_delim
+      - Details.compareAtPrice
+      - CU
+      - no_delim
+      - compareAtUp
+      - RP
+      - no_delim
+      - Details.retailPrice
+
   # 01_HS_DL_FMT7_KJ000827498941044J_D92.json
   # No `T` pair: CalgaryDistLabel has no Details section, so there is no ticket
   # type to name — its only sections are Header and Stores.
