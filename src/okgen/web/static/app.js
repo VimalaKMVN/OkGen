@@ -2135,8 +2135,19 @@ function makeControl(sec, rec, field) {
     arrow.title = "Show all values";
     arrow.addEventListener("mousedown", (e) => {
       if (e && e.preventDefault) e.preventDefault();
-      if (menu.classList.contains("hidden")) openMenu(false);
-      else closeMenu();
+      if (menu.classList.contains("hidden")) {
+        openMenu(false);
+        // Hand focus to the BOX, which the preventDefault above suppressed.
+        // Without this the menu opens with focus nowhere near the input, so
+        // there is no blur to close it: the user opens the list from the arrow
+        // just to SEE the values, clicks away, and the menu outlives the field
+        // it belongs to. (The document-level dismissal below is the general
+        // guard; this also makes the arrow behave like the box — arrow keys
+        // work straight after clicking it.)
+        try { ctrl.focus(); } catch (_) {}
+      } else {
+        closeMenu();
+      }
     });
 
     // Registered BEFORE the badge painter and before makeControl's own onEdit
@@ -2211,6 +2222,9 @@ function makeControl(sec, rec, field) {
     ctrl.okgenWrap = wrap;
     ctrl.okgenMenu = menu;
     ctrl.okgenArrow = arrow;
+    // Back-link: the sweep reaches menus from <body> and needs a way home to
+    // the box, which is no longer an ancestor once the menu is detached.
+    menu.okgenInput = ctrl;
   } else if (field.options) {
     ctrl = el("select", "cell fval");
     const codes = Object.keys(field.options);
@@ -2274,7 +2288,43 @@ function closeStrayFieldMenus() {
   const body = document.body;
   if (!body || !body.querySelectorAll) return;
   Array.prototype.slice.call(body.querySelectorAll(".fval-menu"))
-    .forEach((m) => { if (m.parentNode) m.parentNode.removeChild(m); });
+    .forEach((m) => {
+      if (m.parentNode) m.parentNode.removeChild(m);
+      if (m.classList) m.classList.add("hidden");
+      // The menu is reached from <body>, so its own box is reached back
+      // through this link — otherwise a swept field keeps announcing
+      // aria-expanded="true" for a list that is no longer there.
+      if (m.okgenInput && m.okgenInput.setAttribute) {
+        m.okgenInput.setAttribute("aria-expanded", "false");
+      }
+    });
+}
+
+// Press anywhere that is not a freeform box or its own menu -> the menu closes.
+//
+// User-reported: open the list on Header `type`, `chain` or a detail-line
+// `type` just to SEE the values, pick nothing, click elsewhere or move to
+// another part of OkGen — and the list stayed on screen over everything.
+//
+// The menu had exactly one interactive way to close: the input's `blur`. That
+// covers the case where the box HAS focus, which is why choosing a value, or
+// clicking into the box and then away, always worked. It covers nothing when
+// the list was opened from the ▾ arrow, whose `preventDefault` deliberately
+// keeps focus off it — there is no focus to lose, so no blur is ever fired.
+// `closeStrayFieldMenus` swept only on a RE-RENDER, so switching to a part of
+// the app that does not re-render the editor left the menu hanging.
+//
+// A document-level press is the right level for this because it is true of
+// every dismissal at once, whatever the target and whether or not it can take
+// focus. Registered on the BUBBLE phase, so a mousedown on a menu row still
+// reaches that row's own handler and commits before anything closes.
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("mousedown", (e) => {
+    const t = e && e.target;
+    // Inside the menu, or on the box/arrow that owns one: not a dismissal.
+    if (t && t.closest && t.closest(".fval-menu, .fval-wrap")) return;
+    closeStrayFieldMenus();
+  });
 }
 
 function renderForm(sec) {

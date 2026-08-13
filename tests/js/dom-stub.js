@@ -197,7 +197,27 @@ function install() {
     // Both halves are needed: a modal registers a document-level key handler
     // and REMOVES it when it closes, so a stub without the remover throws the
     // moment a dialog is driven to completion.
-    addEventListener() {}, removeEventListener() {},
+    // REAL, not a no-op. Both halves are needed: a modal registers a
+    // document-level key handler and REMOVES it when it closes, so a stub
+    // without the remover throws the moment a dialog is driven to completion.
+    //
+    // And recording them is needed too — a document-level listener used to be
+    // SWALLOWED here, so app code that dismisses a popup on an outside press
+    // could not be exercised at all: the handler was accepted, never stored,
+    // and any test of it would have passed against an app that never
+    // registered one. `document.dispatchEvent({type, target})` fires them.
+    _handlers: {},
+    addEventListener(ev, fn) { (this._handlers[ev] || (this._handlers[ev] = [])).push(fn); },
+    removeEventListener(ev, fn) {
+      const hs = this._handlers[ev];
+      if (hs) this._handlers[ev] = hs.filter((h) => h !== fn);
+    },
+    dispatchEvent(e) {
+      const type = e && e.type;
+      (this._handlers[type] || []).forEach((f) =>
+        f(Object.assign({ preventDefault() {}, stopPropagation() {} }, e)));
+      return true;
+    },
     body: mkEl(), documentElement: mkEl(),
   };
   const errors = [];
