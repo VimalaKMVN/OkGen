@@ -1037,7 +1037,7 @@ def preview(paths, script_name, registry, config) -> dict:
     """
     prep = _prepare(paths, script_name, registry, config)
     plan = plan_staging(prep["rows"], prep["script"], config, prep["engines"])
-    return {
+    pv = {
         "script": script_name,
         "enabled": plan["enabled"],
         "configured": plan["configured"],
@@ -1054,6 +1054,12 @@ def preview(paths, script_name, registry, config) -> dict:
         "errors": prep["errors"],
         "skipped": prep["skipped"],
     }
+    # The per-combination roll-up the dialog renders, and the plan report text.
+    # Both are built HERE so the dialog, its View report and the plan log all
+    # come from one computation rather than three that can disagree.
+    pv["combinations"] = plan_combinations(pv)
+    pv["report"] = build_plan_report(pv, len(paths or []))
+    return pv
 
 
 # --------------------------------------------------------------------------- #
@@ -1208,6 +1214,103 @@ def build_report(res: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def plan_combinations(pv: dict) -> List[dict]:
+    """One entry per Chain/Process/Format for the CONFIRMATION dialog.
+
+    The same roll-up `combinations()` does for a finished run, from the plan
+    instead of the outcome — so the dialog and the result window count the same
+    way and a user comparing them is not comparing two different arithmetics.
+    Two roots can stage one combination into two folders, hence the merge.
+    """
+    per: dict = {}
+    order: List[tuple] = []
+    for t in pv.get("targets") or []:
+        key = (t.get("chain"), t.get("process"), t.get("format"))
+        if key not in per:
+            per[key] = {"chain": key[0], "process": key[1], "format": key[2],
+                        "status": "will_run", "copy": 0, "remove": 0,
+                        "create": 0, "paths": []}
+            order.append(key)
+        got = per[key]
+        got["copy"] += len(t.get("copy") or [])
+        got["remove"] += len(t.get("remove") or [])
+        got["create"] += 1 if t.get("status") == "create" else 0
+        got["paths"].append(t.get("path"))
+    out = [per[k] for k in order]
+    for x in pv.get("excluded") or []:
+        out.append({"chain": x.get("chain"), "process": x.get("process"),
+                    "format": x.get("format"), "status": "will_not_run",
+                    "copy": 0, "remove": 0, "create": 0, "paths": [],
+                    "files": list(x.get("files") or []),
+                    "reasons": list(x.get("reasons") or [])})
+    return out
+
+
+def build_plan_report(pv: dict, file_count: int = 0) -> str:
+    """The staging PLAN as plain text — the confirmation dialog's View report,
+    and the plan log.
+
+    Same one-function rule as `build_report`: this text is what the window shows
+    AND what the log file holds, so the two cannot describe different work. It
+    carries the file NAMES — the dialog itself now shows counts only (the user's
+    call: the delete list made the window too tall, and the summary line plus the
+    per-row Delete column already say a delete is coming).
+    """
+    combos = plan_combinations(pv)
+    bad = [c for c in combos if c["status"] == "will_not_run"]
+    lines = [
+        "OkGen — Run TOSCA Script: STAGING PLAN (nothing has run yet)",
+        f"Script   : {pv.get('script')}",
+        f"Selected : {file_count} file(s)",
+        f"Plan     : {pv.get('copy_total', 0)} file(s) to copy into "
+        f"{len(pv.get('targets') or [])} folder(s), "
+        f"{pv.get('remove_total', 0)} existing file(s) to DELETE, "
+        f"{len(bad)} combination(s) that will NOT run",
+        "",
+    ]
+    if not pv.get("enabled", False):
+        lines += ["STAGING OFF — input_staging.enabled is false in config/tosca.yaml,",
+                  "              so the sheet would be updated but no files copied.", ""]
+    elif not pv.get("configured", False):
+        lines += ["NO INPUT FOLDERS — this script has no input_folders in "
+                  "config/tosca.yaml,", "              so no files would be copied.", ""]
+    lines.append("COMBINATIONS")
+    if not combos:
+        lines.append("  (none — nothing matched this script)")
+    for c in combos:
+        if c["status"] == "will_run":
+            lines.append(
+                f"  [WILL RUN] {str(c['chain'] or ''):<12} {str(c['process'] or ''):<15}"
+                f" {str(c['format'] or ''):<26} copy {c['copy']}  delete {c['remove']}"
+                + ("  (folder will be created)" if c["create"] else ""))
+        else:
+            lines.append(
+                f"  [NOT RUN ] {str(c['chain'] or ''):<12} {str(c['process'] or ''):<15}"
+                f" {str(c['format'] or ''):<26} {len(c['files'])} file(s)")
+            for r in c.get("reasons") or []:
+                lines.append(f"               reason : {r}")
+            if c["files"]:
+                lines.append("               files  :")
+                lines += _wrap_names(c["files"], 24)
+    # Per FOLDER, because that is where a delete actually happens — and the
+    # names are here rather than in the dialog, so this is the only place they
+    # can be checked before the run is agreed to.
+    if pv.get("targets"):
+        lines += ["", "PER FOLDER"]
+        for t in pv["targets"]:
+            lines.append(f"  {t.get('path')}")
+            if t.get("status") == "create":
+                lines.append("      (this folder does not exist yet and will be created)")
+            if t.get("remove"):
+                lines.append(f"      DELETE ({len(t['remove'])}):")
+                lines += _wrap_names(list(t["remove"]), 8)
+            else:
+                lines.append("      DELETE (0): nothing to remove")
+            lines.append(f"      COPY ({len(t.get('copy') or [])}):")
+            lines += _wrap_names(list(t.get("copy") or []), 8)
+    return "\n".join(lines) + "\n"
+
+
 def log_folder(config) -> Path:
     """Where the run log goes: ``log_folder:`` in config/tosca.yaml, or the
     ``logs`` folder beside OkGen when that is blank or absent."""
@@ -1215,17 +1318,33 @@ def log_folder(config) -> Path:
     return Path(raw) if raw else default_log_folder()
 
 
-def _write_log(config, report: str, stamp: str) -> Optional[str]:
+def _write_log(config, report: str, stamp: str, kind: str = "") -> Optional[str]:
     """Write the report beside OkGen. A log we cannot write must never fail the
-    run — the report is still returned to the UI either way."""
+    run — the report is still returned to the UI either way.
+
+    ``kind`` names the file: ``okgen_tosca_<stamp>.log`` for a run,
+    ``okgen_tosca_plan_<stamp>.log`` for a staging plan. Two names rather than
+    one, because a plan and a run are different events and a folder where they
+    are indistinguishable is a folder nobody reads twice.
+    """
     try:
         folder = log_folder(config)
         fs.mkdir(folder, parents=True, exist_ok=True)
-        path = folder / f"okgen_tosca_{stamp}.log"
+        suffix = f"{kind}_" if kind else ""
+        path = folder / f"okgen_tosca_{suffix}{stamp}.log"
         fs.write_text(path, report, encoding="utf-8")
         return str(path)
     except (OSError, ValueError):
         return None
+
+
+def log_plan(pv: dict, config, file_count: int = 0) -> dict:
+    """Build the plan report and write it beside OkGen. Returns
+    ``{"report", "log"}`` — ``log`` is None when it could not be written, which
+    never fails anything: the text still reaches the window."""
+    report = build_plan_report(pv, file_count)
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return {"report": report, "log": _write_log(config, report, stamp, kind="plan")}
 
 
 def run(paths, script_name, registry, config, launch=True, stage=True) -> dict:

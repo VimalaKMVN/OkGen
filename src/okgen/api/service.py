@@ -2119,6 +2119,23 @@ def tosca_preview(paths, script, registry, config: Config) -> dict:
         raise EditError(str(exc))
 
 
+def tosca_plan_log(paths, script, registry, config: Config) -> dict:
+    """Write the staging PLAN beside OkGen and return ``{report, log}``.
+
+    Called when the confirmation dialog's "View report" is opened, NOT on every
+    preview: the dialog re-previews each time the chosen script changes, so
+    logging there would drop a file in ``logs/`` for every radio button pressed.
+    Opening the report is a deliberate act, which is the right moment to keep a
+    copy of what was about to happen.
+    """
+    from okgen import tosca
+    try:
+        pv = tosca.preview(paths, script, registry, config)
+    except tosca.ToscaError as exc:
+        raise EditError(str(exc))
+    return tosca.log_plan(pv, config, len(paths or []))
+
+
 def run_tosca_script(paths, script, registry, config: Config) -> dict:
     """Populate the chosen TOSCA workbook from the selected files."""
     from okgen import tosca

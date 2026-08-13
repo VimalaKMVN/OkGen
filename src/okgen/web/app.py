@@ -311,6 +311,18 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except service.EditError as exc:
             return _err(str(exc), 422)
 
+    @app.post("/api/tosca/plan-log")
+    def tosca_plan_log():
+        # Writes the staging plan to logs/okgen_tosca_plan_<stamp>.log and
+        # returns its text. Its own call rather than a side effect of /preview,
+        # which is re-run every time the chosen script changes.
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.tosca_plan_log(
+                body.get("paths", []), body.get("script", ""), registry, config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     @app.post("/api/tosca/run")
     def tosca_run():
         body = request.get_json(force=True, silent=True) or {}

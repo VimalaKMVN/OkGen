@@ -44,6 +44,16 @@ const PREVIEW = {
     remove: ["previous_one.OK", "previous_two.OK"],
     copy: ["SH_0001.OK"],
   }],
+  // Computed server-side (tosca.plan_combinations) so the dialog, its View
+  // report and the plan log all count the same way.
+  combinations: [
+    { chain: "T.J. Maxx", process: "Style Header", format: "A - Purple Tag",
+      status: "will_run", copy: 1, remove: 2, create: 0 },
+    { chain: "T.J. Maxx", process: "Style Header", format: "T-Q-Line Small Gum Label",
+      status: "will_not_run", copy: 0, remove: 0, files: ["SH_0009.OK"],
+      reasons: ["the sheet says 'T-Q-Line Small Gum Label' but the folder is "
+                + "named 'T - Q-Line Small Gum Label'"] },
+  ],
   excluded: [{
     chain: "T.J. Maxx", process: "Style Header",
     format: "T-Q-Line Small Gum Label",
@@ -58,10 +68,18 @@ const PREVIEW = {
 // A fetch stub that answers /api/tosca/preview and records what was asked.
 const asked = [];
 let answer = PREVIEW;
+const PLAN_LOG = {
+  report: "OkGen — Run TOSCA Script: STAGING PLAN (nothing has run yet)\n"
+        + "  D:\\ToscaAutomation\\FUN_LASER_OK_Files\\T.J. Maxx\\Style Header\\A - Purple Tag\n"
+        + "      DELETE (2):\n        previous_one.OK, previous_two.OK\n"
+        + "      COPY (1):\n        SH_0001.OK\n",
+  log: "C:\\OkGen\\logs\\okgen_tosca_plan_20260813_101500.log",
+};
 function fetchStub(url, opts) {
   const body = opts && opts.body ? JSON.parse(opts.body) : {};
   asked.push({ url, body });
-  return Promise.resolve({ ok: true, statusText: "OK", json: () => Promise.resolve(answer) });
+  const payload = String(url).indexOf("plan-log") !== -1 ? PLAN_LOG : answer;
+  return Promise.resolve({ ok: true, statusText: "OK", json: () => Promise.resolve(payload) });
 }
 
 // Every export is resolved DEFENSIVELY. A missing function must make the checks
@@ -72,7 +90,8 @@ const run = new Function(
   src + "\n;return {"
       + " pickTosca: typeof pickTosca === 'function' ? pickTosca : null,"
       + " showToscaResult: typeof showToscaResult === 'function' ? showToscaResult : null,"
-      + " renderToscaPlan: typeof renderToscaPlan === 'function' ? renderToscaPlan : null };");
+      + " renderToscaPlan: typeof renderToscaPlan === 'function' ? renderToscaPlan : null,"
+      + " showToscaPlanReport: typeof showToscaPlanReport === 'function' ? showToscaPlanReport : null };");
 
 let api;
 try {
@@ -130,27 +149,77 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   // ---- what it shows (asserted INSIDE the plan block) ---------------------
   let p = planText();
   check("it renders a plan block", byClass("tosca-plan").length > 0);
-  check("it names the target folder in full", p.indexOf("A - Purple Tag") !== -1
-        && p.indexOf("FUN_LASER_OK_Files") !== -1);
   check("it says how many files will be copied", /1 file\(s\) will be copied/.test(p));
   check("it says how many will be DELETED", /2 existing file\(s\) that will be DELETED/.test(p));
-  // The names, not just the count — this is the assertion that makes the
-  // confirmation checkable rather than merely reassuring.
-  check("it names the files it will delete",
-        p.indexOf("previous_one.OK") !== -1 && p.indexOf("previous_two.OK") !== -1);
-  check("it names the files it will copy", p.indexOf("SH_0001.OK") !== -1);
+  // COUNTS ONLY in the dialog — the user's call: the delete list made this
+  // window too tall to use, and the line above plus the Delete column say a
+  // delete is coming. The names move to View report and the plan log, which the
+  // checks further down prove they actually reach — an absence assertion alone
+  // would pass on a build that simply lost them.
+  check("it does NOT name the files it will delete",
+        p.indexOf("previous_one.OK") === -1 && p.indexOf("previous_two.OK") === -1);
+  check("it does NOT name the files it will copy", p.indexOf("SH_0001.OK") === -1);
+  check("it does NOT print the full folder path", p.indexOf("FUN_LASER_OK_Files") === -1);
+  // …but the combination is still there as a row with its two counts
+  check("each combination is a row with copy/delete counts",
+        byClass("tosca-mini").length > 0
+        && p.indexOf("A - Purple Tag") !== -1);
 
   // ---- the combination that cannot run -----------------------------------
-  check("it warns about the excluded combination", /will NOT run/.test(p));
-  check("the warning names the file", p.indexOf("SH_0009.OK") !== -1);
+  // The ONE piece of detail that keeps its full text here: the fix is in the
+  // workbook's Key sheet, so a bare count would send the user looking in the
+  // wrong place entirely.
+  check("it warns about the excluded combination", /will NOT run|will not run/.test(p));
+  check("the warning names the file count", /1 file\(s\)/.test(p));
   check("the warning quotes BOTH spellings",
         p.indexOf("T-Q-Line Small Gum Label") !== -1
         && p.indexOf("T - Q-Line Small Gum Label") !== -1);
   check("the warning points at the Key sheet", /Key sheet/.test(p));
-  check("the exclusion is rendered as a warning, not plain text",
+  check("the exclusion is rendered in the error colour, not plain text",
         byClass("tosca-plan").length > 0
         && descendants(byClass("tosca-plan")[0]).some(
-             (e) => (e.className || "").includes("modal-warn")));
+             (e) => (e.className || "").includes("tosca-plan-bad")));
+  // headings green + bold, failures red — asserted on the STYLESHEET, because
+  // a class name in the DOM proves nothing about what is painted
+  check("the plan headings use the green token",
+        /\.tosca-plan-head\s*\{[^}]*color:\s*var\(--ok\)/.test(css));
+  check("a failure heading uses the error token",
+        /\.tosca-sec-label\.bad\s*\{[^}]*color:\s*var\(--err\)/.test(css));
+  check("the failure text uses the error token",
+        /\.tosca-plan-bad\s*\{[^}]*color:\s*var\(--err\)/.test(css));
+
+  // ---- View report: the names the dialog no longer shows -----------------
+  check("app.js exposes the plan report window",
+        typeof api.showToscaPlanReport === "function");
+  const viewBtn = descendants(doc.body).find((e) => (e.textContent || "") === "View report");
+  check("the dialog offers View report", !!viewBtn);
+  if (viewBtn) {
+    viewBtn.click();
+    await tick(); await tick(); await tick();
+    check("it asks the server to build and LOG the plan",
+          asked.some((a) => String(a.url).indexOf("/api/tosca/plan-log") !== -1));
+    const req2 = asked.find((a) => String(a.url).indexOf("plan-log") !== -1) || { body: {} };
+    check("it logs the plan for the SELECTED script",
+          req2.body.script === "OK Functional Laser");
+    const rt = texts();
+    // The pair that makes moving the names out of the dialog safe: absent
+    // there, PRESENT here. An absence check alone would pass on a build that
+    // simply lost them.
+    check("the plan report names the files to be DELETED",
+          rt.indexOf("previous_one.OK") !== -1 && rt.indexOf("previous_two.OK") !== -1);
+    check("the plan report names the files to be copied", rt.indexOf("SH_0001.OK") !== -1);
+    check("the plan report names the folder path", rt.indexOf("FUN_LASER_OK_Files") !== -1);
+    check("it says nothing has run yet", /nothing has run yet/.test(rt));
+    check("it names the plan log it was written to",
+          /okgen_tosca_plan_20260813_101500\.log/.test(rt));
+    check("it uses the Send report's monospace block", descendants(doc.body).some(
+      (e) => (e.className || "") === "send-report-text"));
+    check("it offers Copy report",
+          descendants(doc.body).some((e) => (e.textContent || "") === "Copy report"));
+    // close it again so the gate checks below act on the dialog
+    const pc = descendants(doc.body).filter((e) => (e.textContent || "") === "Close").pop();
+    if (pc) pc.click();
+  }
 
   // ---- the run is still gated, and the gate mentions the deletion --------
   const runBtn = descendants(doc.body).find((e) => (e.textContent || "") === "Run TOSCA");

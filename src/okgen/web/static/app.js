@@ -3138,40 +3138,63 @@ function renderToscaPlan(box, pv) {
     return;
   }
   const targets = pv.targets || [];
+  const combos = pv.combinations || [];
+  const bad = pv.excluded || [];
+
   box.appendChild(el("div", "tosca-plan-head",
     `${pv.copy_total} file(s) will be copied into ${targets.length} input folder(s)`
     + (pv.remove_total
         ? `, replacing ${pv.remove_total} existing file(s) that will be DELETED.`
         : ". No existing files need removing.")));
-  if (targets.length) {
-    const tbl = el("div", "tosca-rows");
-    targets.forEach((t) => {
-      const row = el("div", "tosca-row");
-      row.appendChild(el("div", "tosca-plan-path", t.path));
-      row.appendChild(el("div", "tosca-plan-counts",
-        `− ${t.remove.length} removed   + ${t.copy.length} copied`
-        + (t.status === "create" ? "   (folder will be created)" : "")));
-      // The names are what makes this checkable rather than merely reassuring:
-      // a count alone cannot show you it is about to delete the wrong thing.
-      if (t.remove.length) row.appendChild(
-        el("div", "tosca-plan-files", "delete: " + t.remove.join(", ")));
-      row.appendChild(el("div", "tosca-plan-files", "copy: " + t.copy.join(", ")));
-      tbl.appendChild(row);
+
+  // Counts only, no file names — the user's call: the delete list made this
+  // window too tall to use, and the line above plus the Delete column below
+  // both say a delete is coming. The NAMES are in View report and in
+  // logs/okgen_tosca_plan_*.log, where they can be checked before agreeing.
+  if (combos.length) {
+    const tbl = el("table", "tosca-mini");
+    const thead = el("thead"), hr = el("tr");
+    ["Chain", "Process", "Format", "Copy", "Delete"].forEach((h, i) =>
+      hr.appendChild(el("th", i >= 3 ? "num" : "", h)));
+    thead.appendChild(hr); tbl.appendChild(thead);
+    const tb = el("tbody");
+    combos.forEach((c) => {
+      const tr = el("tr", c.status === "will_not_run" ? "bad" : "");
+      tr.appendChild(el("td", "", c.chain || ""));
+      tr.appendChild(el("td", "", c.process || ""));
+      tr.appendChild(el("td", "", c.format || ""));
+      if (c.status === "will_not_run") {
+        const td = el("td", "num", ""); td.colSpan = 2;
+        td.appendChild(el("span", "tosca-chip",
+          `will not run · ${(c.files || []).length} file(s)`));
+        tr.appendChild(td);
+      } else {
+        const cp = el("td", "num");
+        cp.appendChild(el("b", "", String(c.copy)));
+        tr.appendChild(cp);
+        tr.appendChild(el("td", "num", String(c.remove)));
+      }
+      tb.appendChild(tr);
     });
+    tbl.appendChild(tb);
     box.appendChild(tbl);
   }
+
   // A combination whose folder is missing or misnamed cannot run at all, and
   // saying so HERE rather than in the report afterwards is the point: the fix
-  // is in the workbook's Key sheet, not in anything OkGen can do.
-  (pv.excluded || []).forEach((x) => {
-    const w = el("div", "modal-warn");
-    w.appendChild(el("span", "modal-warn-icon", "⚠"));
-    w.appendChild(el("span", "modal-warn-text",
-      `${x.chain} · ${x.process} · ${x.format} will NOT run `
-      + `(${(x.files || []).length} file(s): ${(x.files || []).join(", ")}) — `
-      + (x.reasons || []).join("; ")));
-    box.appendChild(w);
-  });
+  // is in the workbook's Key sheet, not in anything OkGen can do. This is the
+  // ONE thing that keeps its full text in the dialog.
+  if (bad.length) {
+    box.appendChild(el("div", "tosca-sec-label bad",
+      `${bad.length} combination(s) will NOT run`));
+    bad.forEach((x) => {
+      const w = el("div", "tosca-plan-bad");
+      w.appendChild(el("b", "", `${x.chain} · ${x.process} · ${x.format}`));
+      w.appendChild(el("span", "",
+        ` — ${(x.files || []).length} file(s) — ` + (x.reasons || []).join("; ")));
+      box.appendChild(w);
+    });
+  }
 }
 
 function pickTosca(scripts, paths, warning) {
@@ -3181,6 +3204,7 @@ function pickTosca(scripts, paths, warning) {
     const card = el("div", "modal-card");
     card.appendChild(el("h3", "modal-title", `Run TOSCA on ${count} file(s)`));
     card.appendChild(el("div", "modal-dest", "Choose the script whose input sheet to populate, then run:"));
+    card.appendChild(el("div", "tosca-sec-label", "Script"));
     const list = el("div", "tosca-scripts");
     const radios = [];
     scripts.forEach((s, i) => {
@@ -3236,11 +3260,30 @@ function pickTosca(scripts, paths, warning) {
     card.appendChild(check);
 
     const acts = el("div", "modal-actions");
+    // The plan in full — folder paths and every file name, including the ones
+    // about to be DELETED, which the dialog above deliberately shows only as a
+    // count. Opening it also writes logs/okgen_tosca_plan_<stamp>.log; that is
+    // done HERE rather than on every preview, because the preview re-runs each
+    // time the chosen script changes and would litter the folder.
+    const view = el("button", "btn", "View report");
+    view.addEventListener("click", async () => {
+      const sel = card.querySelector("input[name=tosca-script]:checked");
+      if (!sel) return;
+      const was = view.textContent;
+      view.textContent = "Working…"; view.disabled = true;
+      try {
+        const out = await postJSON("/api/tosca/plan-log",
+                                   { paths, script: sel.value });
+        showToscaPlanReport(sel.value, out);
+      } catch (e) {
+        setStatus("Could not build the plan report: " + e.message, "err");
+      } finally { view.textContent = was; view.disabled = false; }
+    });
     const cancel = el("button", "btn", "Cancel");
     const run = el("button", "btn btn-primary", "Run TOSCA");
     run.disabled = true;
     cb.addEventListener("change", () => { run.disabled = !cb.checked; });
-    acts.appendChild(cancel); acts.appendChild(run);
+    acts.appendChild(view); acts.appendChild(cancel); acts.appendChild(run);
     card.appendChild(acts);
     ov.appendChild(card); document.body.appendChild(ov);
     const close = (val) => { ov.remove(); resolve(val); };
@@ -3252,6 +3295,45 @@ function pickTosca(scripts, paths, warning) {
       close(sel ? sel.value : null);
     });
   });
+}
+
+// The STAGING PLAN in full, in the same shape as the run report and the Send
+// report: one plain-text block, the log path, Copy report. The text comes from
+// the SERVER's build_plan_report(), which also wrote the log, so what is copied
+// from here and what is in the file cannot differ.
+function showToscaPlanReport(script, out) {
+  const ov = el("div", "modal-overlay");
+  const card = el("div", "modal-card modal-wide");
+  card.appendChild(el("h3", "modal-title", "Staging plan — nothing has run yet"));
+  const body = el("div", "modal-body");
+  card.appendChild(body);
+  body.appendChild(el("div", "modal-dest", script));
+  const pre = el("pre", "send-report-text");
+  pre.textContent = out.report || "(no plan)";
+  body.appendChild(pre);
+  if (out.log) body.appendChild(el("div", "send-report-log", `Also written to: ${out.log}`));
+
+  const acts = el("div", "modal-actions");
+  const copy = el("button", "btn", "Copy report");
+  copy.addEventListener("click", async () => {
+    const text = out.report || "";
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      const ta = el("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } finally { ta.remove(); }
+    }
+    copy.textContent = "Copied ✓";
+    setTimeout(() => { copy.textContent = "Copy report"; }, 1600);
+  });
+  const ok = el("button", "btn btn-primary", "Close");
+  ok.addEventListener("click", () => ov.remove());
+  acts.appendChild(copy); acts.appendChild(ok); card.appendChild(acts);
+  ov.appendChild(card); document.body.appendChild(ov);
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
+  ok.focus();
 }
 
 // The full run report, in the shape the Send to NiceLabel report already uses:

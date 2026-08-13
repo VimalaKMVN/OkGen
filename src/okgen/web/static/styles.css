@@ -209,7 +209,35 @@ body {
    wraps rather than forcing the card wide or clipping the tail — a truncated
    path in a delete confirmation is worse than no path. */
 .tosca-plan { margin: 10px 0; }
-.tosca-plan-head { font-size: 12px; color: var(--text); margin-bottom: 6px; }
+/* Headings green and bold, failures red — the user's call, and both reuse the
+   palette's own tokens rather than new colours. Measured against the modal card
+   (--bg-alt #252526): --ok is 7.52:1 and --err is 6.24:1, both clear of the
+   4.5:1 small-text floor. A "brighter" pure #ff5555 would be WORSE (4.87:1),
+   which is why the existing token wins on legibility as well as consistency. */
+.tosca-plan-head {
+  font-size: 12.5px; color: var(--ok); font-weight: 600; margin-bottom: 8px;
+}
+/* Anything that will not run, and why. The ONE piece of detail that keeps its
+   full text in the dialog: the fix is in the workbook's Key sheet, so a count
+   would send the user looking in the wrong place. */
+.tosca-plan-bad { color: var(--err); font-size: 12px; line-height: 1.5; margin-bottom: 4px; }
+.tosca-plan-bad b { color: var(--err); font-weight: 600; }
+/* The confirm dialog's combination table — counts only, no file names. */
+.tosca-mini { width: 100%; border-collapse: collapse; font-size: 12px;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif; margin: 2px 0 6px; }
+.tosca-mini th {
+  text-align: left; font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-dim); font-weight: 600; padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.tosca-mini th.num, .tosca-mini td.num { text-align: right; }
+.tosca-mini td {
+  padding: 4px 8px; border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.tosca-mini td.num { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--text-dim); }
+.tosca-mini td.num b { color: var(--text); font-weight: 500; }
+.tosca-mini tr.bad td { color: var(--err); }
 .tosca-plan-note { font-size: 12px; color: var(--muted, #9aa0a6); }
 .tosca-plan-note.warn { color: #ffcf33; }
 .tosca-plan-path { font-size: 11px; overflow-wrap: anywhere; word-break: break-word; }
@@ -244,10 +272,15 @@ body {
   font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase;
   color: var(--text-dim); margin-top: 2px;
 }
+/* The section heading in BOTH TOSCA windows (Script / Combinations / Will not
+   run). One class rather than two, so the confirmation dialog and the result
+   window cannot drift into different headings — the failure this file keeps
+   recording for parallel implementations. Green and bold at the user's call. */
 .tosca-sec-label {
   font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
-  color: var(--text-dim); margin: 12px 0 4px;
+  color: var(--ok); font-weight: 600; margin: 12px 0 4px;
 }
+.tosca-sec-label.bad { color: var(--err); }
 /* Not the global monospace `table` rule: these are words (chain, process,
    format description), not aligned data — only the count columns are. */
 .tosca-table {

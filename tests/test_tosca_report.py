@@ -319,3 +319,116 @@ def test_a_run_with_nothing_to_report_still_produces_one(tmp_path, registry, con
     assert res["report"]
     assert "0 rows written" in res["report"]
     assert Path(res["log"]).exists(), "a no-op run is logged too"
+
+
+# --------------------------------------------------------------------------- #
+# the STAGING PLAN report — the confirmation dialog's View report, and its log
+# --------------------------------------------------------------------------- #
+
+def _preview(tmp_path, registry, config, make_folders=True):
+    _wb(tmp_path, config)
+    root = tmp_path / "tree"
+    leaf = root / "T.J. Maxx" / "Style Header" / "A - Purple Tag"
+    if make_folders:
+        leaf.mkdir(parents=True)
+        (leaf / "previous_one.json").write_text("{}", encoding="utf-8")
+    else:
+        root.mkdir()
+    _stage_cfg(config, root)
+    _logs_to(config, tmp_path / "logs")
+    p = _sample(tmp_path, "styleheader_fmtB.json", "sh.json", chain="01", fmt="A")
+    return p, leaf, tosca.preview([str(p)], SCRIPT, registry, config)
+
+
+def test_the_preview_carries_a_plan_report_and_a_roll_up(tmp_path, registry, config):
+    """Both are built server-side so the dialog, its View report and the plan
+    log come from ONE computation — three that agreed by coincidence is how the
+    two TOSCA windows would drift apart."""
+    _, _, pv = _preview(tmp_path, registry, config)
+    assert pv["report"], "the preview must carry the plan text"
+    assert pv["combinations"], "the preview must carry the per-combination roll-up"
+    c = pv["combinations"][0]
+    assert c["status"] == "will_run"
+    assert c["chain"] == "T.J. Maxx" and c["process"] == "Style Header"
+    assert c["copy"] == 1 and c["remove"] == 1
+
+
+def test_the_plan_report_names_the_files_the_dialog_no_longer_shows(tmp_path,
+                                                                    registry, config):
+    """The load-bearing test of moving the delete list out of the dialog.
+
+    The user's call was that the dialog is too tall with the names in it and the
+    summary line plus the Delete column already say a delete is coming — so the
+    names must be REACHABLE, not gone. This is where they have to be.
+    """
+    _, leaf, pv = _preview(tmp_path, registry, config)
+    rep = pv["report"]
+    assert "STAGING PLAN (nothing has run yet)" in rep
+    assert "previous_one.json" in rep, "the file about to be DELETED is not named"
+    assert "sh.json" in rep, "the file about to be copied is not named"
+    assert str(leaf) in rep, "the folder path is not named"
+    assert "DELETE (1)" in rep and "COPY (1)" in rep
+
+
+def test_the_plan_report_explains_a_combination_that_will_not_run(tmp_path,
+                                                                  registry, config):
+    _, _, pv = _preview(tmp_path, registry, config, make_folders=False)
+    rep = pv["report"]
+    assert "[NOT RUN ]" in rep
+    assert "1 combination(s) that will NOT run" in rep
+    assert "reason :" in rep
+    assert "sh.json" in rep
+
+
+def test_opening_the_plan_report_writes_a_log_of_its_own_name(tmp_path, registry,
+                                                              config):
+    """`okgen_tosca_plan_<stamp>.log`, NOT `okgen_tosca_<stamp>.log`: a plan and
+    a run are different events, and a folder where they cannot be told apart is
+    one nobody reads twice."""
+    _wb(tmp_path, config)
+    logs = tmp_path / "logs"
+    _logs_to(config, logs)
+    p = _sample(tmp_path, "styleheader_fmtB.json", "sh.json", chain="01", fmt="A")
+
+    from okgen.api import service
+    out = service.tosca_plan_log([str(p)], SCRIPT, registry, config)
+    assert out["report"]
+    written = Path(out["log"])
+    assert written.exists() and written.parent == logs
+    assert written.name.startswith("okgen_tosca_plan_")
+    assert written.read_text(encoding="utf-8") == out["report"], \
+        "the plan log and the plan window must be the same text"
+
+
+def test_a_plan_log_that_cannot_be_written_never_fails_the_dialog(tmp_path,
+                                                                  registry, config):
+    _wb(tmp_path, config)
+    blocked = tmp_path / "not-a-folder"
+    blocked.write_text("x", encoding="utf-8")
+    _logs_to(config, blocked)
+    p = _sample(tmp_path, "styleheader_fmtB.json", "sh.json", chain="01", fmt="A")
+
+    from okgen.api import service
+    out = service.tosca_plan_log([str(p)], SCRIPT, registry, config)
+    assert out["log"] is None
+    assert out["report"], "the plan must survive a failed log write"
+
+
+def test_the_plan_and_the_run_count_the_same_way(tmp_path, registry, config):
+    """A user comparing the confirmation with the result afterwards must not be
+    comparing two different arithmetics."""
+    _wb(tmp_path, config)
+    root = tmp_path / "tree"
+    (root / "T.J. Maxx" / "Style Header" / "A - Purple Tag").mkdir(parents=True)
+    _stage_cfg(config, root)
+    _logs_to(config, tmp_path / "logs")
+    p = _sample(tmp_path, "styleheader_fmtB.json", "sh.json", chain="01", fmt="A")
+
+    pv = tosca.preview([str(p)], SCRIPT, registry, config)
+    res = tosca.run([str(p)], SCRIPT, registry, config, launch=False)
+
+    planned = pv["combinations"][0]
+    done = res["combinations"][0]
+    assert (planned["chain"], planned["process"], planned["format"]) == \
+           (done["chain"], done["process"], done["format"])
+    assert planned["copy"] == done["copied"]
