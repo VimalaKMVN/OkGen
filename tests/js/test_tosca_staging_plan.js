@@ -204,13 +204,19 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
     },
   });
   const t = texts();
-  check("the report says what was staged", /1 copied into 1 folder\(s\)/.test(t));
-  check("the report says what was removed", /2 previous file\(s\) removed/.test(t));
-  // The folder PATH, not its format segment — the written-rows list carries
-  // "A - Purple Tag" too, so matching on that alone passed without any staging
-  // report at all.
-  check("the report names the staged folder path", t.indexOf("D:\\tree\\") !== -1);
-  check("the report repeats the combination that was NOT run", /was NOT run/.test(t));
+  // The run window is a SUMMARY now: what was staged and removed are COUNTS,
+  // and the folder paths and file names live in the report behind
+  // "View report" (and in logs/okgen_tosca_*.log).
+  const nums = descendants(doc.body)
+    .filter((e) => (e.className || "").startsWith("tosca-stat-n"))
+    .map((e) => e.textContent || "");
+  check("the summary counts what was staged", nums[1] === "1");
+  check("the summary counts what was removed", nums[2] === "2");
+  check("the folder PATH is not in the summary", t.indexOf("D:\\tree\\") === -1);
+  // Not run stays visible as a count AND as a table row — it is the one
+  // outcome that looks like success once the file names are hidden.
+  check("the summary counts the combination that was NOT run", nums[3] === "1");
+  check("that combination is still named in the table", /Homegoods|not run/i.test(t));
 
   // A run that staged nothing must SAY so — "written: 1" with no files copied
   // is exactly the success-looking outcome this reports against.

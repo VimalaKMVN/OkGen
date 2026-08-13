@@ -1056,6 +1056,178 @@ def preview(paths, script_name, registry, config) -> dict:
     }
 
 
+# --------------------------------------------------------------------------- #
+# The run report
+#
+# Deliberately the same shape as `nicelabel_post.build_report` / `_write_log`,
+# because it is the same job: ONE function returns the text, the log file gets
+# it and the window shows it. What a user pastes into a message is then exactly
+# what the log says, by construction rather than by discipline.
+# --------------------------------------------------------------------------- #
+
+def default_log_folder() -> Path:
+    """``logs`` next to OkGen itself — not in the user's data folders."""
+    return Path(__file__).resolve().parents[2] / "logs"
+
+
+def combinations(res: dict) -> List[dict]:
+    """One entry per Chain/Process/Format, with what staging did to its folder.
+
+    The run already knows both halves — a staged folder entry carries the same
+    chain/process/format triple the row does, because the row IS the folder
+    (that is the addressing rule staging is built on). Joining them HERE rather
+    than in the UI is what lets the report and the summary window show the same
+    numbers without either recomputing them.
+    """
+    st = res.get("staging") or {}
+    per: dict = {}
+    for f in st.get("folders") or []:
+        key = (f.get("chain"), f.get("process"), f.get("format"))
+        got = per.setdefault(key, {"copied": 0, "removed": 0, "created": 0,
+                                   "paths": []})
+        got["copied"] += len(f.get("copied") or [])
+        got["removed"] += len(f.get("removed") or [])
+        got["created"] += 1 if f.get("created") else 0
+        got["paths"].append(f.get("path"))
+    out = []
+    for row in res.get("rows") or []:
+        key = (row.get("chain"), row.get("process"), row.get("format"))
+        got = per.get(key) or {}
+        out.append({
+            "chain": row.get("chain"), "process": row.get("process"),
+            "format": row.get("format"), "status": "written",
+            "copied": got.get("copied", 0), "removed": got.get("removed", 0),
+            "created": got.get("created", 0), "paths": got.get("paths", []),
+            "files": [Path(f).name for f in (row.get("files") or [])],
+        })
+    for x in st.get("excluded") or []:
+        out.append({
+            "chain": x.get("chain"), "process": x.get("process"),
+            "format": x.get("format"), "status": "not_run",
+            "copied": 0, "removed": 0, "created": 0, "paths": [],
+            "files": list(x.get("files") or []),
+            "reasons": list(x.get("reasons") or []),
+        })
+    return out
+
+
+def _wrap_names(names, indent: int, width: int = 96) -> List[str]:
+    """File names as wrapped, indented lines — one long comma run is unreadable
+    in a log and unquotable in a message."""
+    pad = " " * indent
+    lines, cur = [], ""
+    for i, n in enumerate(names):
+        piece = n + ("," if i < len(names) - 1 else "")
+        if cur and len(cur) + 1 + len(piece) > width:
+            lines.append(pad + cur)
+            cur = piece
+        else:
+            cur = (cur + " " + piece).strip()
+    if cur:
+        lines.append(pad + cur)
+    return lines
+
+
+def build_report(res: dict) -> str:
+    """The run report, as plain text — the log file AND the View report window."""
+    st = res.get("staging") or {}
+    combos = combinations(res)
+    not_run = [c for c in combos if c["status"] == "not_run"]
+    lines = [
+        "OkGen — Run TOSCA Script",
+        f"Script   : {res.get('script')}"
+        + (f"        (engine: {', '.join(res.get('applies_to') or [])})"
+           if res.get("applies_to") else ""),
+        f"Workbook : {res.get('workbook')}",
+        f"Sheet    : {res.get('data_sheet')}",
+        f"Started  : {res.get('started', '')}      "
+        f"Elapsed: {res.get('elapsed_seconds', 0):.1f}s",
+        f"Result   : {res.get('written', 0)} rows written, "
+        f"{st.get('copied', 0)} files staged, {st.get('removed', 0)} removed, "
+        f"{len(not_run)} combination(s) NOT run",
+        "",
+        "COMBINATIONS",
+    ]
+    if not combos:
+        lines.append("  (none — nothing matched this script)")
+    for c in combos:
+        if c["status"] == "written":
+            lines.append(
+                f"  [WRITTEN ] {str(c['chain'] or ''):<12} {str(c['process'] or ''):<15}"
+                f" {str(c['format'] or ''):<26} +{c['copied']}  -{c['removed']}"
+                + ("  (folder created)" if c["created"] else ""))
+            for p in c["paths"]:
+                lines.append(f"             {p}")
+            if c["removed"]:
+                # the removed NAMES are not carried per combination; the folder
+                # entries hold them, so they are printed from there below
+                pass
+            if c["files"]:
+                lines.append("               copied :")
+                lines += _wrap_names(c["files"], 24)
+        else:
+            lines.append(
+                f"  [NOT RUN ] {str(c['chain'] or ''):<12} {str(c['process'] or ''):<15}"
+                f" {str(c['format'] or ''):<26} {len(c['files'])} file(s)")
+            for r in c.get("reasons") or []:
+                lines.append(f"               reason : {r}")
+            if c["files"]:
+                lines.append("               files  :")
+                lines += _wrap_names(c["files"], 24)
+    # The removed names, per folder — the one thing a combination row cannot
+    # carry, since two roots can stage the same combination into two folders.
+    removed_any = [f for f in (st.get("folders") or []) if f.get("removed")]
+    if removed_any:
+        lines += ["", "FILES REMOVED BEFORE STAGING"]
+        for f in removed_any:
+            lines.append(f"  {f.get('path')}")
+            lines += _wrap_names(list(f.get("removed") or []), 6)
+    skipped = res.get("skipped") or []
+    if skipped:
+        lines += ["", f"NOT APPLICABLE TO THIS SCRIPT ({len(skipped)})"]
+        for s in skipped:
+            lines.append(f"  {str(s.get('file', '')):<34} {s.get('reason', '')}")
+    errs = res.get("errors") or []
+    if errs:
+        lines += ["", f"COULD NOT BE USED ({len(errs)})"]
+        for e in errs:
+            lines.append(f"  {str(e.get('file', '')):<34} {e.get('error', '')}")
+    if not st.get("enabled", False):
+        lines += ["", "STAGING OFF — input_staging.enabled is false in config/tosca.yaml,"
+                      "             so no files were copied into the TOSCA tree."]
+    elif not st.get("configured", False):
+        lines += ["", "NO INPUT FOLDERS — this script has no input_folders in "
+                      "config/tosca.yaml,", "             so no files were copied."]
+    lines += ["", "LAUNCH"]
+    if res.get("launched"):
+        lines.append(f"  started : {res.get('bat')}")
+    elif res.get("launch_error"):
+        lines.append(f"  NOT started : {res.get('launch_error')}")
+    else:
+        lines.append("  not started (no rows were written)")
+    return "\n".join(lines) + "\n"
+
+
+def log_folder(config) -> Path:
+    """Where the run log goes: ``log_folder:`` in config/tosca.yaml, or the
+    ``logs`` folder beside OkGen when that is blank or absent."""
+    raw = str(((config.tosca() if config else {}) or {}).get("log_folder") or "").strip()
+    return Path(raw) if raw else default_log_folder()
+
+
+def _write_log(config, report: str, stamp: str) -> Optional[str]:
+    """Write the report beside OkGen. A log we cannot write must never fail the
+    run — the report is still returned to the UI either way."""
+    try:
+        folder = log_folder(config)
+        fs.mkdir(folder, parents=True, exist_ok=True)
+        path = folder / f"okgen_tosca_{stamp}.log"
+        fs.write_text(path, report, encoding="utf-8")
+        return str(path)
+    except (OSError, ValueError):
+        return None
+
+
 def run(paths, script_name, registry, config, launch=True, stage=True) -> dict:
     """Stage the selected files into the script's TOSCA input folders, populate
     its workbook from them, then fire its .bat (fire-and-forget) when rows were
@@ -1063,6 +1235,8 @@ def run(paths, script_name, registry, config, launch=True, stage=True) -> dict:
 
     ``launch=False`` skips the .bat and ``stage=False`` skips the file copy;
     both are for tests that don't want to spawn a process or touch a tree."""
+    started_at = datetime.datetime.now()
+    began = time.time()
     prep = _prepare(paths, script_name, registry, config)
     t = prep["t"]
     script = prep["script"]
@@ -1128,10 +1302,12 @@ def run(paths, script_name, registry, config, launch=True, stage=True) -> dict:
             except Exception as exc:                    # noqa: BLE001
                 launch_error = f"failed to start .bat: {exc}"
 
-    return {
+    res = {
         "workbook": str(workbook),
         "script": script_name,
         "data_sheet": data_sheet,
+        "started": started_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "elapsed_seconds": round(time.time() - began, 1),
         "written": len(rows),
         "rows": rows,
         "errors": errors,
@@ -1150,3 +1326,13 @@ def run(paths, script_name, registry, config, launch=True, stage=True) -> dict:
         "bat": str(bat_file) if bat_file else bat_cfg,
         "launch_error": launch_error,
     }
+    # The per-combination roll-up the summary window shows, computed once here so
+    # the window and the report cannot disagree about a count.
+    res["combinations"] = combinations(res)
+    # EVERY run is logged, not only a failing one (the user's call, and what Send
+    # already does): "what did last Tuesday's run actually stage?" is the
+    # question a log exists to answer, and by then the window is long gone.
+    res["report"] = build_report(res)
+    res["log"] = _write_log(config, res["report"],
+                            started_at.strftime("%Y%m%d_%H%M%S"))
+    return res

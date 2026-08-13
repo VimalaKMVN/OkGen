@@ -308,6 +308,22 @@ process_names:
 #   I TJ_MAR_CL_Fmt         J TJ_MAR_DL_Fmt           K HG_CL_Fmt
 #   L HG_WN_HS_DL_Fmt       M Winners_HS_CL_Fmt       N Europe_CL_Fmt
 # Note the *_SH_PT_* columns serve Style Header AND Pre-Ticket both.
+# Where the run log goes. EVERY run writes one — a run that staged nothing is
+# itself an answer, and by the time you want to know, the result window is gone.
+#
+# Blank (or absent) means the `logs` folder beside OkGen, next to the
+# okgen_send_*, okgen_total_qty_* and okgen_folder_dialog_* files already there.
+# The file is `okgen_tosca_<YYYYMMDD_HHMMSS>.log` and holds exactly the text the
+# "View report" button shows — one build_report() feeds both, so what you paste
+# into a message cannot differ from what the log says.
+#
+# A log that cannot be written never fails the run: the report still reaches the
+# window, and the "Also written to" line is simply omitted.
+#
+# NOT a backslash-escaping trap like the paths above — but the same rule applies,
+# so write it unquoted:  log_folder: D:\ToscaAutomation\OkGenLogs
+log_folder:
+
 key_sheet: "Key"
 format_columns:
   "T.J. Maxx":  { "Style Header": C, "Pre-Ticket": C, "Carton Label": I, "Distribution Label": J }

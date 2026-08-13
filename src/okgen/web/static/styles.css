@@ -218,6 +218,65 @@ body {
 .tosca-launch { margin: 8px 0; padding: 6px 8px; border-radius: 4px; font-size: 12px; }
 .tosca-launch.ok { background: rgba(40,160,80,0.15); }
 .tosca-launch.warn { background: rgba(224,176,0,0.15); }
+
+/* ----- Run-result SUMMARY (the four counts + the combinations table) -----
+   The run window shows counts and combinations only; every file name and
+   absolute path is in the report behind "View report" (and in the log). It
+   used to print all of them here, and the outcome was buried in a column of
+   names taller than the answer. */
+.tosca-stats {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px; background: var(--border);
+  border: 1px solid var(--border); border-radius: 5px;
+  overflow: hidden; margin: 4px 0 14px;
+}
+.tosca-stat { background: var(--bg); padding: 9px 11px; }
+.tosca-stat-n {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 19px; line-height: 1.15;
+  font-variant-numeric: tabular-nums; color: var(--text);
+}
+/* Amber ONLY when the count is above zero — a clean run must not read as a
+   warning, which is what a permanently-amber "Not run: 0" would do. */
+.tosca-stat-n.good { color: var(--ok); }
+.tosca-stat-n.warn { color: #ffcf33; }
+.tosca-stat-l {
+  font-size: 10.5px; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-dim); margin-top: 2px;
+}
+.tosca-sec-label {
+  font-size: 10.5px; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-dim); margin: 12px 0 4px;
+}
+/* Not the global monospace `table` rule: these are words (chain, process,
+   format description), not aligned data — only the count columns are. */
+.tosca-table {
+  width: 100%; border-collapse: collapse; font-size: 12px;
+  font-family: -apple-system, "Segoe UI", system-ui, sans-serif;
+  margin: 2px 0 6px;
+}
+.tosca-table th {
+  text-align: left; font-weight: 600; font-size: 10.5px;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-dim);
+  padding: 5px 8px; border-bottom: 1px solid var(--border);
+}
+.tosca-table th.num { text-align: right; }
+.tosca-table td {
+  padding: 5px 8px; border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+}
+.tosca-table td.num {
+  text-align: right; color: var(--text-dim);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+}
+.tosca-table td.num b { color: var(--text); font-weight: 500; }
+.tosca-table tr.excluded td { color: #ffe08a; }
+.tosca-chip {
+  display: inline-block; font-size: 10px; letter-spacing: 0.04em;
+  padding: 1px 6px; border-radius: 9px; vertical-align: 1px;
+  background: rgba(224,176,0,0.16); color: #ffcf33;
+  border: 1px solid rgba(224,176,0,0.45);
+}
 .json-tag {
   margin-left: 4px;
   padding: 0 4px;

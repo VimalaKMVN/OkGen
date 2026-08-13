@@ -3254,6 +3254,59 @@ function pickTosca(scripts, paths, warning) {
   });
 }
 
+// The full run report, in the shape the Send to NiceLabel report already uses:
+// one plain-text block, the log path, Copy report. The text comes from the
+// SERVER's build_report(), which also wrote the log — so what is copied from
+// here and what is in the file cannot differ.
+function showToscaReport(res) {
+  const ov = el("div", "modal-overlay");
+  const card = el("div", "modal-card modal-wide");
+  const notRun = ((res.staging || {}).excluded || []).length;
+  card.appendChild(el("h3", "modal-title",
+    `TOSCA report — ${res.written} row(s) written`
+    + (notRun ? `, ${notRun} combination(s) not run` : "")));
+  const body = el("div", "modal-body");
+  card.appendChild(body);
+  const meta = [res.script];
+  if (res.started) meta.push(res.started);
+  if (res.elapsed_seconds != null) meta.push(`${res.elapsed_seconds}s`);
+  body.appendChild(el("div", "modal-dest", meta.join("   ·   ")));
+
+  const pre = el("pre", "send-report-text");
+  pre.textContent = res.report || "(no report)";
+  body.appendChild(pre);
+  // Omitted rather than faked when the log could not be written — claiming a
+  // file that is not there is worse than saying nothing.
+  if (res.log) body.appendChild(el("div", "send-report-log", `Also written to: ${res.log}`));
+
+  const acts = el("div", "modal-actions");
+  const copy = el("button", "btn", "Copy report");
+  copy.addEventListener("click", async () => {
+    const text = res.report || "";
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (e) {
+      // Clipboard API needs a secure context; fall back to a scratch textarea.
+      const ta = el("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); } finally { ta.remove(); }
+    }
+    copy.textContent = "Copied ✓";
+    setTimeout(() => { copy.textContent = "Copy report"; }, 1600);
+  });
+  const ok = el("button", "btn btn-primary", "Close");
+  ok.addEventListener("click", () => ov.remove());
+  acts.appendChild(copy); acts.appendChild(ok); card.appendChild(acts);
+  ov.appendChild(card); document.body.appendChild(ov);
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
+  ok.focus();
+}
+
+// The run window: SUMMARY ONLY. Counts, and one line per Chain/Process/Format.
+// Every file name and absolute path lives in the report behind `View report`
+// (and in the log) — this window used to print all of them, and the outcome was
+// buried in a column of names taller than the answer.
 function showToscaResult(res) {
   // Pinned to the BOTTOM-RIGHT (see .modal-corner): the TOSCA script opens its
   // own console window on top of the browser, which covered a centred card, so
@@ -3261,91 +3314,110 @@ function showToscaResult(res) {
   const ov = el("div", "modal-overlay modal-corner");
   const card = el("div", "modal-card modal-wide");
   card.appendChild(el("h3", "modal-title", `TOSCA '${res.script}' — ${res.written} row(s) written`));
-  // Everything below the title scrolls, so long .bat/workbook paths and long row
-  // lists stay inside the window instead of running off it.
   const body = el("div", "modal-body");
   card.appendChild(body);
-  body.appendChild(el("div", "modal-dest", res.workbook));
-  if (res.launched) {
-    const ok = el("div", "tosca-launch ok",
-      "▶ TOSCA started (fire-and-forget). Launched .bat: " + (res.bat || "?"));
-    body.appendChild(ok);
-  } else if (res.launch_error) {
-    const bad = el("div", "tosca-launch warn", "TOSCA not started: " + res.launch_error);
-    body.appendChild(bad);
-  }
-  const rows = res.rows || [];
-  if (rows.length) {
-    const tbl = el("div", "tosca-rows");
-    rows.forEach((r) => tbl.appendChild(
-      el("div", "tosca-row", `${r.chain} · ${r.process} · ${r.format}`)));
-    body.appendChild(tbl);
-  }
-  // What was actually done to the input folders. Reported even when it is
-  // nothing, because "no files were copied" is exactly the outcome a run that
-  // looked successful could otherwise hide.
+
   const st = res.staging || {};
-  if (st.enabled && st.configured) {
-    const folders = st.folders || [];
+  const combos = res.combinations || [];
+  // Counted from `staging.excluded`, NOT from `combinations`. Both say the same
+  // thing, but excluded is the field that has always existed and is built by the
+  // planner itself — so a response without `combinations` still reports the
+  // combinations that did not run, instead of quietly showing zero. That zero is
+  // the one number in this window that must never be wrong by omission.
+  const notRun = st.excluded || [];
+
+  // ---- the four counts -----------------------------------------------------
+  const stats = el("div", "tosca-stats");
+  const stat = (n, label, tone) => {
+    const box = el("div", "tosca-stat");
+    box.appendChild(el("div", "tosca-stat-n" + (tone ? " " + tone : ""), String(n)));
+    box.appendChild(el("div", "tosca-stat-l", label));
+    stats.appendChild(box);
+  };
+  stat(res.written, "Rows written");
+  stat(st.copied || 0, "Files staged", (st.copied || 0) > 0 ? "good" : "");
+  stat(st.removed || 0, "Files removed");
+  // Amber only when it is above zero: a clean run must not look like a warning.
+  stat(notRun.length, "Not run", notRun.length ? "warn" : "");
+  body.appendChild(stats);
+
+  if (res.launched) {
     body.appendChild(el("div", "tosca-launch ok",
-      `📁 Input files staged: ${st.copied} copied into ${folders.length} folder(s), `
-      + `${st.removed} previous file(s) removed`
-      + (st.created ? `, ${st.created} folder(s) created` : "")));
-    if (folders.length) {
-      const tbl = el("div", "tosca-rows");
-      folders.forEach((f) => {
-        const row = el("div", "tosca-row");
-        row.appendChild(el("div", "tosca-plan-path", f.path));
-        row.appendChild(el("div", "tosca-plan-counts",
-          `− ${f.removed.length} removed   + ${f.copied.length} copied`
-          + (f.created ? "   (folder created)" : "")));
-        row.appendChild(el("div", "tosca-plan-files", "copied: " + f.copied.join(", ")));
-        tbl.appendChild(row);
-      });
-      body.appendChild(tbl);
-    }
-  } else if (st.enabled === false || st.configured === false) {
+      `▶ TOSCA started.` + (st.enabled && st.configured
+        ? ` ${(st.folders || []).length} folder(s) staged`
+          + (st.created ? `, ${st.created} created` : "") + "."
+        : "")));
+  } else if (res.launch_error) {
+    body.appendChild(el("div", "tosca-launch warn", "TOSCA not started: " + res.launch_error));
+  }
+  // "No files were copied" is exactly the outcome a run that looked successful
+  // could otherwise hide, so it is stated rather than left to a zero count.
+  if (st.enabled === false || st.configured === false) {
     body.appendChild(el("div", "tosca-launch warn",
       "No input files were staged — "
       + (st.enabled === false
           ? "staging is off (input_staging.enabled in config/tosca.yaml)."
           : "this script has no input_folders configured in config/tosca.yaml.")));
   }
-  // A combination left out because its folder is missing or disagrees with the
-  // Key sheet: it was staged nowhere AND written to no row, so saying so is the
-  // only thing standing between the user and a quietly shorter run.
-  (st.excluded || []).forEach((x) => {
-    const box = el("div", "modal-warn");
-    box.appendChild(el("span", "modal-warn-icon", "⚠"));
-    box.appendChild(el("span", "modal-warn-text",
-      `${x.chain} · ${x.process} · ${x.format} was NOT run `
-      + `(${(x.files || []).length} file(s): ${(x.files || []).join(", ")}) — `
-      + (x.reasons || []).join("; ")));
-    body.appendChild(box);
-  });
 
-  // Files this script doesn't apply to (.OK selected for a JSON script, or vice
-  // versa) — reported, never silently dropped.
-  const skipped = res.skipped || [];
-  if (skipped.length) {
-    const box = el("div", "modal-warn");
-    box.appendChild(el("span", "modal-warn-icon", "⏭"));
-    box.appendChild(el("span", "modal-warn-text",
-      `${skipped.length} file(s) not applicable to this script: `
-      + skipped.map((s) => s.file).join(", ")));
-    body.appendChild(box);
+  // ---- one line per combination -------------------------------------------
+  if (combos.length) {
+    body.appendChild(el("div", "tosca-sec-label", "Combinations"));
+    const tbl = el("table", "tosca-table");
+    const thead = el("thead");
+    const hr = el("tr");
+    ["Chain", "Process", "Format", "Copied", "Removed"].forEach((h, i) => {
+      const th = el("th", i >= 3 ? "num" : "", h);
+      hr.appendChild(th);
+    });
+    thead.appendChild(hr); tbl.appendChild(thead);
+    const tb = el("tbody");
+    combos.forEach((c) => {
+      const tr = el("tr", c.status === "not_run" ? "excluded" : "");
+      tr.appendChild(el("td", "", c.chain || ""));
+      tr.appendChild(el("td", "", c.process || ""));
+      tr.appendChild(el("td", "", c.format || ""));
+      if (c.status === "not_run") {
+        // An excluded combination stays IN the table rather than moving behind
+        // the button: once the file names are hidden, a combination that
+        // silently did not run looks exactly like a successful one.
+        const td = el("td", "num", "");
+        td.colSpan = 2;
+        td.appendChild(el("span", "tosca-chip",
+          `not run · ${(c.files || []).length} file(s)`));
+        tr.appendChild(td);
+      } else {
+        const cp = el("td", "num");
+        cp.appendChild(el("b", "", String(c.copied)));
+        tr.appendChild(cp);
+        tr.appendChild(el("td", "num", String(c.removed)));
+      }
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+    body.appendChild(tbl);
   }
+
+  // ---- one amber line, counts only ----------------------------------------
+  const skipped = res.skipped || [];
   const errs = res.errors || [];
-  if (errs.length) {
+  const bits = [];
+  if (notRun.length) bits.push(`${notRun.length} combination(s) were not run`);
+  if (skipped.length) bits.push(`${skipped.length} file(s) not applicable to this script`);
+  if (errs.length) bits.push(`${errs.length} file(s) could not be used`);
+  if (bits.length) {
     const box = el("div", "modal-warn");
     box.appendChild(el("span", "modal-warn-icon", "⚠"));
     box.appendChild(el("span", "modal-warn-text",
-      `${errs.length} file(s) could not be used: ` + errs.map((e) => `${e.file} (${e.error})`).join("; ")));
+      bits.join(", ") + ". Open the report for the file names and reasons."));
     body.appendChild(box);
   }
+
   const acts = el("div", "modal-actions");
+  const view = el("button", "btn", "View report");
+  view.addEventListener("click", () => showToscaReport(res));
   const ok = el("button", "btn btn-primary", "Close");
-  acts.appendChild(ok); card.appendChild(acts);
+  acts.appendChild(view); acts.appendChild(ok); card.appendChild(acts);
   ov.appendChild(card); document.body.appendChild(ov);
   const close = () => ov.remove();
   ok.addEventListener("click", close);
