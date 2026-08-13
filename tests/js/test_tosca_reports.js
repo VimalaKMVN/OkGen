@@ -128,6 +128,85 @@ setTimeout(async () => {
   check("the status line says what was opened — Explorer is outside the browser",
         status && /Opened/.test(status.textContent) && /Explorer/i.test(status.textContent));
 
+  // ------------------------------------------------------------------------
+  // A folder that is not on this machine is shown, and UNSELECTABLE
+  // ------------------------------------------------------------------------
+  // The red line alone left the choice takeable, and taking it could only ever
+  // fail — so the entry stays visible (that a script's folder is not set up
+  // here is worth knowing) while the control is disabled.
+  const pick = api.pickReportFolder;
+  const css = fs.readFileSync(
+    path.join(__dirname, "..", "..", "src", "okgen", "web", "static", "styles.css"), "utf8");
+
+  function render(folders) {
+    doc.body.innerHTML = "";
+    if (typeof pick === "function") pick(folders);
+    const all = descendants(doc.body);
+    return {
+      all,
+      radios: all.filter((e) => e.type === "radio"),
+      rows: all.filter((e) => (e.className || "").includes("tosca-choice")),
+      text: all.map((e) => e.textContent || "").join(" | "),
+      openBtn: all.filter((e) => e.tagName === "BUTTON"
+                                 && /open in explorer/i.test(e.textContent || ""))[0],
+    };
+  }
+
+  check("app.js exposes the report picker", typeof pick === "function");
+
+  const mixed = render([
+    { name: "Present", exists: true, folder: "D:\\here" },
+    { name: "Absent", exists: false, folder: "D:\\nope" },
+  ]);
+  check("a present folder stays selectable",
+        !!mixed.radios[0] && mixed.radios[0].disabled !== true);
+  check("a missing folder cannot be selected",
+        !!mixed.radios[1] && mixed.radios[1].disabled === true);
+  check("...and its row is marked as greyed out",
+        !!mixed.rows[1] && (mixed.rows[1].className || "").includes("tosca-choice-off"));
+  check("...while the present row is not",
+        !!mixed.rows[0] && !(mixed.rows[0].className || "").includes("tosca-choice-off"));
+  check("the missing entry is still SHOWN, not hidden", /Absent/.test(mixed.text));
+  check("...and still says it is not found here", /not found on this machine/.test(mixed.text));
+  check("...and says what would make it usable", /until that folder is created/.test(mixed.text));
+
+  // The default must land on a row that can actually be opened. A checked but
+  // disabled radio would leave Open enabled with nothing behind it.
+  const firstMissing = render([
+    { name: "Absent", exists: false, folder: "D:\\nope" },
+    { name: "Present", exists: true, folder: "D:\\here" },
+  ]);
+  check("the preselection skips a disabled row",
+        !!firstMissing.radios[0] && firstMissing.radios[0].checked !== true);
+  check("...and lands on the first selectable one",
+        !!firstMissing.radios[1] && firstMissing.radios[1].checked === true);
+
+  // Nothing selectable at all: Open would silently do nothing, which reads as a
+  // broken button rather than as an unconfigured machine.
+  const none = render([
+    { name: "A", exists: false, folder: "D:\\nope" },
+    { name: "B", exists: false, folder: "D:\\nada" },
+  ]);
+  check("with no folder present, Open is disabled",
+        !!none.openBtn && none.openBtn.disabled === true);
+  check("...and the dialog says why rather than looking broken",
+        /None of these folders exists on this machine/.test(none.text));
+  check("...while both entries are still listed", /A/.test(none.text) && /B/.test(none.text));
+
+  // ---- the stylesheet, because the greying is CSS-only -------------------
+  check("styles.css greys the disabled row's NAME",
+        /\.tosca-choice-off\s+\.report-name\s*\{[^}]*color:/.test(css));
+  check("...and shows a not-allowed cursor on it",
+        /\.tosca-choice-off\s*\{[^}]*cursor:\s*not-allowed/.test(css));
+  // Load-bearing: an `opacity` on the row would fade the red "not found" line
+  // too — the explanation for the disabled state is the one thing that must
+  // NOT get harder to read.
+  // The rule must EXIST and lack `opacity` — testing only for its absence
+  // passes on any build that has no such rule at all, which is vacuous.
+  const offRule = css.match(/\.tosca-choice-off\s*\{([^}]*)\}/);
+  check("the row is NOT dimmed wholesale, which would fade its own warning",
+        !!offRule && !/opacity/.test(offRule[1]));
+
   console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
   process.exit(failures ? 1 : 0);
 }, 0);

@@ -893,6 +893,20 @@ input.fval[role="combobox"] { padding-right: 22px; }
   overflow-wrap: anywhere;
 }
 .report-missing { font-size: 10.5px; color: #b45309; font-weight: 600; }
+.report-none {
+  font-size: 12px; color: #b45309; font-weight: 600;
+  line-height: 1.45; margin: 4px 0 14px;
+}
+/* A report folder that is not on this machine: shown, greyed, unselectable.
+   The dimming is applied to the NAME and the radio, deliberately NOT as an
+   `opacity` on the whole row — the row also holds the red "not found" line,
+   which is the reason the entry is disabled and is already the least legible
+   text in the dialog (measured 3.32:1 on --bg, see PLAN §6). Fading the row
+   would fade the explanation along with it, which is backwards: the disabled
+   state should make its reason MORE readable, not less. */
+.tosca-choice-off { cursor: not-allowed; }
+.tosca-choice-off .report-name { color: #7d8590; }   /* 4.47:1 — dim, still read */
+.tosca-choice-off input[type=radio] { cursor: not-allowed; }
 
 /* Bulk Edit — field values: one row per field, shaped like Volume Generate's
    picker but with a values box first (a single entry means "set it"). */

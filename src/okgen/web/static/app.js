@@ -3011,20 +3011,31 @@ function pickReportFolder(folders) {
       "Which script's results? The folder opens in Explorer, where the "
       + "Word and Excel reports open as usual."));
     const list = el("div", "tosca-scripts");
-    folders.forEach((f, i) => {
-      const lab = el("label", "tosca-choice");
+    // A folder that is not on this machine is shown, and DISABLED. Choosing it
+    // could only ever fail, so the choice is removed rather than the outcome
+    // explained afterwards — but the entry and its red line stay visible,
+    // because "that script's folder is not set up here" is information, and
+    // hiding the row would leave the list looking arbitrarily short.
+    let picked = false;
+    folders.forEach((f) => {
+      const lab = el("label", "tosca-choice" + (f.exists ? "" : " tosca-choice-off"));
       const rb = el("input"); rb.type = "radio"; rb.name = "tosca-reports"; rb.value = f.name;
-      if (i === 0) rb.checked = true;
+      rb.disabled = !f.exists;
+      // The default lands on the first SELECTABLE row, not the first row — a
+      // checked-and-disabled radio would leave Open enabled with nothing it
+      // could open.
+      if (f.exists && !picked) { rb.checked = true; picked = true; }
       lab.appendChild(rb);
       const box = el("span", "report-choice-text");
-      box.appendChild(el("span", null, f.name));
+      box.appendChild(el("span", "report-name", f.name));
       // The full path, and a plain warning when it is not on THIS machine —
       // only some of these folders are set up, and an empty Explorer window
       // would not say why.
       box.appendChild(el("span", "report-path", f.folder));
       if (!f.exists) {
         box.appendChild(el("span", "report-missing",
-                           "not found on this machine — check config/tosca.yaml"));
+                           "not found on this machine — cannot be opened until that "
+                           + "folder is created (or fix the path in config/tosca.yaml)"));
       }
       lab.appendChild(box);
       list.appendChild(lab);
@@ -3033,6 +3044,15 @@ function pickReportFolder(folders) {
     const acts = el("div", "modal-actions");
     const cancel = el("button", "btn", "Cancel");
     const open = el("button", "btn btn-primary", "Open in Explorer");
+    // Nothing selectable at all: Open would silently do nothing, which reads as
+    // a broken button rather than as an unconfigured machine.
+    if (!picked) {
+      open.disabled = true;
+      card.insertBefore(el("div", "report-none",
+        "None of these folders exists on this machine, so there is nothing to "
+        + "open yet. Run a script once to create its results folder, or correct "
+        + "the `results:` paths in config/tosca.yaml and restart OkGen."), acts);
+    }
     acts.appendChild(cancel); acts.appendChild(open);
     card.appendChild(acts);
     ov.appendChild(card); document.body.appendChild(ov);
