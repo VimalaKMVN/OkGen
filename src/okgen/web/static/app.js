@@ -3047,13 +3047,72 @@ function pickReportFolder(folders) {
   });
 }
 
-function pickTosca(scripts, count, warning) {
+// The input-folder plan, rendered into the confirmation dialog.
+//
+// A run CLEARS the folders it stages into, and a step that deletes files should
+// be visible while Cancel is still on the table — the counts here are the same
+// ones the run will act on (server-side `preview` and `run` share one planner,
+// so the two cannot describe different work).
+function renderToscaPlan(box, pv) {
+  box.textContent = "";
+  if (!pv || !pv.enabled) {
+    box.appendChild(el("div", "tosca-plan-note",
+      "Input file staging is off — the sheet will be updated but no files copied "
+      + "(input_staging.enabled in config/tosca.yaml)."));
+    return;
+  }
+  if (!pv.configured) {
+    box.appendChild(el("div", "tosca-plan-note",
+      "This script has no input_folders configured, so no files will be copied "
+      + "into the TOSCA input tree."));
+    return;
+  }
+  const targets = pv.targets || [];
+  box.appendChild(el("div", "tosca-plan-head",
+    `${pv.copy_total} file(s) will be copied into ${targets.length} input folder(s)`
+    + (pv.remove_total
+        ? `, replacing ${pv.remove_total} existing file(s) that will be DELETED.`
+        : ". No existing files need removing.")));
+  if (targets.length) {
+    const tbl = el("div", "tosca-rows");
+    targets.forEach((t) => {
+      const row = el("div", "tosca-row");
+      row.appendChild(el("div", "tosca-plan-path", t.path));
+      row.appendChild(el("div", "tosca-plan-counts",
+        `− ${t.remove.length} removed   + ${t.copy.length} copied`
+        + (t.status === "create" ? "   (folder will be created)" : "")));
+      // The names are what makes this checkable rather than merely reassuring:
+      // a count alone cannot show you it is about to delete the wrong thing.
+      if (t.remove.length) row.appendChild(
+        el("div", "tosca-plan-files", "delete: " + t.remove.join(", ")));
+      row.appendChild(el("div", "tosca-plan-files", "copy: " + t.copy.join(", ")));
+      tbl.appendChild(row);
+    });
+    box.appendChild(tbl);
+  }
+  // A combination whose folder is missing or misnamed cannot run at all, and
+  // saying so HERE rather than in the report afterwards is the point: the fix
+  // is in the workbook's Key sheet, not in anything OkGen can do.
+  (pv.excluded || []).forEach((x) => {
+    const w = el("div", "modal-warn");
+    w.appendChild(el("span", "modal-warn-icon", "⚠"));
+    w.appendChild(el("span", "modal-warn-text",
+      `${x.chain} · ${x.process} · ${x.format} will NOT run `
+      + `(${(x.files || []).length} file(s): ${(x.files || []).join(", ")}) — `
+      + (x.reasons || []).join("; ")));
+    box.appendChild(w);
+  });
+}
+
+function pickTosca(scripts, paths, warning) {
+  const count = paths.length;
   return new Promise((resolve) => {
     const ov = el("div", "modal-overlay");
     const card = el("div", "modal-card");
     card.appendChild(el("h3", "modal-title", `Run TOSCA on ${count} file(s)`));
     card.appendChild(el("div", "modal-dest", "Choose the script whose input sheet to populate, then run:"));
     const list = el("div", "tosca-scripts");
+    const radios = [];
     scripts.forEach((s, i) => {
       const lab = el("label", "tosca-choice");
       const rb = el("input"); rb.type = "radio"; rb.name = "tosca-script"; rb.value = s.name;
@@ -3061,8 +3120,34 @@ function pickTosca(scripts, count, warning) {
       lab.appendChild(rb);
       lab.appendChild(el("span", null, s.name));
       list.appendChild(lab);
+      radios.push(rb);
     });
     card.appendChild(list);
+
+    // The plan is per SCRIPT, so it reloads when the choice changes. Replies are
+    // sequenced by request number: switching scripts quickly must not leave the
+    // slower earlier answer on screen describing a script you are not running.
+    const plan = el("div", "tosca-plan");
+    card.appendChild(plan);
+    let planReq = 0;
+    async function loadPlan(name) {
+      const mine = ++planReq;
+      plan.textContent = "";
+      plan.appendChild(el("div", "tosca-plan-note", "Checking the input folders…"));
+      let pv = null, err = null;
+      try { pv = await postJSON("/api/tosca/preview", { paths, script: name }); }
+      catch (e) { err = e; }
+      if (mine !== planReq) return;
+      if (err) {
+        plan.textContent = "";
+        plan.appendChild(el("div", "tosca-plan-note warn",
+          "Could not check the input folders: " + err.message));
+        return;
+      }
+      renderToscaPlan(plan, pv);
+    }
+    radios.forEach((rb) => rb.addEventListener("change", () => loadPlan(rb.value)));
+    if (radios.length) loadPlan(radios[0].value);
 
     // Production action — warn about the common PowerForms-link mistake and gate
     // Run behind an acknowledgement checkbox (like Send to NiceLabel).
@@ -3075,7 +3160,9 @@ function pickTosca(scripts, count, warning) {
     const check = el("label", "modal-check");
     const cb = el("input"); cb.type = "checkbox";
     check.appendChild(cb);
-    check.appendChild(el("span", null, "I've verified the correct PowerForms link is in the input sheet."));
+    check.appendChild(el("span", null,
+      "I've verified the correct PowerForms link is in the input sheet, and the "
+      + "input folders above will be cleared and refilled."));
     card.appendChild(check);
 
     const acts = el("div", "modal-actions");
@@ -3124,6 +3211,49 @@ function showToscaResult(res) {
       el("div", "tosca-row", `${r.chain} · ${r.process} · ${r.format}`)));
     body.appendChild(tbl);
   }
+  // What was actually done to the input folders. Reported even when it is
+  // nothing, because "no files were copied" is exactly the outcome a run that
+  // looked successful could otherwise hide.
+  const st = res.staging || {};
+  if (st.enabled && st.configured) {
+    const folders = st.folders || [];
+    body.appendChild(el("div", "tosca-launch ok",
+      `📁 Input files staged: ${st.copied} copied into ${folders.length} folder(s), `
+      + `${st.removed} previous file(s) removed`
+      + (st.created ? `, ${st.created} folder(s) created` : "")));
+    if (folders.length) {
+      const tbl = el("div", "tosca-rows");
+      folders.forEach((f) => {
+        const row = el("div", "tosca-row");
+        row.appendChild(el("div", "tosca-plan-path", f.path));
+        row.appendChild(el("div", "tosca-plan-counts",
+          `− ${f.removed.length} removed   + ${f.copied.length} copied`
+          + (f.created ? "   (folder created)" : "")));
+        row.appendChild(el("div", "tosca-plan-files", "copied: " + f.copied.join(", ")));
+        tbl.appendChild(row);
+      });
+      body.appendChild(tbl);
+    }
+  } else if (st.enabled === false || st.configured === false) {
+    body.appendChild(el("div", "tosca-launch warn",
+      "No input files were staged — "
+      + (st.enabled === false
+          ? "staging is off (input_staging.enabled in config/tosca.yaml)."
+          : "this script has no input_folders configured in config/tosca.yaml.")));
+  }
+  // A combination left out because its folder is missing or disagrees with the
+  // Key sheet: it was staged nowhere AND written to no row, so saying so is the
+  // only thing standing between the user and a quietly shorter run.
+  (st.excluded || []).forEach((x) => {
+    const box = el("div", "modal-warn");
+    box.appendChild(el("span", "modal-warn-icon", "⚠"));
+    box.appendChild(el("span", "modal-warn-text",
+      `${x.chain} · ${x.process} · ${x.format} was NOT run `
+      + `(${(x.files || []).length} file(s): ${(x.files || []).join(", ")}) — `
+      + (x.reasons || []).join("; ")));
+    body.appendChild(box);
+  });
+
   // Files this script doesn't apply to (.OK selected for a JSON script, or vice
   // versa) — reported, never silently dropped.
   const skipped = res.skipped || [];
@@ -3163,7 +3293,7 @@ async function runTosca() {
   const all = info.scripts || [];
   if (!all.length) { setStatus("No TOSCA scripts configured (config/tosca.yaml)", "err"); return; }
   const scripts = all.some(s => s.matches > 0) ? all.filter(s => s.matches > 0) : all;
-  const script = await pickTosca(scripts, paths.length, info.warning);
+  const script = await pickTosca(scripts, paths, info.warning);
   if (!script) return;
   if (!beginBusy("Running TOSCA…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
@@ -3171,7 +3301,12 @@ async function runTosca() {
     const er = (res.errors || []).length;
     const sk = (res.skipped || []).length;
     const launch = res.launched ? " — TOSCA started" : (res.launch_error ? " — not started" : "");
+    const stg = res.staging || {};
+    const ex = (stg.excluded || []).length;
     setStatus(`TOSCA '${script}': wrote ${res.written} row(s)`
+              + (stg.enabled && stg.configured
+                  ? `, staged ${stg.copied} file(s) (${stg.removed} removed)` : "")
+              + (ex ? `, ${ex} combination(s) NOT run — see the report` : "")
               + (er ? `, ${er} error(s)` : "")
               + (sk ? `, skipped ${sk} file(s) not applicable to this script` : "")
               + launch,

@@ -2103,6 +2103,22 @@ def tosca_scripts(config: Config, paths=None, registry=None) -> dict:
     return {"scripts": tosca.list_scripts(config), "warning": warning}
 
 
+def tosca_preview(paths, script, registry, config: Config) -> dict:
+    """What a run would do to the TOSCA input folders, for the confirmation.
+
+    A run CLEARS the input folders it stages into, and a destructive step should
+    be seen before it is agreed to — this is what puts the folder list and the
+    file counts in front of the user while Cancel is still an option. It also
+    surfaces a combination that cannot run (missing or misnamed format folder)
+    BEFORE the workbook is touched, rather than in the report afterwards.
+    """
+    from okgen import tosca
+    try:
+        return tosca.preview(paths, script, registry, config)
+    except tosca.ToscaError as exc:
+        raise EditError(str(exc))
+
+
 def run_tosca_script(paths, script, registry, config: Config) -> dict:
     """Populate the chosen TOSCA workbook from the selected files."""
     from okgen import tosca

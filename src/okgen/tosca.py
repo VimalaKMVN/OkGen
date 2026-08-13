@@ -120,12 +120,29 @@ def _okfile_header(path: Path, layout, config) -> dict:
     return out
 
 
-def _format_code(value) -> Optional[str]:
-    """The bare code from a value that may already be a ``"1 - Carton Label"``
-    display string (derived fields carry the full label)."""
+def format_head(value) -> Optional[str]:
+    """The CODE at the head of a ``"code - description"`` string.
+
+    Splits on the FIRST hyphen, not on ``" -"``, and that is deliberate: the
+    workbooks' own Key sheets are not consistently spaced. Two rows are typed
+    without the space before the hyphen — ``'T-Q-Line Small Gum Label'`` (TJMaxx
+    SH/PT) and ``'J- Rat Tail Gum Label'`` (Marshalls SH/PT) — so a ``" -"``
+    split returned the WHOLE string as the code and those two formats resolved
+    to nothing at all: a file carrying format ``T`` was reported as *not in Key
+    column C* and dropped from the run. A format code is always the leading
+    token and never contains a hyphen, so the first hyphen is the right seam.
+
+    The same rule names the ticket-format FOLDER (see ``_find_child``), so the
+    Key row and the folder are identified by one definition rather than two.
+    """
     if value in (None, ""):
         return value
-    return str(value).split(" -", 1)[0].strip()
+    return str(value).split("-", 1)[0].strip()
+
+
+# Derived fields carry the full ``"1 - Carton Label"`` label; the code is the
+# same leading token, found the same way.
+_format_code = format_head
 
 
 def _format_string(key_ws, column: str, code: str) -> Optional[str]:
@@ -136,15 +153,20 @@ def _format_string(key_ws, column: str, code: str) -> Optional[str]:
         v = key_ws[f"{column}{row}"].value
         if v is None:
             continue
-        head = str(v).split(" -", 1)[0].strip()   # part before ' -'
-        if head == code:
+        if format_head(v) == code:
             return str(v)
     return None
 
 
 def build_rows(paths, registry, config, key_ws) -> Tuple[List[dict], List[dict]]:
     """(unique rows, per-file errors). Each row: chain/process/format/status/
-    source/date + is_europe. Deduped by (chain, process, format)."""
+    source/date. Deduped by (chain, process, format).
+
+    Each row also carries ``files`` — the selected paths that resolved to it.
+    Staging needs exactly that: the row IS the input folder, so the files
+    sharing a row are the files that belong in one folder. It is dropped by the
+    sheet write, which only ever reads the columns named in ``columns:``.
+    """
     t = config.tosca()
     chain_names = t.get("chain_names", {}) or {}
     process_names = t.get("process_names", {}) or {}
@@ -155,7 +177,7 @@ def build_rows(paths, registry, config, key_ws) -> Tuple[List[dict], List[dict]]
     date_def = t.get("date_format_default", "%m/%d/%Y")
     today = datetime.date.today()
 
-    seen = set()
+    seen: dict = {}
     rows: List[dict] = []
     errors: List[dict] = []
     for p in paths or []:
@@ -209,18 +231,327 @@ def build_rows(paths, registry, config, key_ws) -> Tuple[List[dict], List[dict]]
 
         key = (chain_name, process_name, fmt_str)
         if key in seen:
-            continue                                    # dedupe unique combinations
-        seen.add(key)
+            # Dedupe unique combinations — but the FILE still belongs to the
+            # row, because every file resolving to a combination is staged into
+            # that combination's one folder.
+            seen[key]["files"].append(str(p))
+            continue
         is_eu = chain_name in europe
-        rows.append({
+        row = {
             "chain": chain_name,
             "process": process_name,
             "format": fmt_str,
             "status": defaults.get("status", "Work Pending"),
             "source": defaults.get("source", "Online"),
             "date": today.strftime(date_eu if is_eu else date_def),
-        })
+            "files": [str(p)],
+        }
+        seen[key] = row
+        rows.append(row)
     return rows, errors
+
+
+# --------------------------------------------------------------------------- #
+# Input file staging — putting the selected files where TOSCA reads them
+# --------------------------------------------------------------------------- #
+# Updating the sheet only tells TOSCA WHICH combinations to process; it reads the
+# files themselves from a tree of its own, addressed as
+# ``{B[Chain]}\{B[Process]}\{B[Format]}`` — the very triple a row already is. So
+# nothing new is resolved here: the ROW IS THE FOLDER, and the files that share a
+# row are the files that belong in one folder.
+#
+# A run is therefore three ordered steps: stage, write the sheet, fire the .bat.
+# Staging goes FIRST so that a folder-level failure leaves the workbook exactly
+# as it was — there is nothing to undo, and the sheet can never end up listing a
+# combination whose folder was not set up.
+#
+# Config: the ``input_staging`` block plus each script's ``input_folders``.
+
+STAGE_OK = "ok"                    # folder found, named exactly as the sheet cell
+STAGE_NAME_MISMATCH = "name_mismatch"   # found by CODE, but named differently
+STAGE_MISSING = "missing"          # no folder for this format at all
+STAGE_CREATE = "create"            # missing, and create_missing is on
+
+# Files cleared from a target folder, by the engine whose files are going in.
+_ENGINE_EXTS = {"ok": (".ok",), "json": (".json",)}
+
+
+def staging_config(config) -> dict:
+    """The ``input_staging`` block with defaults applied. Absent block = OFF, so
+    a config written before this feature keeps behaving exactly as it did."""
+    st = (config.tosca() or {}).get("input_staging") or {}
+    return {
+        "enabled": bool(st.get("enabled", False)),
+        "subpath": str(st.get("subpath") or "{chain}\\{process}\\{format}"),
+        "match_by_code": bool(st.get("match_format_by_code", True)),
+        "clear": str(st.get("clear", "matching")).strip().lower(),
+        "create_missing": bool(st.get("create_missing", False)),
+        "overwrite": bool(st.get("overwrite", True)),
+    }
+
+
+def _script_roots(script: dict) -> List[str]:
+    raw = script.get("input_folders") or []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [str(r).strip() for r in raw if str(r).strip()]
+
+
+def _children(parent: Path) -> List[str]:
+    """Sub-folder NAMES of ``parent`` ([] if it isn't a folder). Listed through
+    ``long_path`` because these trees are deep enough to pass MAX_PATH (D44),
+    and only the names are kept so the caller keeps building real paths."""
+    try:
+        return [c.name for c in Path(fs.long_path(parent)).iterdir() if c.is_dir()]
+    except (OSError, ValueError):
+        return []
+
+
+def _find_child(parent: Path, name: str, by_code: bool = False):
+    """Locate one folder level. Returns ``(path, how)`` with ``how`` one of
+    ``exact`` / ``case`` / ``code``, or ``(None, None)``.
+
+    ``code`` is the interesting one and applies to the ticket-format level only:
+    it finds the folder whose leading code matches even when the full name does
+    not, which is how the Key sheet's ``'T-Q-Line Small Gum Label'`` is
+    recognised as the tree's ``'T - Q-Line Small Gum Label'``. That is a
+    DETECTION, not a repair — see ``plan_staging``.
+    """
+    direct = parent / name
+    try:
+        if direct.is_dir():
+            return direct, "exact"
+    except OSError:
+        pass
+    kids = _children(parent)
+    low = str(name).lower()
+    for k in kids:                                   # Windows folders are
+        if k.lower() == low:                         # case-insensitive; a
+            return parent / k, "case"                # case-sensitive FS is not
+    if by_code:
+        code = format_head(name)
+        if code not in (None, ""):
+            for k in kids:
+                if format_head(k) == code:
+                    return parent / k, "code"
+    return None, None
+
+
+def _leaf_segments(subpath: str, row: dict) -> List[str]:
+    """The configured ``{chain}\\{process}\\{format}`` filled in from the row.
+    Split on BOTH separators so a config written with Windows backslashes also
+    resolves on the POSIX box the tests run on."""
+    filled = subpath.format(chain=row.get("chain", ""),
+                            process=row.get("process", ""),
+                            format=row.get("format", ""))
+    return [seg for seg in re.split(r"[\\/]+", filled) if seg]
+
+
+def _clear_list(folder: Path, exts, mode: str, keep: set) -> List[str]:
+    """Files this run would delete from ``folder``.
+
+    Only FILES, never sub-folders, and only in a folder this run is populating —
+    a stale file under some other format is harmless, because the data sheet is
+    cleared below the last row, so TOSCA processes only the combinations written.
+
+    ``keep`` holds the sources being staged INTO this folder. A file already
+    sitting in its own target (the user browsed the TOSCA tree in OkGen, edited,
+    and ran) must not be deleted out from under itself — it is about to be
+    rewritten from the snapshot anyway.
+    """
+    if mode == "none":
+        return []
+    out = []
+    try:
+        entries = sorted(Path(fs.long_path(folder)).iterdir(), key=lambda c: c.name)
+    except (OSError, ValueError):
+        return []
+    for child in entries:
+        if not child.is_file():
+            continue
+        real = folder / child.name
+        if str(real).lower() in keep:
+            continue
+        if mode == "all" or child.suffix.lower() in exts:
+            out.append(str(real))
+    return out
+
+
+def plan_staging(rows, script, config, engines=None) -> dict:
+    """What staging WOULD do — pure inspection, nothing written.
+
+    Backs both the confirmation dialog (so a destructive step is seen before it
+    is agreed to) and the run itself, so the preview and the action cannot
+    describe different work.
+
+    A row whose folder is missing, or whose folder disagrees with the sheet
+    cell, is EXCLUDED and reported; every other selected combination still runs.
+    Excluding rather than staging-anyway is not caution, it is arithmetic: TOSCA
+    builds its input path from the Format CELL, so a row whose cell does not name
+    a real folder cannot be processed however the files are arranged.
+    """
+    cfg = staging_config(config)
+    roots = _script_roots(script)
+    plan = {"enabled": cfg["enabled"], "configured": bool(roots), "roots": roots,
+            "targets": [], "excluded": [], "remove_total": 0, "copy_total": 0,
+            "clear": cfg["clear"], "create_missing": cfg["create_missing"]}
+    if not cfg["enabled"] or not roots:
+        return plan
+
+    exts = tuple(sorted({e for eng in (engines or ["ok", "json"])
+                         for e in _ENGINE_EXTS.get(eng, ())}))
+    for row in rows:
+        files = [str(f) for f in (row.get("files") or [])]
+        keep = {f.lower() for f in files}
+        targets, problems = [], []
+
+        # Two selected files with the same NAME resolving to the same
+        # combination would land on top of each other in the one folder, and
+        # whichever copied last would win silently. Reported, and NEITHER is
+        # staged — a bulk write path must not quietly keep one of two files.
+        counts: dict = {}
+        for f in files:
+            counts[Path(f).name.lower()] = counts.get(Path(f).name.lower(), 0) + 1
+        clashes = sorted(n for n, c in counts.items() if c > 1)
+        if clashes:
+            problems.append(
+                "two or more selected files share a name and resolve to this same "
+                "folder, so one would overwrite the other: " + ", ".join(clashes))
+
+        for root in ([] if problems else roots):
+            segs = _leaf_segments(cfg["subpath"], row)
+            here, ok = Path(root), True
+            for i, seg in enumerate(segs):
+                last = (i == len(segs) - 1)
+                found, how = _find_child(here, seg, by_code=last and cfg["match_by_code"])
+                if found is None:
+                    if last and cfg["create_missing"]:
+                        targets.append({"root": root, "path": str(here / seg),
+                                        "status": STAGE_CREATE, "how": None,
+                                        "note": f"folder does not exist yet and will be created: {here / seg}",
+                                        "remove": [], "copy": files})
+                    else:
+                        problems.append(
+                            f"no {'ticket format' if last else 'folder'} {seg!r} under {here}")
+                    ok = False
+                    break
+                if last and how == "code" and found.name != seg:
+                    problems.append(
+                        f"the sheet says {seg!r} but the folder is named "
+                        f"{found.name!r} — TOSCA looks for the sheet's spelling, "
+                        f"so this combination cannot run until the workbook's Key "
+                        f"sheet is corrected to {found.name!r}")
+                    ok = False
+                    break
+                here = found
+            if not ok:
+                continue
+            targets.append({"root": root, "path": str(here), "status": STAGE_OK,
+                            "how": "exact",
+                            "remove": _clear_list(here, exts, cfg["clear"], keep),
+                            "copy": files})
+
+        if problems:
+            plan["excluded"].append({
+                "chain": row.get("chain"), "process": row.get("process"),
+                "format": row.get("format"),
+                "files": [Path(f).name for f in files],
+                "reasons": problems,
+            })
+            continue
+        for t in targets:
+            t.update(chain=row.get("chain"), process=row.get("process"),
+                     format=row.get("format"))
+            plan["targets"].append(t)
+            plan["remove_total"] += len(t["remove"])
+            plan["copy_total"] += len(t["copy"])
+    return plan
+
+
+def included_rows(rows, plan) -> List[dict]:
+    """The rows staging did not exclude. An excluded combination is left out of
+    the SHEET as well: writing it would ask TOSCA to process a folder that is not
+    there, and report a failure that looks like TOSCA's rather than the Key
+    sheet's."""
+    if not plan.get("enabled") or not plan.get("configured"):
+        return list(rows)
+    bad = {(e.get("chain"), e.get("process"), e.get("format"))
+           for e in plan.get("excluded", [])}
+    return [r for r in rows if (r.get("chain"), r.get("process"), r.get("format")) not in bad]
+
+
+def apply_staging(plan: dict) -> dict:
+    """Carry out ``plan``: snapshot, clear, copy. Raises ToscaError on any
+    folder-level failure, having deleted nothing.
+
+    SNAPSHOT FIRST, and that is the whole design. The obvious order — clear the
+    folder, then copy the files in — destroys its own input when a selected file
+    already lives in the folder being cleared, which is exactly what happens when
+    someone browses the TOSCA input tree in OkGen, edits a file and runs. Copying
+    every source into a temp folder before anything is deleted makes the order
+    irrelevant, and means a read failure costs nothing: the delete only ever
+    happens once the replacement is in hand.
+    """
+    import shutil
+    import tempfile
+
+    targets = plan.get("targets") or []
+    result = {"folders": [], "removed": 0, "copied": 0, "created": 0}
+    if not targets:
+        return result
+
+    tmp = Path(tempfile.mkdtemp(prefix="okgen-tosca-"))
+    try:
+        snap = {}                                     # source path -> temp copy
+        for t in targets:
+            for src in t["copy"]:
+                if src in snap:
+                    continue
+                s = Path(src)
+                if not s.is_file():
+                    raise ToscaError(f"could not stage input files — this file is "
+                                     f"no longer there: {src}")
+                dst = tmp / f"{len(snap)}_{s.name}"
+                try:
+                    fs.copy2(s, dst)
+                except OSError as exc:
+                    raise ToscaError(f"could not read {s.name} to stage it: {exc}")
+                snap[src] = dst
+
+        for t in targets:
+            folder = Path(t["path"])
+            entry = {"path": t["path"], "chain": t.get("chain"),
+                     "process": t.get("process"), "format": t.get("format"),
+                     "created": False, "removed": [], "copied": []}
+            if t["status"] == STAGE_CREATE:
+                try:
+                    fs.mkdir(folder, parents=True, exist_ok=True)
+                except OSError as exc:
+                    raise ToscaError(f"could not create the input folder {folder}: {exc}")
+                entry["created"] = True
+                result["created"] += 1
+            for victim in t["remove"]:
+                try:
+                    fs.unlink(Path(victim))
+                except OSError as exc:
+                    raise ToscaError(
+                        f"could not clear the input folder {folder} — {Path(victim).name} "
+                        f"could not be removed ({exc}). Nothing has been written to the "
+                        f"workbook and TOSCA was not started.")
+                entry["removed"].append(Path(victim).name)
+                result["removed"] += 1
+            for src in t["copy"]:
+                dest = folder / Path(src).name
+                try:
+                    fs.copy2(snap[src], dest)
+                except OSError as exc:
+                    raise ToscaError(f"could not copy {Path(src).name} into {folder}: {exc}")
+                entry["copied"].append(Path(src).name)
+                result["copied"] += 1
+            result["folders"].append(entry)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    return result
 
 
 # --------------------------------------------------------------------------- #
@@ -644,10 +975,14 @@ def scripts_for(paths, registry, config) -> dict:
                                        "unknown": counts.get(None, 0)}}
 
 
-def run(paths, script_name, registry, config, launch=True) -> dict:
-    """Populate the chosen script's workbook from the selected files, then fire
-    the script's .bat (fire-and-forget) when rows were written. ``launch=False``
-    updates the sheet only (used by tests that don't want to spawn a process)."""
+def _prepare(paths, script_name, registry, config) -> dict:
+    """Everything a run and a preview both need: the resolved script + workbook,
+    the engine routing, and the rows the selection resolves to.
+
+    Shared rather than duplicated so the preview and the run cannot describe
+    different work — the whole point of showing a destructive step beforehand is
+    that what is shown is what happens.
+    """
     import openpyxl
 
     t = config.tosca()
@@ -686,6 +1021,69 @@ def run(paths, script_name, registry, config, launch=True) -> dict:
         max_row = (data_ws.max_row if data_ws else 0) or 0
     finally:
         wb.close()
+    return {"script": script, "workbook": workbook, "data_sheet": data_sheet,
+            "first_data_row": first_data_row, "columns": columns,
+            "engines": engines, "rows": rows, "errors": errors,
+            "skipped": skipped, "max_row": max_row, "t": t}
+
+
+def preview(paths, script_name, registry, config) -> dict:
+    """What a run WOULD do to the input folders — for the confirmation dialog.
+
+    Deliberately its own round trip rather than part of the script list: the
+    folders depend on the script CHOSEN, and scanning all ten scripts' trees to
+    answer a question about one would be both slow and mostly wrong (most of
+    those roots are not present on a given machine).
+    """
+    prep = _prepare(paths, script_name, registry, config)
+    plan = plan_staging(prep["rows"], prep["script"], config, prep["engines"])
+    return {
+        "script": script_name,
+        "enabled": plan["enabled"],
+        "configured": plan["configured"],
+        "rows": len(included_rows(prep["rows"], plan)),
+        "targets": [{"path": t["path"], "chain": t.get("chain"),
+                     "process": t.get("process"), "format": t.get("format"),
+                     "status": t["status"],
+                     "remove": [Path(v).name for v in t["remove"]],
+                     "copy": [Path(c).name for c in t["copy"]]}
+                    for t in plan["targets"]],
+        "excluded": plan["excluded"],
+        "remove_total": plan["remove_total"],
+        "copy_total": plan["copy_total"],
+        "errors": prep["errors"],
+        "skipped": prep["skipped"],
+    }
+
+
+def run(paths, script_name, registry, config, launch=True, stage=True) -> dict:
+    """Stage the selected files into the script's TOSCA input folders, populate
+    its workbook from them, then fire its .bat (fire-and-forget) when rows were
+    written — in that order (see the staging section above).
+
+    ``launch=False`` skips the .bat and ``stage=False`` skips the file copy;
+    both are for tests that don't want to spawn a process or touch a tree."""
+    prep = _prepare(paths, script_name, registry, config)
+    t = prep["t"]
+    script = prep["script"]
+    workbook = prep["workbook"]
+    data_sheet = prep["data_sheet"]
+    first_data_row = prep["first_data_row"]
+    columns = prep["columns"]
+    engines = prep["engines"]
+    rows, errors, skipped = prep["rows"], prep["errors"], prep["skipped"]
+    max_row = prep["max_row"]
+
+    # STAGE FIRST — before the workbook is touched. TOSCA reads the files from
+    # its own tree, so a run that updates the sheet without staging processes
+    # whatever was left there last time. Doing it first also means a folder-level
+    # failure (a lock, a permission) leaves the workbook untouched: there is
+    # nothing to undo, and the sheet can never list a combination whose folder
+    # was not set up. A combination whose folder is missing or misnamed is left
+    # out of BOTH the staging and the sheet, and reported — the rest still runs.
+    plan = plan_staging(rows, script, config, engines)
+    staged = apply_staging(plan) if stage else {}
+    rows = included_rows(rows, plan)
 
     max_clear_row = max(max_row, first_data_row + len(rows))
     if rows:
@@ -738,6 +1136,15 @@ def run(paths, script_name, registry, config, launch=True) -> dict:
         "rows": rows,
         "errors": errors,
         "skipped": skipped,
+        "staging": {
+            "enabled": plan.get("enabled", False),
+            "configured": plan.get("configured", False),
+            "folders": staged.get("folders", []),
+            "removed": staged.get("removed", 0),
+            "copied": staged.get("copied", 0),
+            "created": staged.get("created", 0),
+            "excluded": plan.get("excluded", []),
+        },
         "applies_to": sorted(engines),
         "launched": launched,
         "bat": str(bat_file) if bat_file else bat_cfg,

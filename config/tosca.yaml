@@ -38,6 +38,14 @@
 #   workbook    full .xlsm path (preferred), or a folder holding exactly one.
 #   data_sheet  the exact sheet/tab name to populate.
 #   bat         full .bat path (preferred — a folder with several is ambiguous).
+#   input_folders
+#               OPTIONAL. The ROOT(s) of the tree TOSCA reads its input files
+#               from. Before the .bat is fired, OkGen clears and re-fills the
+#               leaf folder for each (Chain, Process, Format) it just wrote to
+#               the sheet — see the `input_staging` block below. A list, because
+#               a script may feed more than one tree; a single path is accepted
+#               too. A script WITHOUT this key stages nothing (today's
+#               behaviour) and says so in the run report.
 #   results     OPTIONAL. The folder this script writes its test results into
 #               (reports, .txt logs, images, Word/Excel docs). The 📄 TOSCA
 #               Reports toolbar button lists every script that declares one and
@@ -55,24 +63,36 @@ scripts:
     workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineLaser_PP\FUN_JSON_LASER_TestData.xlsm
     data_sheet: "Laser-SH_PT_CL_DL_Formats"
     bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineLaser_PP\FUN_LASER_ExecutionScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineLaser_PP\INPUT_JSON_LASER_Files
 
   - name: "JSON Functional Thermal"
     applies_to: [json]
     workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineThermal_PP\FUN_JSON_THERMAL_TestData.xlsm
     data_sheet: "Thermal-SH_PT_CL_DL_Formats"
     bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_ExecutionScript.bat
+    # NB the path first supplied for this script pointed at the .OK tree
+    # (…\FUN_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_OK_Files), which "OK
+    # Functional Thermal" below already stages into. User-corrected to this one,
+    # under the script's own FUN_JSON_… folder.
+    input_folders:
+      - D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_OnlineThermal_PP\Input_JSON_THERMAL_Files
 
   - name: "JSON Functional Delete RP Laser"
     applies_to: [json]
     workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_DeleteOrders_RePrint_PP\FUN_JSON_SH_PT_CL_DL_DeleteOrders_RP_PP_TestData.xlsm
     data_sheet: "SH_PT_CL_DL_DeleteReprints"
     bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_DeleteOrders_RePrint_PP\RP_Delete_Automation_RunScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Functional_Testing_Automation\FUN_JSON_SH_PT_CL_DL_DeleteOrders_RePrint_PP\Input_JSON_SH_PT_CL_DL_DeleteOrders_Files
 
   - name: "JSON Regression Laser"
     applies_to: [json]
     workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\REG_JSON_LASER_Compare_TestData.xlsm
     data_sheet: "Laser-SH_PT_CL_DL_Formats"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\REG_JSON_LASER_ExecutionScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\INPUT_JSON_LASER_Files
     results: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_LASER_SH_PT_CL_DL_Comparison\Laser_TestResults
 
   - name: "JSON Regression Thermal"
@@ -80,6 +100,8 @@ scripts:
     workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\REG_JSON_THERMAL_TestData.xlsm
     data_sheet: "REG_JSON_THERMAL_Compare"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\REG_JSON_THERMAL_ExecutionScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\Input_JSON_THERMAL_Files
     results: D:\ToscaAutomation\Regression_Testing_Automation\REG_JSON_THERMAL_SH_PT_CL_DL_Comparison\Thermal_TestResults
 
   # ------------------------------------------------------------ .OK files ----
@@ -88,24 +110,32 @@ scripts:
     workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineLaser_PP\FUN_LASER_TestData.xlsm
     data_sheet: "Laser-SH_PT_CL_DL_Formats"
     bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineLaser_PP\FUN_LASER_ExecutionScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineLaser_PP\FUN_LASER_OK_Files
 
   - name: "OK Functional Thermal"
     applies_to: [ok]
     workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_TestData.xlsm
     data_sheet: "Thermal-SH_PT_CL_DL_Formats"
     bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_ExecutionScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_OK_Files
 
   - name: "OK Delete RP Laser"
     applies_to: [ok]
     workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_DeleteOrders_RePrint_PP\FUN_SH_PT_CL_DL_DeleteOrders_RP_PP_TestData.xlsm
     data_sheet: "SH_PT_CL_DL_DeleteReprints"
     bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_DeleteOrders_RePrint_PP\RP_Delete_Automation_RunScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_DeleteOrders_RePrint_PP\FUN_SH_PT_CL_DL_DeleteOrders_RP_PP_OK_Files
 
   - name: "OK Regression Laser"
     applies_to: [ok]
     workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\REG_LASER_Compare_TestData.xlsm
     data_sheet: "Laser-SH_PT_CL_DL_Formats"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\REG_LASER_ExecutionScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\REG_LASER_OK_Files
     results: D:\ToscaAutomation\Regression_Testing_Automation\REG_LASER_SH_PT_CL_DL_Comparison\Laser_TestResults
 
   - name: "OK Regression Thermal"
@@ -113,6 +143,8 @@ scripts:
     workbook: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_TestData.xlsm
     data_sheet: "REG_THERMAL_Compare"
     bat: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_ExecutionScript.bat
+    input_folders:
+      - D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_OK_Files
     results: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\Thermal_TestResults
 
 # A TOSCA run stopped part-way leaves the input workbook OPEN in Excel, and that
@@ -129,6 +161,84 @@ close_open_workbook: true
 # returns immediately (fire-and-forget; TOSCA does its own reporting). Shown in
 # the confirmation before it runs (edit freely):
 run_warning: "Make sure the CORRECT PowerForms link is set in the input sheet before running TOSCA."
+
+# ===========================================================================
+#  INPUT FILE STAGING — putting the selected files where TOSCA reads them
+#  ---------------------------------------------------------------------------
+#  Updating the sheet only tells TOSCA WHICH combinations to process; it reads
+#  the actual files from a folder tree of its own. So a run is three ordered
+#  steps, not two:
+#
+#      1. update the input workbook's data sheet
+#      2. clear + re-fill the input folder for each row written        <-- this
+#      3. fire the .bat
+#
+#  Step 3 runs only if step 2 succeeded for every row. A .bat fired over stale
+#  input is worse than a run that did not start, because it reports success.
+#
+#  THE FOLDER IS THE ROW. Each row is a unique (Chain, Process, Format), and
+#  those are the same three values TOSCA substitutes as {B[Chain]}\{B[Process]}\
+#  {B[Format]} — so nothing new is resolved here, and files sharing a row share
+#  a folder. A file that could not be resolved into a row (no Key match, no
+#  chain name) is already reported as an error and is copied nowhere.
+# ===========================================================================
+input_staging:
+
+  # Master switch. Off = today's behaviour exactly: sheet + .bat, no file copy.
+  enabled: true
+
+  # The tree BELOW a script's `input_folders:` root. Tokens are the row's own
+  # values: {chain} {process} {format}. Single-quoted so YAML leaves the
+  # backslashes alone (see the QUOTING note at the top of this file) — a plain
+  # scalar cannot be used here because a leading '{' starts a YAML flow mapping.
+  subpath: '{chain}\{process}\{format}'
+
+  # Find the FORMAT folder by its CODE as well as by its full name.
+  #
+  # This exists to DETECT a disagreement, not to paper over one. The folder
+  # names and the Key sheet do not always agree: on T.J. Maxx / Style Header the
+  # Key sheet holds 'T-Q-Line Small Gum Label' while the folder is
+  # 'T - Q-Line Small Gum Label' (17 of the 18 match exactly; that one does
+  # not). Marshalls / 'J- Rat Tail Gum Label' is the same.
+  #
+  # When the code matches but the NAME does not, that combination is REPORTED
+  # and its row is left out of the run — it cannot work: TOSCA builds its input
+  # path from the Format CELL, so it would look for the Key sheet's spelling,
+  # which is not what the folder is called. Staging files into the correctly
+  # named folder would not help; the fix is the Key sheet. Every other selected
+  # combination still runs.
+  #
+  # false = look for an exactly-named folder only (a mismatch then reports as a
+  # missing folder, which says less about what is wrong).
+  match_format_by_code: true
+
+  # What is removed from a leaf folder before the new files are copied in.
+  #   matching  files whose extension matches the script's engine (.OK / .json)
+  #   all       every FILE in the folder (still never a subfolder)
+  #   none      copy in without clearing
+  # Only the leaf folders THIS run populates are touched — never the root, and
+  # never a format folder this run is not writing to. Stale files elsewhere are
+  # harmless: the data sheet is cleared below the last row, so TOSCA processes
+  # only the combinations just written.
+  clear: matching
+
+  # A leaf folder that is not there is REPORTED, and that combination is left
+  # out of the run — OkGen does not create it (user's call). The rest of the
+  # selection runs normally, so ten selected formats with one bad folder run
+  # nine and tell you about the tenth.
+  #
+  # Creating it was considered and rejected: a folder OkGen invents is empty of
+  # everything except what this run puts in it, and the usual reason one is
+  # missing is that the Key sheet and the tree disagree — in which case a new
+  # folder cements the disagreement instead of surfacing it.
+  #
+  # true = create a missing leaf folder (named exactly as the sheet cell) and
+  # stage into it.
+  create_missing: false
+
+  # Copy, never move: the selected files stay where the user has them.
+  # An existing file of the same name in the target is overwritten.
+  overwrite: true
 
 # Data-sheet layout: 1-based first data row + the column letter of each field.
 first_data_row: 2

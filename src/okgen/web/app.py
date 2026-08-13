@@ -299,6 +299,18 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         body = request.get_json(force=True, silent=True) or {}
         return jsonify(service.tosca_scripts(config, body.get("paths", []), registry))
 
+    @app.post("/api/tosca/preview")
+    def tosca_preview():
+        # What the run would clear/copy in the TOSCA input folders. Its own call
+        # because the folders depend on the script CHOSEN, which the script list
+        # (above) is asked for before there is a choice.
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.tosca_preview(
+                body.get("paths", []), body.get("script", ""), registry, config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     @app.post("/api/tosca/run")
     def tosca_run():
         body = request.get_json(force=True, silent=True) or {}
