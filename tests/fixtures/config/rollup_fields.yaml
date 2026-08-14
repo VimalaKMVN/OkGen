@@ -28,9 +28,32 @@
 #     seed_when_empty  [lo, hi] inclusive random range used ONLY when the
 #                      section has no rows AND the total is blank/zero.
 #                      Omit to leave a blank total blank.
+# A JSON (json_mode) layout may declare a roll-up too. The sum is written in
+# that engine's OWN form: fixed-width .OK fields are zero-filled to the declared
+# width ('0000009'), JSON values UNPADDED ('9') — the form every vendor file
+# carries. The declared size still governs the overflow refusal on both.
 rollups:
   StyleHeader:
     - field: tot_qty
       section: Size
       source: qty
       seed_when_empty: [5, 10]
+
+  # No seed_when_empty: there is no agreed quantity to invent for a Pre-Ticket
+  # with no lines. The all-zero filler rows sum to zero, so they cannot move it.
+  Preticket:
+    - field: tot_qty
+      section: Lane
+      source: qty
+
+  # Keyed by LAYOUT, so these cover SCAN and WMS files alike — the user's
+  # explicit call (PLAN D86).
+  CalgaryPreticket:
+    - field: totalQuantity
+      section: Details
+      source: quantity
+
+  CalgaryStyleHeader:
+    - field: totalQuantity
+      section: Details
+      source: quantity

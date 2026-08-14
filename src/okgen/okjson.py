@@ -67,6 +67,23 @@ def _pad9(v) -> str:
     return _trim(v).rjust(9, "0")
 
 
+def _pad6(v) -> str:
+    """A SCAN price: six digits, zero-filled at the front ('4599' -> '004599').
+
+    Every `.OK` price field is six characters wide by construction, so this
+    normally passes the value through untouched — it exists for the case where
+    the `.OK` pads with SPACES rather than zeros, which `_trim` would otherwise
+    collapse to a short string ('  1699' -> '1699').
+
+    A BLANK price stays blank. `CartonLabel.OK` carries `ret_price` as six
+    spaces, meaning *no price* rather than a price of zero, and zero-filling
+    that would invent 0.00 — the absent-vs-blank distinction D34/D39 exist to
+    keep. A real '000000' is a zero and is preserved as one.
+    """
+    s = _trim(v)
+    return s.rjust(6, "0") if s else ""
+
+
 def _pad_left_4(v) -> str:
     """Store numbers are 4 chars — a 3-digit store gets a leading zero."""
     return _trim(v).rjust(4, "0")
@@ -181,6 +198,7 @@ TRANSFORMS = {
     "strip_zeros": _strip_zeros,
     "implied_2dp": _implied_2dp,
     "pad9": _pad9,
+    "pad6": _pad6,
     "pad_left_4": _pad_left_4,
     "iso_date": _iso_date,
     "mmyy_to_first_of_month": _mmyy_to_first_of_month,

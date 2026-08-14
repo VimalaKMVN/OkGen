@@ -35,6 +35,7 @@ import pytest
 
 from okgen.api import service
 from okgen.config import Config
+from okgen.detect import detect_layout
 from okgen.layout.registry import LayoutRegistry
 
 DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "OkFileDefinitions"
@@ -532,7 +533,23 @@ def test_declaring_a_width_moves_no_VALUE(tmp_path, registry, config):
         shutil.copy2(src, p)
         before = p.read_bytes()
         service.apply_edits(p, [], registry, config=config, backup=False)
-        assert p.read_bytes() == before, f"{src.name} changed on a no-op save"
+        after = p.read_bytes()
+        if after != before:
+            # The ONLY write a no-op save is allowed to make is a roll-up total
+            # correcting itself against its own detail rows (preticket.json
+            # ships a blank one). Every other value must be untouched — which
+            # is what this test is really about: a declared WIDTH must not
+            # coerce ' ' or null into a stamp.
+            b = json.loads(before.decode("utf-8"))
+            a = json.loads(after.decode("utf-8"))
+            lay = registry.get(detect_layout(p).layout)
+            moved = [f for f in (a["data"]["header"].keys() | b["data"]["header"].keys())
+                     if a["data"]["header"].get(f) != b["data"]["header"].get(f)]
+            allowed = {r["field"] for r in (config.rollups(lay.name) or [])}
+            assert set(moved) <= allowed, f"{src.name}: {moved} moved on a no-op save"
+            for f in moved:
+                a["data"]["header"][f] = b["data"]["header"][f]
+            assert a == b, f"{src.name}: something outside the roll-up moved"
         checked += 1
     assert checked >= 5, "not enough samples exercised"
 

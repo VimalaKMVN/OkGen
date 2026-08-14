@@ -248,16 +248,21 @@ def test_rollup_state_reports_an_empty_section_as_authoritative(tmp_path, regist
 
 
 def test_a_layout_with_no_rollup_is_untouched(tmp_path, registry, config):
-    """Only StyleHeader declares a roll-up; every other layout must save exactly
-    as it did before (D30 in reverse — a rule must not leak into paths it was
-    never declared for)."""
+    """A layout that declares no roll-up must save exactly as it did before
+    (D30 in reverse — a rule must not leak into paths it was never declared
+    for).
+
+    `Preticket.OK` used to be one of these and no longer is: it declares a
+    roll-up of its own now, and is covered by
+    :func:`test_a_preticket_total_follows_its_detail_lines` instead.
+    """
     # Compared against a save by a config with NO roll-ups at all, rather than
     # against the file on disk: other layouts legitimately change on save (a
     # Preticket's line_count is re-synced by D16's detail fill), and the claim
     # here is only that roll-ups added nothing to that.
     plain = Config.load(FIXTURE_CONFIG)
     plain._rollups = {}                             # noqa: SLF001
-    for name in ("Preticket.OK", "CartonLabel.OK", "DistLabels.OK"):
+    for name in ("CartonLabel.OK", "DistLabels.OK"):
         src = DATA_DIR / name
         if not src.is_file():
             continue
@@ -340,12 +345,59 @@ def test_an_already_correct_file_is_not_rewritten(sh, registry, config):
 
 
 def test_other_layouts_are_skipped_not_scanned(tmp_path, registry, config):
-    p = tmp_path / "Preticket.OK"
-    shutil.copy(DATA_DIR / "Preticket.OK", p)
+    """A layout with no roll-up is reported as skipped, not silently scanned."""
+    p = tmp_path / "CartonLabel.OK"
+    shutil.copy(DATA_DIR / "CartonLabel.OK", p)
     res = service.total_qty_scan([str(p)], registry, config, apply=True,
                                  backup=False)
     assert res["results"][0]["status"] == "skipped"
     assert res["summary"]["skipped"] == 1
+
+
+def test_a_preticket_total_follows_its_detail_lines(tmp_path, registry, config):
+    """A Pre-Ticket's `tot_qty` is the sum of its Lane rows (the user's call).
+
+    The shipped sample is the demonstration: it says `0000038` while carrying
+    four real detail lines that sum to 9. The all-zero FILLER rows this layout
+    pads with must not be counted into the total — they sum to zero, so a
+    filler-blind sum would still give 9, which is why the row COUNT is checked
+    too rather than the total alone.
+    """
+    p = tmp_path / "Preticket.OK"
+    shutil.copy(DATA_DIR / "Preticket.OK", p)
+    st = service.rollup_state(parse_okfile(p, registry=registry), config)
+    assert len(st) == 1
+    assert st[0]["field"] == "tot_qty" and st[0]["section"] == "Lane"
+    assert st[0]["current"] == "0000038"          # what the sample claims
+    assert st[0]["expected"] == "0000009"         # 3 + 3 + 1 + 2
+    assert st[0]["matches"] is False
+
+    res = service.total_qty_scan([str(p)], registry, config, apply=True,
+                                 backup=False)
+    assert res["results"][0]["status"] == "fixed"
+    assert res["results"][0]["from"] == "0000038"
+    assert res["results"][0]["to"] == "0000009"
+    # ...and it is zero-filled to the field's 7 characters, not written bare:
+    # a short value in a fixed-width field would shift every field after it.
+    assert _total(p, registry) == "0000009"
+
+
+def test_a_preticket_with_no_detail_rows_keeps_its_total(tmp_path, registry, config):
+    """No rows -> the header total is the real quantity and is left alone, and
+    NOTHING is seeded: unlike StyleHeader, `Preticket` declares no
+    `seed_when_empty`, because there is no agreed quantity to invent for a
+    Pre-Ticket that has no lines."""
+    p = tmp_path / "Preticket.OK"
+    shutil.copy(DATA_DIR / "Preticket.OK", p)
+    service.bulk_op_apply([str(p)], "Preticket", "Lane",
+                          {"type": "keep", "count": 0}, registry, config,
+                          backup=False)
+    st = service.rollup_state(parse_okfile(p, registry=registry), config)
+    assert st[0]["rows"] == 0 and st[0]["authoritative"] is True
+    assert st[0]["expected"] is None
+    kept = _total(p, registry)
+    _save(p, registry, config)
+    assert _total(p, registry) == kept, "an empty Preticket total was seeded"
 
 
 def test_an_unfittable_total_is_an_error_not_a_write(tmp_path, registry, config):

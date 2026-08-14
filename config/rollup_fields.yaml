@@ -28,9 +28,45 @@
 #     seed_when_empty  [lo, hi] inclusive random range used ONLY when the
 #                      section has no rows AND the total is blank/zero.
 #                      Omit to leave a blank total blank.
+# A JSON (json_mode) layout may declare a roll-up too. The sum is written in
+# that engine's OWN form: a fixed-width .OK field is zero-filled to its declared
+# width ('0000009'), while a JSON value is written UNPADDED ('9') because that
+# is what every vendor file carries — 13 of 13 Calgary Style Headers hold
+# totalQuantity as '10'/'12'/'20'/'22' beside 7-padded detail quantities. The
+# declared size still governs the OVERFLOW refusal on both engines.
 rollups:
   StyleHeader:
     - field: tot_qty
       section: Size
       source: qty
       seed_when_empty: [5, 10]
+
+  # A Pre-Ticket's total is the sum of its detail lines (the user's call). No
+  # `seed_when_empty`: unlike a Style Header, there is no agreed number to
+  # invent for a Pre-Ticket with no lines, and inventing one would put a
+  # printed quantity on a file that never had one.
+  #
+  # The all-zero FILLER rows this layout pads with (config/detail_fill.yaml)
+  # sum to zero, so they cannot move the total.
+  Preticket:
+    - field: tot_qty
+      section: Lane
+      source: qty
+
+  # The JSON half of the same rule, so editing a detail quantity in either
+  # engine keeps the header total honest.
+  #
+  # NOTE these are keyed by LAYOUT, which covers SCAN *and* WMS files alike —
+  # there is no source dimension here. The user's explicit call (PLAN D86),
+  # made with the trade-off stated: all 13 WMS vendor Style Headers already
+  # satisfy the rule, so it is a no-op on them, but an unseen WMS file that
+  # disagreed would be corrected on save.
+  CalgaryPreticket:
+    - field: totalQuantity
+      section: Details
+      source: quantity
+
+  CalgaryStyleHeader:
+    - field: totalQuantity
+      section: Details
+      source: quantity

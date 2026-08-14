@@ -126,9 +126,9 @@ conversions:
         pastSeasonIndicator: { from: psi, raw: true }
         messageCode1:        { from: message1 }
         messageCode2:        { from: message2 }
-        compareAtPrice:      { from: comp_price, transform: pad9 }
+        compareAtPrice:      { from: comp_price, transform: pad6 }
         compareAtUp:         { from: comp_up, transform: yn_to_bool }
-        retailPrice:         { from: ret_price, transform: pad9 }
+        retailPrice:         { from: ret_price, transform: pad6 }
         quantity:            { from: tot_qty, raw: true }
         pieces:              { from: pieces, raw: true }
         ladderPlanMMYY:      { from: ladder_mmdd }
@@ -158,7 +158,7 @@ conversions:
       # and HEADER-ONLY: distributionLabels have no store- or detail-level
       # retailPrice. (User-confirmed against the live system — the sample files
       # in hand still carry the older un-dotted '999999' form.)
-      retailPrice:    { from: price, transform: implied_2dp }
+      retailPrice:    { from: price, transform: pad6 }
       # A converted file's source is decided by this field, exactly like any
       # other Calgary JSON: it is taken from the .OK when that layout has an
       # ASN field, and is NULL when it does not. None of the three convertible

@@ -79,7 +79,10 @@ def test_transforms(registry, config):
     assert h["transmitDate"] == "2017-07-17"     # 20170717 -> ISO
     assert h["retailPrice"] == "20.99"           # 002099 implied 2dp
     assert h["totalQuantity"] == "22"            # 0000022 zero-stripped
-    assert d["retailPrice"] == "000002099"       # detail keeps 9-digit form
+    # SIX digits, not nine: a converted file is always a SCAN file, and a SCAN
+    # price is 6 characters. The 9-digit form is the WMS one, which conversion
+    # never produces (see test_a_converted_price_is_six_digits_not_the_wms_nine).
+    assert d["retailPrice"] == "002099"
     assert d["compareAtUp"] == "false"           # comp_up 'N'
     assert d["ladderPlan"] == "20170801"         # 0817 MMYY -> first of month
     assert d["quantity"] == "0000022"            # raw: padding preserved
@@ -260,8 +263,11 @@ def test_distlabels_header_values(registry, config):
     assert h["transmitDate"] == "2017-04-04"             # ISO
     assert h["distroDate"] == "20170404"                 # raw 8-digit
     assert h["description"] == "#NAVY LATTICE"
-    # retailPrice carries the dot, like styleHeaders, and is HEADER-ONLY
-    assert h["retailPrice"] == "16.99"
+    # retailPrice is SIX digits un-dotted and is HEADER-ONLY. This REVERSES the
+    # earlier dotted '16.99' (PLAN D85): it was taken on the user's word over
+    # the sample files, and they re-confirmed 6 digits with the data in front of
+    # them, so the value agrees with every sample again.
+    assert h["retailPrice"] == "001699"
     assert not any("retailPrice" in s for s in h["stores"])
     assert doc["data"]["details"] == []
 

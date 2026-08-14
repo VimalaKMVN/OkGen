@@ -249,12 +249,19 @@ def test_the_header_carries_the_ok_values(tmp_path, registry, config):
 
 
 def test_prices_are_zero_padded_like_the_style_header(tmp_path, registry, config):
-    """The user's call: "similar to StyleHeader with 0s in the front"."""
+    """The user's call: "similar to StyleHeader with 0s in the front" — and
+    SIX characters wide, not nine.
+
+    A converted file is always a SCAN file, and a SCAN price is 6 digits; the
+    9-digit form belongs to WMS files, which conversion never produces. The
+    `.OK` field is itself 6 wide, so the front zeros are already there and the
+    transform normally passes the value straight through.
+    """
     _, d = _convert(tmp_path, registry, config)
     row = d["details"][0]
-    assert row["compareAtPrice"] == "000999999"
-    assert row["retailPrice"] == "000599999"
-    assert len(row["compareAtPrice"]) == len(row["retailPrice"]) == 9
+    assert row["compareAtPrice"] == "999999"
+    assert row["retailPrice"] == "599999"
+    assert len(row["compareAtPrice"]) == len(row["retailPrice"]) == 6
 
 
 def test_line_count_is_copied_and_may_disagree_with_the_rows(tmp_path, registry,

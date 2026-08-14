@@ -76,6 +76,20 @@ def _real_rows(path, jpath):
     return [r for r in _rows(path, jpath) if isinstance(r, dict) and not blank(r)]
 
 
+def _mask(text: str, fields) -> str:
+    """Blank out the VALUE of each named scalar, keeping every other byte.
+
+    Lets a byte-for-byte comparison say "nothing moved except this field",
+    which is stronger than dropping the comparison for files where a roll-up
+    legitimately rewrites a header total.
+    """
+    import re
+    for f in fields:
+        text = re.sub(r'("%s"\s*:\s*)(".*?"|null|-?\d+(?:\.\d+)?)' % re.escape(f),
+                      r"\1<MASKED>", text)
+    return text
+
+
 def _copy(tmp_path, fixture, name="f.json"):
     p = tmp_path / name
     p.write_bytes((FIX / fixture).read_bytes())
@@ -213,8 +227,23 @@ def test_untouched_rows_keep_their_exact_bytes(tmp_path, registry, config,
                           registry, config, preview=False, backup=False)
 
     after = p.read_text(encoding="utf-8")
-    # Everything before the edited array is byte-identical...
-    assert after[:spans[apath][0]] == original[:spans[apath][0]]
+    # Everything before the edited array is byte-identical — EXCEPT a roll-up
+    # total, which a row op is supposed to move: deleting a detail row changes
+    # the sum, so a header that still claimed the old total would be wrong.
+    # Masking the roll-up fields (rather than dropping the assertion) keeps the
+    # no-reformatting guarantee byte-for-byte over everything else.
+    rollup_fields = [r["field"] for r in (config.rollups(layout) or [])]
+    before_prefix = original[:spans[apath][0]]
+    after_prefix = after[:scan_spans(after)[apath][0]]
+    assert _mask(before_prefix, rollup_fields) == _mask(after_prefix, rollup_fields)
+    if rollup_fields:
+        # and the total really is the surviving rows' sum, not a stale value
+        v2 = service.parse_file_view(p, registry, config)
+        rows = v2["sections"][_section_index(v2, section)]["records"]
+        for st in (config.rollups(layout) or []):
+            got = v2["sections"][0]["records"][0]["values"][st["field"]]
+            want = sum(int(r["values"][st["source"]] or 0) for r in rows)
+            assert got == str(want), f"{st['field']} is not the new sum"
     # ...everything after it is too...
     assert after[len(after) - (len(original) - spans[apath][1]):] == \
         original[spans[apath][1]:]

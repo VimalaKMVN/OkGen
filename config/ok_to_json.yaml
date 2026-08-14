@@ -139,9 +139,14 @@ conversions:
         pastSeasonIndicator: { from: psi, raw: true }
         messageCode1:        { from: message1 }
         messageCode2:        { from: message2 }
-        compareAtPrice:      { from: comp_price, transform: pad9 }
+        # SIX digits, not nine. A converted file is always a SCAN file (see
+        # headerASNid above), and a SCAN price is 6 characters — the user's
+        # call, and the width the .OK field already has. The 9-digit form
+        # belongs to WMS files, which conversion never produces; the vendor
+        # samples in the repo are all WMS, which is where the 9 came from.
+        compareAtPrice:      { from: comp_price, transform: pad6 }
         compareAtUp:         { from: comp_up, transform: yn_to_bool }
-        retailPrice:         { from: ret_price, transform: pad9 }
+        retailPrice:         { from: ret_price, transform: pad6 }
         quantity:            { from: tot_qty, raw: true }
         pieces:              { from: pieces, raw: true }
         ladderPlanMMYY:      { from: ladder_mmdd }
@@ -167,11 +172,17 @@ conversions:
       houseNumber:    { from: housenum }
       description:    { from: desc }
       area:           { from: area }
-      # Decimal form with the dot ('001699' -> '16.99'), same as styleHeaders,
-      # and HEADER-ONLY: distributionLabels have no store- or detail-level
-      # retailPrice. (User-confirmed against the live system — the sample files
-      # in hand still carry the older un-dotted '999999' form.)
-      retailPrice:    { from: price, transform: implied_2dp }
+      # SIX digits, un-dotted ('001699'), and HEADER-ONLY: distributionLabels
+      # have no store- or detail-level retailPrice, so this is the only price
+      # the layout has and the SCAN 6-digit rule reaches it here.
+      #
+      # ***This REVERSES an earlier user call*** (PLAN D85). This field used to
+      # be `implied_2dp` -> '16.99', taken on the user's word that the live
+      # system sends the dotted form even though all four sample files carry
+      # the un-dotted '999999'. Re-confirmed as 6 digits with the samples in
+      # front of them, so the value now agrees with the data again. Do not
+      # restore the dotted form without new information.
+      retailPrice:    { from: price, transform: pad6 }
       # A converted file's source is decided by this field, exactly like any
       # other Calgary JSON: it is taken from the .OK when that layout has an
       # ASN field, and is NULL when it does not. None of the three convertible
@@ -365,8 +376,24 @@ conversions:
       lineCount:        { from: line_count }
       blockNumber:      { from: block_num }
       numberOfBlocks:   { from: num_block }
-      totalQuantity:    { from: tot_qty }
+      # The SUM of the detail lines' quantities, in the vendor's UNPADDED form
+      # ('9', not '0000009' — every vendor header carries '10'/'22'). It is
+      # COPIED from the .OK rather than summed here, because `tot_qty` is now a
+      # roll-up on the .OK side too (config/rollup_fields.yaml): an OkGen-
+      # written file already holds the correct sum, so one rule feeds both
+      # engines. The consequence, accepted by the user: an .OK that OkGen has
+      # never SAVED still carries whatever total it arrived with, and converts
+      # with it — the shipped Preticket.OK says 0000038 beside 4 rows summing
+      # to 9, until it is saved once.
+      totalQuantity:    { from: tot_qty, transform: strip_zeros }
       totalRetail:      { from: tot_ret }
+      # Blank on a converted Pre-Ticket, whatever the template holds. The user's
+      # call: these are "usually blank in PTs", and the sample's `INITIAL` /
+      # `PUMPKIN SPICE amp EVERYTH` are that one order's data. `description` in
+      # particular was the last genuine leak — the .OK Pre-Ticket has no such
+      # field, so every converted file used to carry the sample's product text.
+      version:          { value: "" }
+      description:      { value: "" }
       # These two live on the DETAIL line in the .OK and on the HEADER in the
       # JSON, so they are read from the first detail row (the user's call for
       # both). Without this they would inherit the template — i.e. the sample
@@ -381,11 +408,8 @@ conversions:
       #   indicator  — says "this is a Pre-Ticket"; the JSON says that in
       #                `data.type`, so it would be the same fact written twice.
       #   add        — no JSON counterpart.
-      #   description — the .OK Pre-Ticket has no such field at all, so this
-      #                inherits the TEMPLATE's product text in every converted
-      #                file. Accepted for now on the user's explicit call
-      #                ("inherit from sample"); it is the one leaky value, and
-      #                blanking it is a one-line change here.
+      # (`description` used to be listed here as an accepted template leak; it
+      #  is written BLANK above now, at the user's call.)
 
     # Counted from the rows actually emitted. `lineCount` is deliberately absent
     # — it is copied from the .OK above, so counting it here would overwrite the
@@ -430,9 +454,10 @@ conversions:
         pastSeasonIndicator: { from: psi, raw: true }
         messageCode1:        { from: message1 }
         messageCode2:        { from: message2 }
-        # Zero-padded to 9 "with 0s in the front", exactly as styleHeaders does.
-        compareAtPrice:      { from: comp_price, transform: pad9 }
-        retailPrice:         { from: ret_price,  transform: pad9 }
+        # SIX digits with 0s in the front, exactly as styleHeaders does — see
+        # the note there for why a converted (always SCAN) file is 6 and not 9.
+        compareAtPrice:      { from: comp_price, transform: pad6 }
+        retailPrice:         { from: ret_price,  transform: pad6 }
         compareAtUp:         { from: comp_up, transform: yn_to_bool }
         quantity:            { from: qty,      raw: true }
         houseNumber:         { from: housenum, raw: true }
@@ -460,7 +485,11 @@ conversions:
 #   raw                     verbatim, padding kept (use `raw: true`)
 #   strip_zeros             '0000022' -> '22'   ('000' -> '0')
 #   implied_2dp             '002099'  -> '20.99'
-#   pad9                    '002099'  -> '000002099'
+#   pad9                    '002099'  -> '000002099'   (WMS price form)
+#   pad6                    '4599'    -> '004599'      (SCAN price form)
+#                           '  1699'  -> '001699'
+#                           '000000'  -> '000000'      (a real zero)
+#                           '      '  -> ''            (BLANK stays blank)
 #   pad_left_4              '208'     -> '0208'   (store numbers)
 #   iso_date                '20170717'-> '2017-07-17'
 #   mmyy_to_first_of_month  '0817'    -> '20170801'

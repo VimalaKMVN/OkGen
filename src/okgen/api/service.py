@@ -1430,7 +1430,7 @@ def rollup_state(okf: OkFile, config: Config) -> List[dict]:
                 entry.update({"error": str(exc), "matches": False})
                 out.append(entry)
                 continue
-            expected = str(total).zfill(f.size or 0)
+            expected = _rollup_format(total, f, layout)
             entry["expected"] = expected
             entry["matches"] = (current == expected)
             if f.size is not None and len(str(total)) > f.size:
@@ -1438,6 +1438,24 @@ def rollup_state(okf: OkFile, config: Config) -> List[dict]:
                 entry["matches"] = False
         out.append(entry)
     return out
+
+
+def _rollup_format(total: int, field, layout) -> str:
+    """Render a roll-up total in the ENGINE's own form.
+
+    A fixed-width ``.OK`` field must fill its declared width, so the total is
+    zero-filled ('9' -> '0000009') — anything shorter would shift every field
+    after it. A JSON value has no such constraint and the vendor files write it
+    UNPADDED: all 13 Calgary Style Header samples carry ``totalQuantity`` as
+    '10'/'12'/'20'/'22' beside 7-padded detail quantities, so zero-filling the
+    JSON one would make OkGen's output disagree with every real file.
+
+    The declared size still governs the OVERFLOW refusal on both engines; this
+    only decides how a total that FITS is written.
+    """
+    if getattr(layout, "json_mode", False):
+        return str(total)
+    return str(total).zfill(getattr(field, "size", None) or 0)
 
 
 def _rollup_total(rows, src: str, sec_name: str) -> int:
@@ -1508,7 +1526,8 @@ def _apply_rollups(okf: OkFile, config: Config) -> List[dict]:
             f = header._field(fname)               # noqa: SLF001
         except KeyError:
             continue
-        val = str(random.randint(int(rng[0]), int(rng[1]))).zfill(f.size or 0)
+        val = _rollup_format(random.randint(int(rng[0]), int(rng[1])), f,
+                             okf.layout)
         header.set(fname, val)
         notes.append({"field": fname, "section": st["section"],
                       "from": st["current"], "to": val, "rows": 0,
@@ -2644,8 +2663,15 @@ def total_qty_scan(paths, registry, config: Config, apply: bool = False,
         entry = {"path": str(p), "name": p.name}
         try:
             if _is_json_file(p):
+                # JSON layouts DO declare roll-ups now (CalgaryStyleHeader and
+                # CalgaryPreticket total their detail rows), and those are
+                # enforced on every JSON write path. This sweep stays .OK-only
+                # on purpose: it exists for the fixed-width BACKLOG — files
+                # written before the rule existed — and a JSON file gets its
+                # total corrected the moment it is saved. Saying "declares no
+                # roll-up" here would now be untrue.
                 entry.update(status="skipped",
-                             detail="JSON layouts declare no roll-up")
+                             detail="not swept — JSON totals are corrected on save")
                 results.append(entry)
                 continue
             okf = parse_okfile(p, registry=registry)
