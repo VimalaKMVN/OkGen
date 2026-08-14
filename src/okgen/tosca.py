@@ -436,11 +436,23 @@ def plan_staging(rows, script, config, engines=None) -> dict:
                     ok = False
                     break
                 if last and how == "code" and found.name != seg:
+                    # States BOTH spellings as facts and prescribes NEITHER.
+                    #
+                    # This used to end "...until the workbook's Key sheet is
+                    # corrected to <folder name>", which assumed the folder was
+                    # right and the sheet wrong. The user hit the opposite — a
+                    # mistyped FOLDER beside a correct sheet — where that advice
+                    # would have edited a correct workbook to match the typo,
+                    # putting the error somewhere the next person would trust.
+                    #
+                    # OkGen can see the two disagree; it cannot know which is
+                    # true. The GTA UI is what settles it, so the message points
+                    # there instead of choosing. (Repairing neither is D79.)
                     problems.append(
-                        f"the sheet says {seg!r} but the folder is named "
-                        f"{found.name!r} — TOSCA looks for the sheet's spelling, "
-                        f"so this combination cannot run until the workbook's Key "
-                        f"sheet is corrected to {found.name!r}")
+                        f"the Key sheet says {seg!r} but the folder is named "
+                        f"{found.name!r}. TOSCA builds its input path from the "
+                        f"Key sheet. Fix the folder name and/or the Key sheet "
+                        f"name to the correct format name, to match the GTA UI.")
                     ok = False
                     break
                 here = found

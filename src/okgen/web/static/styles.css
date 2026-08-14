@@ -220,7 +220,15 @@ body {
 /* Anything that will not run, and why. The ONE piece of detail that keeps its
    full text in the dialog: the fix is in the workbook's Key sheet, so a count
    would send the user looking in the wrong place. */
-.tosca-plan-bad { color: var(--err); font-size: 12px; line-height: 1.5; margin-bottom: 4px; }
+/* The reason must be readable in FULL. The wide modal's body is
+   `overflow-x: hidden`, so anything wider than the card is CLIPPED rather than
+   scrollable — and these lines quote folder names and Key-sheet cells, which
+   can be long and can contain runs with no space to break at. Without this a
+   reason could be cut off at the right edge with no way to reveal it. */
+.tosca-plan-bad {
+  color: var(--err); font-size: 12px; line-height: 1.5; margin-bottom: 4px;
+  overflow-wrap: anywhere; word-break: break-word;
+}
 .tosca-plan-bad b { color: var(--err); font-weight: 600; }
 /* The confirm dialog's combination table — counts only, no file names. */
 .tosca-mini { width: 100%; border-collapse: collapse; font-size: 12px;

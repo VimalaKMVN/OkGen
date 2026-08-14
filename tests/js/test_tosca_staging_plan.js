@@ -51,17 +51,23 @@ const PREVIEW = {
       status: "will_run", copy: 1, remove: 2, create: 0 },
     { chain: "T.J. Maxx", process: "Style Header", format: "T-Q-Line Small Gum Label",
       status: "will_not_run", copy: 0, remove: 0, files: ["SH_0009.OK"],
-      reasons: ["the sheet says 'T-Q-Line Small Gum Label' but the folder is "
-                + "named 'T - Q-Line Small Gum Label'"] },
+      reasons: ["the Key sheet says 'T-Q-Line Small Gum Label' but the folder is named 'T - Q-Line Small Gum Label'. TOSCA builds its input path from the Key sheet. Fix the folder name and/or the Key sheet name to the correct format name, to match the GTA UI."] },
   ],
   excluded: [{
     chain: "T.J. Maxx", process: "Style Header",
     format: "T-Q-Line Small Gum Label",
     files: ["SH_0009.OK"],
-    reasons: ["the sheet says 'T-Q-Line Small Gum Label' but the folder is named "
-              + "'T - Q-Line Small Gum Label' — TOSCA looks for the sheet's "
-              + "spelling, so this combination cannot run until the workbook's "
-              + "Key sheet is corrected"],
+    reasons: ["the Key sheet says 'T-Q-Line Small Gum Label' but the folder is named 'T - Q-Line Small Gum Label'. TOSCA builds its input path from the Key sheet. Fix the folder name and/or the Key sheet name to the correct format name, to match the GTA UI."],
+  }, {
+    // a SECOND failure, so "list them all" is exercised rather than assumed —
+    // a renderer that showed only the first would look identical with one
+    chain: "Marshalls", process: "Pre-Ticket",
+    format: "J- Rat Tail Gum Label",
+    files: ["PT_0011.OK", "PT_0012.OK"],
+    reasons: ["the Key sheet says 'J- Rat Tail Gum Label' but the folder is named "
+              + "'J - Rat Tail Gum Label'. TOSCA builds its input path from the Key "
+              + "sheet. Fix the folder name and/or the Key sheet name to the correct "
+              + "format name, to match the GTA UI."],
   }],
 };
 
@@ -284,7 +290,11 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
   check("the folder PATH is not in the summary", t.indexOf("D:\\tree\\") === -1);
   // Not run stays visible as a count AND as a table row — it is the one
   // outcome that looks like success once the file names are hidden.
-  check("the summary counts the combination that was NOT run", nums[3] === "1");
+  // TWO now, and that is the stronger assertion: the count is derived from
+  // `staging.excluded` rather than hard-coded, so adding a second failure to
+  // the fixture must move it.
+  check("the summary counts EVERY combination that was NOT run",
+        nums[3] === String(PREVIEW.excluded.length) && nums[3] === "2");
   check("that combination is still named in the table", /Homegoods|not run/i.test(t));
 
   // A run that staged nothing must SAY so — "written: 1" with no files copied
@@ -301,6 +311,42 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
         /overflow-wrap:\s*anywhere/.test(pathRule));
   const filesRule = (css.match(/\.tosca-plan-files\s*\{([^}]*)\}/) || [])[1] || "";
   check("the file list wraps too", /overflow-wrap:\s*anywhere/.test(filesRule));
+
+  // ---- the FAILURE reason must be readable in full -----------------------
+  // The wide modal's body is `overflow-x: hidden`, so a line wider than the
+  // card is CLIPPED with no way to reveal it — and these reasons quote folder
+  // names and Key-sheet cells, which are long and can contain runs with no
+  // space to break at. Asserted on the stylesheet because it is a CSS-only
+  // defect: every control renders either way, so the DOM looks identical.
+  const badRule = (css.match(/\.tosca-plan-bad\s*\{([^}]*)\}/) || [])[1] || "";
+  check("a failure reason wraps instead of clipping",
+        /overflow-wrap:\s*anywhere/.test(badRule));
+  check("...and breaks inside a long unbroken run",
+        /word-break:\s*break-word/.test(badRule));
+
+  // ---- every failure is shown, with its own reason in full ---------------
+  // Render the PLAN itself — by this point doc.body holds the RESULT window,
+  // and asserting there would have found no plan rows at all: the checks would
+  // fail for the wrong reason, or pass vacuously if written the other way.
+  const badBox = doc.createElement("div");
+  doc.body.appendChild(badBox);
+  (api.renderToscaPlan || (() => {}))(badBox, PREVIEW);
+  const badRows = descendants(badBox)
+    .filter((e) => (e.className || "").indexOf("tosca-plan-bad") !== -1);
+  check("EVERY combination that will not run is listed",
+        badRows.length === PREVIEW.excluded.length && badRows.length === 2);
+  const badText = descendants(badBox).map((e) => e.textContent || "").join(" ");
+  PREVIEW.excluded.forEach((x, i) => {
+    check(`failure ${i + 1} names its chain and format`,
+          badText.indexOf(x.chain) !== -1 && badText.indexOf(x.format) !== -1);
+    // the WHOLE reason, not a truncation — the last words carry the fix
+    check(`failure ${i + 1} carries its reason to the last word`,
+          badText.indexOf(x.reasons[0]) !== -1);
+  });
+  check("both reasons point at the GTA UI",
+        (badText.match(/GTA UI/g) || []).length === 2);
+  check("neither prescribes only the Key sheet",
+        badText.indexOf("Key sheet is corrected") === -1);
 
   process.exit(failures ? 1 : 0);
 })();

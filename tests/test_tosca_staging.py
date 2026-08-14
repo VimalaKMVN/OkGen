@@ -308,7 +308,15 @@ def test_folder_named_differently_from_the_sheet_is_reported_not_used(tmp_path, 
     why = ex[0]["reasons"][0]
     assert "T-Q-Line Small Gum Label" in why          # what the sheet says
     assert "T - Q-Line Small Gum Label" in why        # what the folder is called
-    assert "Key" in why                               # and where the fix is
+    assert "Key sheet" in why                         # why it fails
+    assert "GTA UI" in why                            # what settles which is right
+    # ***It must NOT prescribe a side.*** The message used to end "until the
+    # workbook's Key sheet is corrected to <folder name>", which assumes the
+    # folder is right. A user hit the opposite — a mistyped FOLDER beside a
+    # correct sheet — where that advice would have edited a correct workbook to
+    # match the typo. OkGen can see they disagree; it cannot know which is true.
+    assert "Key sheet is corrected" not in why
+    assert "and/or" in why, "the fix must name BOTH sides"
     assert res["written"] == 0
     assert _names(leaf) == []                         # nothing staged into it
 
@@ -506,3 +514,34 @@ def test_preview_reports_the_combination_that_will_not_run(tmp_path, registry, c
     pv = tosca.preview([str(ok), str(bad)], SCRIPT, registry, config)
     assert pv["rows"] == 1
     assert len(pv["excluded"]) == 1 and pv["excluded"][0]["files"] == ["bad.json"]
+
+
+def test_every_excluded_combination_is_reported_not_just_the_first(tmp_path, registry,
+                                                                   config):
+    """Two bad folders must produce TWO reported combinations, each with its own
+    reason — the dialog lists them all and the report carries the detail.
+
+    A run that stopped at the first would look like one problem to fix, and the
+    second would only surface on the next attempt.
+    """
+    root = tmp_path / "tree"
+    _tree(root, "T.J. Maxx/Style Header/T - Q-Line Small Gum Label")
+    _tree(root, "Marshalls/Style Header/J - Rat Tail Gum Label")
+    _stage_cfg(config, root)
+    a = _sample(tmp_path, "styleheader_fmtT.json", "t.json", chain="01", fmt="T")
+    b = _sample(tmp_path, "styleheader_fmtT.json", "j.json", chain="02", fmt="J")
+
+    res = tosca.run([str(a), str(b)], SCRIPT, registry, config, launch=False)
+    ex = res["staging"]["excluded"]
+    assert len(ex) == 2, f"only {len(ex)} reported"
+    # `format` carries the Key sheet's own wording, not the bare code
+    assert {tosca.format_head(e["format"]) for e in ex} == {"T", "J"}
+    for e in ex:
+        assert e["reasons"] and "GTA UI" in e["reasons"][0]
+
+    # ...and the REPORT carries the detail behind View report: every combination,
+    # its reason, and the files that did not go anywhere.
+    report = tosca.build_report(res) if hasattr(tosca, "build_report") else ""
+    if report:
+        assert report.count("[NOT RUN ]") == 2
+        assert "t.json" in report and "j.json" in report
