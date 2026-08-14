@@ -295,21 +295,68 @@ def test_a_real_ladder_converts_end_to_end(tmp_path, registry, config):
 
 # ------------------------------------- header fields lifted from a detail row ---
 
-def test_vendor_style_and_category_come_from_the_first_detail_row(tmp_path,
-                                                                  registry, config):
-    """Both live on the DETAIL line in the .OK and on the HEADER in the JSON
-    (the user's call for both). Without this they would inherit the TEMPLATE —
-    i.e. the vendor sample's own product data — in every converted file, which
-    is D46 exactly.
+def test_category_is_lifted_from_the_first_detail_row(tmp_path, registry, config):
+    """`category` lives on the DETAIL line in the .OK and on the HEADER in the
+    JSON (the user's call), so it is read from the first detail row. Without the
+    lift it would inherit the TEMPLATE — the vendor sample's own product data —
+    in every converted file, which is D46 exactly.
 
-    Asserted against the .OK's real values, so inheriting the template would
-    fail rather than merely look plausible: the template carries `BDGB`/`7715`.
+    Asserted against the .OK's real value, so inheriting the template would fail
+    rather than merely look plausible: the template carries `7715`.
+
+    ***`vendorStyle` used to be lifted the same way and no longer is*** — it
+    moved to the detail section, where the .OK already had it per row. See
+    :func:`test_vendor_style_is_per_ROW_not_lifted_to_the_header`.
     """
     _, d = _convert(tmp_path, registry, config)
-    assert d["header"]["vendorStyle"] == "VENDORST"
     assert d["header"]["category"] == "0121"
-    assert d["header"]["vendorStyle"] != "BDGB", "inherited the template"
     assert d["header"]["category"] != "7715", "inherited the template"
+
+
+def test_vendor_style_is_per_ROW_not_lifted_to_the_header(tmp_path, registry,
+                                                          config):
+    """`vendorStyle` is the LAST field of each detail row, mapped 1:1 from the
+    .OK's own per-row `vendor_style`.
+
+    The lift it replaces could only ever carry the FIRST row's value onto the
+    whole document, so rows 2..N silently lost theirs. That never showed because
+    the shipped sample happens to carry the same value on all four rows — which
+    is why this test gives the rows DIFFERENT values before converting, and why
+    a test using the sample as-is would prove nothing.
+    """
+    src = tmp_path / "in"
+    src.mkdir(exist_ok=True)
+    p = src / "Preticket.OK"
+    shutil.copy2(SOURCE_OK, p)
+    view = service.parse_file_view(p, registry, config)
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+    for i, want in enumerate(("AAA11111", "BBB22222")):
+        service.apply_edits(p, [{"record_index": lane["records"][i]["index"],
+                                 "field": "vendor_style", "value": want}],
+                            registry, config=config, backup=False)
+
+    res = service.convert_apply([str(p)], registry, config)
+    out = sorted(Path(res["folder"]).glob("*.json"))[0]
+    d = json.loads(out.read_text(encoding="utf-8"))["data"]
+
+    assert "vendorStyle" not in d["header"], "still lifted to the header"
+    assert d["details"][0]["vendorStyle"] == "AAA11111"
+    assert d["details"][1]["vendorStyle"] == "BBB22222", "row 2 took row 1's value"
+    # ...and it is the LAST key of the row, which is where the user put it
+    assert list(d["details"][0])[-1] == "vendorStyle"
+
+
+def test_size_sits_immediately_after_type_in_every_detail_row(tmp_path, registry,
+                                                              config):
+    """Position is part of the ask, so it is asserted rather than left to the
+    template. Checked on EVERY row: the template is copied per row, so a rule
+    that only fixed the first would pass a row[0]-only check."""
+    _, d = _convert(tmp_path, registry, config)
+    assert d["details"], "no detail rows to check"
+    for i, row in enumerate(d["details"]):
+        keys = list(row)
+        assert keys[keys.index("type") + 1] == "size", f"row {i}: {keys[:6]}"
+        assert keys[-1] == "vendorStyle", f"row {i} does not end with vendorStyle"
 
 
 # --------------------------------------------------- the rest of the header ---

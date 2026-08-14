@@ -119,6 +119,10 @@ seed_rows:
       lineNumber: "006"
       style: "182517"
       type: "2"
+      # `size` sits right after `type`, matching the layout and the template —
+      # a seeded row whose key ORDER differed from a converted one would make
+      # two rows of the same file look like different shapes.
+      size: "SM"
       pastSeasonIndicator: "N"
       messageCode1: "MSG1"
       messageCode2: "MSG2"
@@ -140,7 +144,11 @@ seed_rows:
       fact1: ""
       fact2: ""
       fact3: ""
-      size: "SM"
+      # LAST, matching the layout and the template. It moved here from the
+      # HEADER: the .OK carries `vendor_style` per Lane row, so a seeded detail
+      # row needs its own value — without this line a seeded row would come out
+      # with every field populated EXCEPT this one.
+      vendorStyle: "BDGB"
 
   CalgaryDistLabel:
     Stores:

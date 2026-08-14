@@ -405,11 +405,15 @@ conversions:
       # field, so every converted file used to carry the sample's product text.
       version:          { value: "" }
       description:      { value: "" }
-      # These two live on the DETAIL line in the .OK and on the HEADER in the
-      # JSON, so they are read from the first detail row (the user's call for
-      # both). Without this they would inherit the template — i.e. the sample
-      # order's own product data, in every converted file. That is D46 exactly.
-      vendorStyle:      { from: vendor_style, from_section: Lane }
+      # `category` lives on the DETAIL line in the .OK and on the HEADER in the
+      # JSON, so it is read from the first detail row (the user's call). Without
+      # this it would inherit the template — the sample order's own product
+      # data, in every converted file. That is D46 exactly.
+      #
+      # `vendorStyle` USED to be lifted the same way and no longer is: it moved
+      # to the DETAIL section, where the .OK already had it per row, so it is a
+      # straight 1:1 mapping below. The lift could only ever carry the FIRST
+      # row's value onto the whole document.
       category:         { from: category,     from_section: Lane }
       # A converted file's source is decided by this field, exactly like the
       # other three: the .OK Pre-Ticket has no ASN field, so it is null and the
@@ -505,8 +509,11 @@ conversions:
         fact1:               { from: fact1, null_when_blank: true }
         fact2:               { from: fact2, null_when_blank: true }
         fact3:               { from: fact3, null_when_blank: true }
-        # `vendor_style` is not listed: it has no per-DETAIL home in the JSON
-        # and is lifted to the header above.
+        # Per ROW, matching the .OK: `vendor_style` is a Lane field there, and
+        # `vendorStyle` is now the LAST field of the JSON detail row. Before the
+        # move it was lifted to the header from the FIRST row, so rows 2..N
+        # silently lost their own value.
+        vendorStyle:         { from: vendor_style }
 
 # Available transforms (okgen/okjson.py):
 #   trim                    default — strip surrounding pad

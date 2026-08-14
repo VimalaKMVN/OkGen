@@ -80,22 +80,53 @@ def test_the_sample_is_valid_json():
         assert isinstance(row["houseNumber"], str), "houseNumber must be a string"
 
 
-def test_header_is_the_style_header_union_plus_lpn(registry):
+def test_header_is_the_style_header_union_plus_lpn_MINUS_vendorStyle(registry):
+    """The two layouts no longer share a header exactly.
+
+    The Pre-Ticket was built as "the Style Header's 53-field header + `lpn`",
+    which is what made it nearly free. `vendorStyle` then MOVED to the detail
+    section (the user's call), because the .OK carries `vendor_style` per Lane
+    row — so the headers genuinely diverge now, and the relationship is stated
+    rather than deleted.
+
+    The Style Header KEEPS its header `vendorStyle`, and that is correct: the
+    .OK Style Header carries `ven_style` in its own header.
+    """
     pt = {f.name for s in registry.get("CalgaryPreticket").sections
           if s.name == "Header" for f in s.fields}
     sh = {f.name for s in registry.get("CalgaryStyleHeader").sections
           if s.name == "Header" for f in s.fields}
     assert pt - sh == {"lpn"}
-    assert sh - pt == set()
+    assert sh - pt == {"vendorStyle"}
+    assert "vendorStyle" in sh, "the Style Header must keep its header field"
 
 
-def test_detail_row_is_the_style_header_row_plus_size(registry):
+def test_detail_row_is_the_style_header_row_plus_size_AND_vendorStyle(registry):
     pt = {f.name for s in registry.get("CalgaryPreticket").sections
           if s.name == "Details" for f in s.fields}
     sh = {f.name for s in registry.get("CalgaryStyleHeader").sections
           if s.name == "Details" for f in s.fields}
-    assert pt - sh == {"size"}
+    assert pt - sh == {"size", "vendorStyle"}
     assert sh - pt == set()
+
+
+def test_the_detail_field_ORDER_is_the_users(registry):
+    """`size` immediately after `type`, `vendorStyle` last — asserted on the
+    SPEC, because the spec drives the editor's field order while the template
+    drives the JSON key order, and the two must not drift apart."""
+    names = [f.name for s in registry.get("CalgaryPreticket").sections
+             if s.name == "Details" for f in s.fields]
+    assert names[names.index("type") + 1] == "size"
+    assert names[-1] == "vendorStyle"
+
+
+def test_the_spec_and_the_template_agree_on_detail_order(registry):
+    """The spec orders the editor, the template orders the file. A mismatch is
+    invisible until someone compares a converted row with the panel."""
+    spec = [f.name for s in registry.get("CalgaryPreticket").sections
+            if s.name == "Details" for f in s.fields]
+    tpl = list(_doc(SAMPLE)["details"][0])
+    assert spec == tpl, "layout spec and template disagree on detail field order"
 
 
 def test_it_adds_no_NEW_field_without_a_width(registry):
@@ -348,3 +379,127 @@ def test_europe_is_refused_like_every_other_na_layout(config):
     assert config.can_change_chain("02", "01") is True
     assert config.can_change_chain("02", "05") is False
     assert config.can_change_chain("05", "02") is False
+
+# ------------------------------- the moved fields reach EVERY write path ---
+
+def _det(path):
+    """(size, vendorStyle) per detail row — the two fields that moved."""
+    rows = json.loads(Path(path).read_text(encoding="utf-8"))["data"]["details"]
+    return [(r.get("size"), r.get("vendorStyle")) for r in rows]
+
+
+def test_a_single_edit_lands_on_the_edited_ROW_only(tmp_path, registry, config):
+    """`vendorStyle` moved from the header to the detail row, so the failure to
+    guard against is the value going to the wrong row — or nowhere — while the
+    control still renders."""
+    p = _copy(tmp_path)
+    view = service.parse_file_view(p, registry, config)
+    di = next(i for i, s in enumerate(view["sections"]) if s["name"] == "Details")
+    rec = view["sections"][di]["records"][1]["index"]
+    for field, value in (("vendorStyle", "ZZ99"), ("size", "XL")):
+        service.apply_edits(p, [{"section_index": di, "record_index": rec,
+                                 "field": field, "value": value}],
+                            registry, config=config, backup=False)
+    assert _det(p) == [("SM", "BDGB"), ("XL", "ZZ99")]
+
+
+def test_both_bulk_panels_write_the_moved_fields(tmp_path, registry, config):
+    p = _copy(tmp_path)
+    service.bulk_multi_apply([str(p)], "CalgaryPreticket",
+                             [{"section": "Details", "field": "vendorStyle",
+                               "type": "set", "value": "BULKVS"},
+                              {"section": "Details", "field": "size",
+                               "type": "set", "value": "LG"}],
+                             registry, config, backup=False)
+    assert _det(p) == [("LG", "BULKVS"), ("LG", "BULKVS")]
+
+    q = _copy(tmp_path, "op.json")
+    service.bulk_op_apply([str(q)], "CalgaryPreticket", "Details",
+                          {"type": "set", "field": "vendorStyle", "value": "OPVS"},
+                          registry, config, backup=False)
+    assert [r[1] for r in _det(q)] == ["OPVS", "OPVS"]
+
+
+def test_a_SEEDED_row_carries_both_moved_fields(tmp_path, registry, config):
+    """The seed is an EXPLICIT field list in `json_seed_rows.yaml`, so a moved
+    field does NOT arrive there on its own — this is the one path the
+    layout-driven engine does not cover for free, and it shipped broken until
+    the seed row was updated.
+
+    The section is emptied first: adding to a section that still has rows CLONES
+    (D53), which would carry the fields whatever the seed said, and prove
+    nothing.
+    """
+    p = _copy(tmp_path)
+    service.bulk_op_apply([str(p)], "CalgaryPreticket", "Details",
+                          {"type": "keep", "count": 0}, registry, config,
+                          backup=False)
+    service.bulk_op_apply([str(p)], "CalgaryPreticket", "Details",
+                          {"type": "add", "count": 2}, registry, config,
+                          backup=False)
+    assert _det(p) == [("SM", "BDGB"), ("SM", "BDGB")], "seed lost a moved field"
+    keys = list(json.loads(p.read_text(encoding="utf-8"))["data"]["details"][0])
+    assert keys[keys.index("type") + 1] == "size"
+    assert keys[-1] == "vendorStyle"
+
+
+def test_an_added_row_CLONES_and_keeps_both_fields(tmp_path, registry, config):
+    """The other add path: with rows present the new row copies an existing one
+    (D53), so distinctive values must survive rather than reverting to the seed."""
+    p = _copy(tmp_path)
+    service.bulk_multi_apply([str(p)], "CalgaryPreticket",
+                             [{"section": "Details", "field": "vendorStyle",
+                               "type": "set", "value": "CLONED"}],
+                             registry, config, backup=False)
+    service.bulk_op_apply([str(p)], "CalgaryPreticket", "Details",
+                          {"type": "add", "count": 1}, registry, config,
+                          backup=False)
+    assert [r[1] for r in _det(p)] == ["CLONED"] * 3
+
+
+def test_volume_generate_writes_the_moved_fields(tmp_path, registry, config):
+    """Generate SILENTLY SKIPS a field with no declared width while still
+    reporting success (v0.97.0/v0.108.0), so this asserts the values landed —
+    not merely that the run said `written: 2`."""
+    p = _copy(tmp_path)
+    res = service.generate_apply(
+        [str(p)],
+        {"count": 2, "folder": str(tmp_path / "gen"),
+         "detail_fields": [
+             {"section": "Details", "name": "vendorStyle",
+              "type": "list", "values": ["GENVS"]},
+             {"section": "Details", "name": "size",
+              "type": "list", "values": ["GN"]}]},
+        registry, config)
+    assert res["written"] == 2
+    assert not res.get("no_data"), res.get("no_data")
+    for f in sorted(Path(res["folder"]).glob("*.json")):
+        assert _det(f) == [("GN", "GENVS"), ("GN", "GENVS")], f.name
+
+
+def test_an_emptied_section_keeps_both_fields_present(tmp_path, registry, config):
+    """D45: an emptied array keeps ONE blank marker row with every field
+    present — including the field that just moved into the section."""
+    p = _copy(tmp_path)
+    service.bulk_op_apply([str(p)], "CalgaryPreticket", "Details",
+                          {"type": "keep", "count": 0}, registry, config,
+                          backup=False)
+    row = json.loads(p.read_text(encoding="utf-8"))["data"]["details"][0]
+    assert {"size", "vendorStyle"} <= set(row)
+    assert _det(p) == [(None, None)]
+
+
+def test_the_scopes_OFFER_both_fields_on_the_detail_section(registry, config):
+    """A field omitted from a panel reads as "OkGen forgot it" rather than "you
+    may not set it" (D61) — and the header must stop offering `vendorStyle`."""
+    scope = service.bulk_scope([str(SAMPLE)], registry, config)
+    det = next(s for s in scope["detail_sections"]["CalgaryPreticket"]
+               if s["name"] == "Details")
+    names = [f["name"] for f in det["fields"]]
+    assert {"size", "vendorStyle"} <= set(names)
+    hdr = [f["name"] for f in scope["header_fields"]["CalgaryPreticket"]]
+    assert "vendorStyle" not in hdr, "the header still offers the moved field"
+
+    gen = service.generate_scope([str(SAMPLE)], registry, config)
+    gdet = next(s for s in gen["sections"] if s["name"] == "Details")
+    assert {"size", "vendorStyle"} <= {f["name"] for f in gdet["fields"]}

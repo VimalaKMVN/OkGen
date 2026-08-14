@@ -100,9 +100,12 @@ seed_rows:
       fact2: ""
       fact3: ""
 
-  # Pre-Tickets follow the Style Header: Lanes/Sizes keep chosen values, Stores
-  # is the sample's blank row, and a new Details row is the vendor sample's OWN
-  # first detail line.
+  # Pre-Tickets follow the Style Header exactly (the user's call): Lanes and
+  # Sizes keep the chosen values rather than the sample's blanks, Stores is the
+  # sample's blank row verbatim, and a new Details row is the vendor sample's
+  # OWN first detail line — which is the whole difference from the Style
+  # Header, whose sample detail row was hand-chosen. Update this block when a
+  # better vendor sample arrives; nothing in code names these values.
   CalgaryPreticket:
     Lanes:
       lane: ""
@@ -116,6 +119,10 @@ seed_rows:
       lineNumber: "006"
       style: "182517"
       type: "2"
+      # `size` sits right after `type`, matching the layout and the template —
+      # a seeded row whose key ORDER differed from a converted one would make
+      # two rows of the same file look like different shapes.
+      size: "SM"
       pastSeasonIndicator: "N"
       messageCode1: "MSG1"
       messageCode2: "MSG2"
@@ -123,6 +130,8 @@ seed_rows:
       compareAtUp: "Y"
       retailPrice: "799"
       quantity: "00001"
+      # A string, not a number: the sample's unquoted `000000` is not legal
+      # JSON at all, and the user confirmed the value is a 9-wide string.
       houseNumber: "000000"
       pieces: "00"
       ladderPlanMMYY: "0826"
@@ -135,7 +144,11 @@ seed_rows:
       fact1: ""
       fact2: ""
       fact3: ""
-      size: "SM"
+      # LAST, matching the layout and the template. It moved here from the
+      # HEADER: the .OK carries `vendor_style` per Lane row, so a seeded detail
+      # row needs its own value — without this line a seeded row would come out
+      # with every field populated EXCEPT this one.
+      vendorStyle: "BDGB"
 
   CalgaryDistLabel:
     Stores:

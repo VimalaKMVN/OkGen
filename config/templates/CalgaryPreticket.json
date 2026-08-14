@@ -22,7 +22,6 @@
             "price": "",
             "area": "",
             "instructions": "",
-            "vendorStyle": "BDGB",
             "description": "PUMPKIN SPICE amp EVERYTH",
             "category": "7715",
             "totalQuantity": "",
@@ -89,6 +88,7 @@
                 "lineNumber": "006",
                 "style": "182517",
                 "type": "2",
+                "size": "SM",
                 "pastSeasonIndicator": "N",
                 "messageCode1": "MSG1",
                 "messageCode2": "MSG2",
@@ -108,13 +108,14 @@
                 "fact1": "",
                 "fact2": "",
                 "fact3": "",
-                "size": "SM"
+                "vendorStyle": "BDGB"
             },
             {
                 "pageNumber": "008",
                 "lineNumber": "008",
                 "style": "123456",
                 "type": "2",
+                "size": "SM",
                 "pastSeasonIndicator": "N",
                 "messageCode1": "MSG1",
                 "messageCode2": "MSG2",
@@ -134,7 +135,7 @@
                 "fact1": "",
                 "fact2": "",
                 "fact3": "",
-                "size": "SM"
+                "vendorStyle": "BDGB"
             }
         ]
     }
