@@ -15,8 +15,11 @@ Four user asks landed together here, and the thread that ties them is that a
 * a converted Pre-Ticket's ``version`` and ``description`` are **blank**; the
   sample's ``INITIAL`` / ``PUMPKIN SPICE amp EVERYTH`` are one order's data, and
   ``description`` was the last genuine template leak.
-* ``lineCount`` is **deliberately unchanged** — the user's call, made with the
-  vendor data in front of them (all 13 vendor Style Headers carry a space).
+* ``lineCount`` MATCHES the real detail lines on both engines and across
+  conversion. It was withdrawn mid-design on Style Header evidence (all 13
+  vendor Style Headers carry a space) and then REINSTATED for the Pre-Ticket
+  once the user confirmed with their team — the Style Header still keeps its
+  blank, so the rule is scoped per layout rather than global.
 
 The WMS half is pinned as hard as the SCAN half: the user's instruction was
 "don't touch WMS", so a test asserting a 6-digit price is only half the claim.
@@ -30,6 +33,7 @@ import pytest
 
 from okgen.api import service
 from okgen.config import Config
+from okgen.detect import detect_layout
 from okgen.layout.registry import LayoutRegistry
 from okgen.okfile import parse_okfile
 from okgen.okjson import TRANSFORMS
@@ -370,9 +374,11 @@ def test_declaring_line_count_moved_no_VALUE(tmp_path, registry, fixcfg):
             continue
         service.apply_edits(p, [], registry, config=fixcfg, backup=False)
         after = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]
+        if fixcfg.count_field(detect_layout(p).layout, "Details"):
+            continue        # a counted lineCount is SUPPOSED to move; see below
         assert after["lineCount"] == before["lineCount"], src.name
         checked += 1
-    assert checked >= 5, "not enough samples exercised"
+    assert checked >= 4, "not enough samples exercised"
     # named explicitly, so the check cannot pass vacuously on files that
     # happen to carry neither form
     vals = {json.loads((FIX / n).read_text(encoding="utf-8"))["data"]["header"]["lineCount"]
@@ -403,17 +409,121 @@ def test_line_count_is_now_writable_and_refuses_an_over_long_value(tmp_path,
     assert json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["lineCount"] == "12"
 
 
-def test_line_count_is_still_copied_and_is_NOT_a_count(tmp_path, registry, config):
-    """The user withdrew this one after seeing the vendor data: all 13 vendor
-    Style Headers carry `lineCount` as a single space, and there is no vendor
-    Pre-Ticket to check against.
+def test_line_count_MATCHES_the_detail_lines_on_both_engines(tmp_path, registry,
+                                                             config):
+    """`lineCount` equals the real detail lines, in the `.OK`, in the JSON, and
+    across conversion — the user's call, confirmed with their team.
 
-    Pinned as a GUARD, not as an aspiration — if someone later wires `lineCount`
-    into `counts:`, this fails and points at the decision.
+    ***This REVERSES the withdrawal recorded earlier in this file.*** It was
+    parked on Style Header evidence (all 13 vendor samples carry `' '`), but
+    that evidence was only ever about Style Headers; the Pre-Ticket is the
+    layout where the value is actually needed, and there the copy put `05`
+    beside 4 rows.
+
+    Both engines are asserted in one place because the whole point is that they
+    AGREE — while writing the number in each engine's own form: the fixed-width
+    `.OK` field is zero-filled to its 2 characters, the JSON one is not.
     """
-    _, d = _convert(tmp_path, registry, config, "Preticket.OK")
-    assert d["header"]["lineCount"] == "05"       # the .OK header's own value
-    assert len(d["details"]) == 4                 # ...which disagrees, by design
+    # .OK: syncs on save
+    p = tmp_path / "Preticket.OK"
+    shutil.copy(DATA_DIR / "Preticket.OK", p)
+    service.apply_edits(p, [], registry, target_path=str(p), config=config,
+                        backup=False)
+    v = service.parse_file_view(p, registry, config)
+    assert v["sections"][0]["records"][0]["values"]["line_count"] == "04"
+
+    # conversion: counted, not copied
+    src = tmp_path / "in"
+    src.mkdir()
+    q = src / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", q)
+    res = service.convert_apply([str(q)], registry, config)
+    out = sorted(Path(res["folder"]).glob("*.json"))[0]
+    d = json.loads(out.read_text(encoding="utf-8"))["data"]
+    assert d["header"]["lineCount"] == "4"
+    assert len(d["details"]) == 4
+
+
+def test_a_json_preticket_line_count_follows_its_rows(tmp_path, registry, config):
+    """Editing rows in the JSON keeps the count honest, in BOTH directions —
+    a shrink-only test would miss the silent no-op the splice engine is prone
+    to (D47)."""
+    src = tmp_path / "in"
+    src.mkdir()
+    q = src / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", q)
+    res = service.convert_apply([str(q)], registry, config)
+    p = sorted(Path(res["folder"]).glob("*.json"))[0]
+
+    def state():
+        d = json.loads(Path(p).read_text(encoding="utf-8"))["data"]
+        return d["header"]["lineCount"], len(d["details"])
+
+    assert state() == ("4", 4)
+    service.bulk_op_apply([str(p)], "CalgaryPreticket", "Details",
+                          {"type": "keep", "count": 2}, registry, config,
+                          backup=False)
+    assert state() == ("2", 2)
+    service.bulk_op_apply([str(p)], "CalgaryPreticket", "Details",
+                          {"type": "add", "count": 3}, registry, config,
+                          backup=False)
+    assert state() == ("5", 5)
+
+
+def test_line_count_boundaries_including_the_SILENT_overflow(tmp_path, registry,
+                                                             config):
+    """0, 1, 99 and 100+ rows — the last one is a documented WART, pinned here
+    so it cannot change unnoticed and so it stays visible.
+
+    `_set_count_field` leaves the field UNCHANGED when the count does not fit,
+    rather than truncating or overflowing. On the `.OK` that is clearly right:
+    the field is 2 characters by FORMAT, and writing 3 would shift every field
+    after it. The JSON side now inherits it because `lineCount` is declared 2
+    there too — so a 120-line JSON Pre-Ticket keeps whatever number it had, and
+    **silently stops matching its rows**, which is the one case that
+    contradicts the rule this whole change exists for.
+
+    This is NOT new: the `.OK` has behaved this way since before the count was
+    wired to the JSON, and a 120-row `.OK` Pre-Ticket likewise keeps `05`.
+    """
+    src = tmp_path / "in"
+    src.mkdir()
+    q = src / "Preticket.OK"
+    shutil.copy2(DATA_DIR / "Preticket.OK", q)
+    res = service.convert_apply([str(q)], registry, config)
+    base = sorted(Path(res["folder"]).glob("*.json"))[0]
+
+    def rebuilt(op):
+        p = tmp_path / "w.json"
+        shutil.copy2(base, p)
+        for o in op:
+            service.bulk_op_apply([str(p)], "CalgaryPreticket", "Details", o,
+                                  registry, config, backup=False)
+        d = json.loads(p.read_text(encoding="utf-8"))["data"]
+        return d["header"]["lineCount"], len(d["details"])
+
+    # an emptied section keeps ONE blank marker row (D45) but counts 0 REAL rows
+    assert rebuilt([{"type": "keep", "count": 0}]) == ("0", 1)
+    assert rebuilt([{"type": "keep", "count": 1}]) == ("1", 1)
+    assert rebuilt([{"type": "add", "count": 95}]) == ("99", 99)      # fits
+    # ...and one row further, the count silently stands still
+    lc, rows = rebuilt([{"type": "add", "count": 116}])
+    assert rows == 120
+    assert lc == "4", "overflow should leave the previous value, not truncate"
+
+
+def test_a_json_count_is_UNPADDED_unlike_the_ok_one(registry, config):
+    """`lineCount` is 2 wide on both engines, and only the `.OK` zero-fills it.
+
+    The vendor files are unambiguous that a JSON count is unpadded even when
+    the field has a width: `numberOfStores` is 4 wide and carries `'5'`, and
+    `totalQuantity` carries `'22'`. Padding the JSON one would also silently
+    reshape what conversion writes, since `counts:` emits `str(len(rows))`.
+    """
+    assert config.count_field("CalgaryPreticket", "Details") == "lineCount"
+    assert config.count_field("Preticket", "Lane") == "line_count"
+    # the Style Header must NOT have acquired one
+    assert config.count_field("CalgaryStyleHeader", "Details") in (None, "")
 
 
 # ------------------------------------------------- the Total Qty sweep ---

@@ -373,7 +373,9 @@ conversions:
       # .OK files for now"). Note `lineCount` therefore reports what the .OK
       # header claims, which can disagree with the number of detail rows
       # actually emitted — revisit if that turns out to matter.
-      lineCount:        { from: line_count }
+      # `lineCount` is NOT copied from the .OK header — it is COUNTED from the
+      # rows actually emitted, in the `counts:` block below. Declaring it in
+      # both places would make two rules fight over the same field.
       blockNumber:      { from: block_num }
       numberOfBlocks:   { from: num_block }
       # The SUM of the detail lines' quantities, in the vendor's UNPADDED form
@@ -411,10 +413,23 @@ conversions:
       # (`description` used to be listed here as an accepted template leak; it
       #  is written BLANK above now, at the user's call.)
 
-    # Counted from the rows actually emitted. `lineCount` is deliberately absent
-    # — it is copied from the .OK above, so counting it here would overwrite the
-    # copy and silently make the two rules fight.
-    counts: {}
+    # Counted from the rows actually emitted, NOT copied from the .OK header.
+    #
+    # The user confirmed this with their team: a Pre-Ticket's `lineCount` must
+    # match its detail lines, in the .OK, in the JSON, and across conversion.
+    # Copying let the two disagree — the shipped `Preticket.OK` says `05` while
+    # carrying FOUR real detail rows, so every converted file repeated that.
+    #
+    # Counting happens AFTER `skip_filler_rows` has dropped the trailing
+    # all-zero padding, so this is the number of real order lines rather than
+    # the block size. Written unpadded ('4'), the form every vendor JSON count
+    # field uses.
+    #
+    # A Calgary StyleHeader deliberately does NOT do this — its `lineCount`
+    # stays blank (all 13 vendor samples carry ' '), which its own conversion
+    # writes through `empty_counts`.
+    counts:
+      lineCount: details
 
     # A Pre-Ticket .OK has no lane/size/store sections, so all four are always
     # the empty form. Declared rather than inherited so the value is visible

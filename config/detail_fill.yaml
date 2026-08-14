@@ -18,6 +18,12 @@ fill:
   # adding or removing any rows.
   EUPreticket:
     Lane: 0
+  # The JSON Pre-Ticket, in the same count-only mode. A JSON array has no filler
+  # rows at all — the padding this file exists for is a fixed-width block-size
+  # artefact — so `0` is the only correct value here, and it buys the count sync
+  # rather than any row manipulation.
+  CalgaryPreticket:
+    Details: 0
 
 # Layouts whose detail lines carry padding spaces AFTER the record terminator
 # ('\') that the format does not need (Preticket writes '...VENDORST\   '). On

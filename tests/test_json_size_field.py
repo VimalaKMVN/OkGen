@@ -535,17 +535,20 @@ def test_declaring_a_width_moves_no_VALUE(tmp_path, registry, config):
         service.apply_edits(p, [], registry, config=config, backup=False)
         after = p.read_bytes()
         if after != before:
-            # The ONLY write a no-op save is allowed to make is a roll-up total
-            # correcting itself against its own detail rows (preticket.json
-            # ships a blank one). Every other value must be untouched — which
-            # is what this test is really about: a declared WIDTH must not
-            # coerce ' ' or null into a stamp.
+            # The ONLY writes a no-op save is allowed to make are a roll-up
+            # total and a section COUNT correcting themselves against their own
+            # detail rows (preticket.json ships both blank). Every other value
+            # must be untouched — which is what this test is really about: a
+            # declared WIDTH must not coerce ' ' or null into a stamp.
             b = json.loads(before.decode("utf-8"))
             a = json.loads(after.decode("utf-8"))
             lay = registry.get(detect_layout(p).layout)
             moved = [f for f in (a["data"]["header"].keys() | b["data"]["header"].keys())
                      if a["data"]["header"].get(f) != b["data"]["header"].get(f)]
             allowed = {r["field"] for r in (config.rollups(lay.name) or [])}
+            allowed |= {config.count_field(lay.name, s)
+                        for s in (config.fill_sections(lay.name) or {})}
+            allowed.discard(None)
             assert set(moved) <= allowed, f"{src.name}: {moved} moved on a no-op save"
             for f in moved:
                 a["data"]["header"][f] = b["data"]["header"][f]

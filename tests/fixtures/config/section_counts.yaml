@@ -1,4 +1,8 @@
-# Fixed section count fields for tests.
+# Header field that holds the record count for each repeating section.
+# When bulk Add/Keep changes a section's record count, this field is kept in
+# sync (zero-padded to its width). Editable.
+#
+#   layout -> { section name -> header count field }
 section_counts:
   StyleHeader:
     Lane: lane_rec
@@ -12,3 +16,10 @@ section_counts:
     Lane: line_count
   EUPreticket:
     Lane: line_count
+  # The JSON Pre-Ticket keeps `lineCount` in step with its detail rows too, so
+  # the two engines agree (the user's call, confirmed with their team). Scoped
+  # to the Pre-Ticket ONLY — a Calgary StyleHeader must keep `lineCount` blank,
+  # which all 13 vendor samples carry and which its conversion writes
+  # deliberately. Written UNPADDED ('4', not '04') like every other JSON count.
+  CalgaryPreticket:
+    Details: lineCount

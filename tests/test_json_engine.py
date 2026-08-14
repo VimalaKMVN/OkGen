@@ -51,23 +51,42 @@ def config():
 def _rollup_fixups(path, registry, config) -> dict:
     """Header fields a SAVE will legitimately rewrite, and their new values.
 
-    A roll-up is applied on every write path, so a file whose header total
-    disagrees with its own detail rows is corrected the moment it is saved.
-    That is not new and not JSON-specific — it is the rule the `.OK` engine has
-    had since `v0.77.0`, and the shipped `StyleHeader.OK` sample itself carries
-    a stale `tot_qty` that a save fixes.
+    TWO rules do this, and both are applied on every write path:
 
-    So "an untouched save is byte-exact" means *nothing moved except these*.
-    Only `preticket.json` has a mismatch today (a blank `totalQuantity` beside
-    two detail rows), which is why the byte-for-byte assertion still runs
-    unweakened on the other five fixtures.
+    * a **roll-up** (`rollup_fields.yaml`) — a header total that must equal the
+      sum of a detail column;
+    * a **section count** (`section_counts.yaml`) — a header count that must
+      equal the number of real detail rows.
+
+    So a file whose header disagrees with its own rows is corrected the moment
+    it is saved. That is neither new nor JSON-specific: it is the rule the `.OK`
+    engine has had since `v0.77.0`, and the shipped `StyleHeader.OK` sample
+    itself carries a stale `tot_qty` that a save fixes.
+
+    "An untouched save is byte-exact" therefore means *nothing moved except
+    these*. Only `preticket.json` has a mismatch today (a blank `totalQuantity`
+    and a blank `lineCount` beside two detail rows), which is why the
+    byte-for-byte assertion still runs unweakened on the other five fixtures.
     """
     from okgen.okfile import parse_okfile
     lay = registry.get(detect_layout(path).layout)
     okf = parse_okfile(Path(path), lay)
-    return {st["field"]: st["expected"]
-            for st in service.rollup_state(okf, config)
-            if st["rows"] and not st["matches"]}
+    out = {st["field"]: st["expected"]
+           for st in service.rollup_state(okf, config)
+           if st["rows"] and not st["matches"]}
+
+    hidden = config.hidden_fields(lay.name)
+    for sec_name in (config.fill_sections(lay.name) or {}):
+        cf = config.count_field(lay.name, sec_name)
+        sec = next((s for s in lay.sections if s.name == sec_name), None)
+        if not cf or sec is None:
+            continue
+        real = [r for r in okf.records
+                if r.section is sec and not service._is_blank_row(r, hidden)]
+        want = str(len(real))
+        if okf.records[0].get(cf) != want:
+            out[cf] = want
+    return out
 
 
 def _assert_only_rollups_moved(after_path, before_path, fixups):

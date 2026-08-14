@@ -264,19 +264,53 @@ def test_prices_are_zero_padded_like_the_style_header(tmp_path, registry, config
     assert len(row["compareAtPrice"]) == len(row["retailPrice"]) == 6
 
 
-def test_line_count_is_copied_and_may_disagree_with_the_rows(tmp_path, registry,
-                                                             config):
-    """The user chose "copy from the .OK files for now" over counting the rows.
+def test_line_count_is_COUNTED_from_the_rows_not_copied(tmp_path, registry,
+                                                        config):
+    """`lineCount` equals the detail lines actually emitted.
 
-    This asserts the CONSEQUENCE rather than only the rule, because the shipped
-    reference file already shows it: its header claims 5 detail lines and it
-    carries 4 real ones, so the converted JSON says `lineCount: "05"` beside 4
-    details. That is the documented behaviour today — if it is ever wrong, this
-    test is the one to change, and the fix is one line of ok_to_json.yaml.
+    ***This REVERSES the original "copy from the .OK files for now"***, which
+    the user confirmed with their team. The shipped reference file is why it
+    mattered: its header claims 5 detail lines while carrying 4 real ones, so
+    the copy put `lineCount: "05"` beside 4 details in every converted file.
+
+    Counting happens AFTER `skip_filler_rows` drops the trailing all-zero
+    padding, so this is the number of real order lines and not the block size —
+    the distinction that makes 4 the right answer rather than 14.
     """
     _, d = _convert(tmp_path, registry, config)
-    assert d["header"]["lineCount"] == "05"
+    assert d["header"]["lineCount"] == "4"
     assert len(d["details"]) == 4
+
+
+def test_line_count_follows_a_TRIMMED_detail_section(tmp_path, registry, config):
+    """The count tracks the rows, rather than happening to match once.
+
+    Converting a file whose detail section was trimmed to 2 must say 2 — a test
+    that only ever saw the reference file would pass just as well on a build
+    that hard-coded 4, or on one that still copied a header that happened to
+    agree.
+    """
+    _, d = _convert(tmp_path, registry, config, keep=2)
+    assert len(d["details"]) == 2
+    assert d["header"]["lineCount"] == "2"
+
+
+def test_a_style_header_line_count_stays_BLANK(tmp_path, registry, config):
+    """Scoped to the Pre-Ticket, deliberately.
+
+    All 13 vendor Calgary Style Headers carry `lineCount` as a single space, and
+    that layout's conversion writes it through `empty_counts`. Counting there
+    would contradict every real file, so the guard belongs beside the change.
+    """
+    src = tmp_path / "sh"
+    src.mkdir()
+    p = src / "StyleHeader.OK"
+    shutil.copy2(DATA_DIR / "StyleHeader.OK", p)
+    res = service.convert_apply([str(p)], registry, config)
+    out = sorted(Path(res["folder"]).glob("*.json"))[0]
+    d = json.loads(out.read_text(encoding="utf-8"))["data"]
+    assert d["header"]["lineCount"] == " "
+    assert len(d["details"]) == 1        # it HAS a detail row, and still says ' '
 
 
 # -------------------------------------------------------- config misuse ---

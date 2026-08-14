@@ -1637,11 +1637,24 @@ def _set_count_field(okf: OkFile, layout_name: str, section_name: str,
                      count: int, config: Config) -> None:
     """Write ``count`` (zero-padded) into the section's header count field.
 
+    Written in the ENGINE's own form, the same rule roll-ups follow
+    (:func:`_rollup_format`): a fixed-width ``.OK`` field is zero-filled to its
+    width (``'04'``), a JSON one is written UNPADDED (``'4'``). The vendor files
+    are unambiguous on that — ``numberOfStores`` is a 4-wide field carrying
+    ``'5'`` and ``'10'``, and ``totalQuantity`` carries ``'22'`` — so padding a
+    JSON count would disagree with every real file. It also keeps conversion and
+    the editor in step: the ``counts:`` block in ``ok_to_json.yaml`` writes
+    ``str(len(rows))``, so a padded save would silently reshape a value
+    conversion had just written.
+
     If ``count`` does not fit the field's width, the field is LEFT UNCHANGED
     rather than truncated or overflowed — e.g. Preticket/EUPreticket keep a
     2-digit ``line_count``, so once the real detail rows reach 100+ the count is
     no longer updated (its existing value stands). Overwriting would corrupt the
     header, and truncating would silently misreport the count.
+
+    A field with NO declared width is skipped — which is why the JSON
+    ``lineCount`` could not be kept in sync until it was declared as 2.
     """
     cf = config.count_field(layout_name, section_name)
     if not cf or not okf.records:
@@ -1653,7 +1666,7 @@ def _set_count_field(okf: OkFile, layout_name: str, section_name: str,
         return
     if f.size is None:
         return
-    val = str(count).zfill(f.size)
+    val = _rollup_format(count, f, okf.layout)
     if len(val) <= f.size:                        # fits -> update; else leave as-is
         header.set(cf, val)
 

@@ -18,10 +18,21 @@ fill:
   # adding or removing any rows.
   EUPreticket:
     Lane: 0
+  # The JSON Pre-Ticket, in the same count-only mode. A JSON array has no filler
+  # rows at all — the padding this file exists for is a fixed-width block-size
+  # artefact — so `0` is the only correct value here, and it buys the count sync
+  # rather than any row manipulation.
+  CalgaryPreticket:
+    Details: 0
 
-# Trim padding spaces after the record terminator ('\') on detail lines, on
-# write. Preticket's detail lines end '...VENDORST\   '; the trailing pad is
-# unneeded, so writes end the line at the terminator. Write-only (plain open
-# still round-trips byte-exact).
+# Layouts whose detail lines carry padding spaces AFTER the record terminator
+# ('\') that the format does not need (Preticket writes '...VENDORST\   '). On
+# write, OkGen trims that trailing pad so each detail line ends right at the
+# terminator. The terminator is a non-space char, so every field — including a
+# space-padded trailing field like vendor_style — is preserved; only the junk
+# after '\' is removed. Runs on write only (like `fill` above), so a plain open
+# still round-trips byte-exact. Header line is never touched.
+#
+#   layout -> trim trailing pad after the record terminator on detail lines
 trim_trailing:
   - Preticket
