@@ -59,7 +59,9 @@ const run = new Function(
   "document", "window", "localStorage", "Option", "fetch", "confirm", "prompt", "alert",
   src + "\n;return {"
       + " placeCtxMenu: typeof placeCtxMenu === 'function' ? placeCtxMenu : null,"
-      + " hideCtxMenu: typeof hideCtxMenu === 'function' ? hideCtxMenu : null };");
+      + " hideCtxMenu: typeof hideCtxMenu === 'function' ? hideCtxMenu : null,"
+      + " showBulkMenu: typeof showBulkMenu === 'function' ? showBulkMenu : null,"
+      + " state: typeof state !== 'undefined' ? state : null };");
 
 let api;
 try {
@@ -234,6 +236,27 @@ check("it is click, not mousedown (hiding on mousedown swallows the choice)",
       !/document\.addEventListener\("mousedown",[\s\S]{0,300}?hideCtxMenu/.test(src));
 check("the folder row still stops propagation (its own reason is unchanged)",
       /row\.addEventListener\("click", \(e\) => \{ e\.stopPropagation\(\); toggleFolder/.test(src));
+
+// --------------------------------------------------------------------------
+// 7. the dismisser must not eat the click that OPENS a menu
+// --------------------------------------------------------------------------
+// The capture listener fires on EVERY click, including the one on the Bulk
+// Actions button. Capture runs BEFORE the button's own handler, so the correct
+// sequence is hide-then-open; if it ran after, the button would open a menu
+// that was immediately closed and the control would look dead.
+if (api.showBulkMenu && api.state) {
+  const btn = doc.querySelector("#bulkBtn");
+  btn._rect = { top: 0, left: 0, right: 300, bottom: 40, width: 80, height: 40 };
+  api.state.selection = new Set(["/f/a.OK"]);   // it early-returns on none
+  menu._rect = { top: 0, left: 0, right: 0, bottom: 0, height: 300, width: 220 };
+  openMenu();
+  doc.dispatchEvent({ type: "click", target: btn });
+  check("the capture dismisser closes the old menu first", !isOpen());
+  api.showBulkMenu();
+  check("...and the button's own handler still opens the new one", isOpen());
+} else {
+  check("Bulk Actions menu reachable for the ordering check", false);
+}
 
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);
