@@ -84,7 +84,12 @@ def test_transforms(registry, config):
     # never produces (see test_a_converted_price_is_six_digits_not_the_wms_nine).
     assert d["retailPrice"] == "002099"
     assert d["compareAtUp"] == "false"           # comp_up 'N'
-    assert d["ladderPlan"] == "20170801"         # 0817 MMYY -> first of month
+    # 0817 is MMDD (Aug 17), and the .OK carries NO year — so the year comes
+    # from today. Asserted against the clock, never a literal: this used to read
+    # "20170801", which took the DAY 17 as the year 2017 and forced day 01.
+    from okgen.okjson import _current_year
+    assert d["ladderPlan"] == f"{_current_year()}0817"
+    assert d["ladderPlanMMYY"] == f"08{_current_year()[2:4]}"
     assert d["quantity"] == "0000022"            # raw: padding preserved
 
 

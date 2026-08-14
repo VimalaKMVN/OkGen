@@ -94,12 +94,80 @@ def _iso_date(v) -> str:
     return f"{s[0:4]}-{s[4:6]}-{s[6:8]}" if len(s) == 8 and s.isdigit() else s
 
 
-def _mmyy_to_first_of_month(v) -> str:
-    """'0817' (MMYY) -> '20170801'."""
+def _current_year() -> str:
+    """The full year to stamp a ladder plan with, e.g. '2026'.
+
+    The `.OK` ladder field carries **MMDD and no year at all** (user-confirmed),
+    so the year can only come from the clock. Deliberately a function rather
+    than a literal, for the same reason as :func:`_current_century`: a
+    hard-coded year is wrong the moment the calendar turns.
+
+    Note the consequence, which is inherent to the rule rather than a defect:
+    converting the SAME `.OK` file next year produces a different `ladderPlan`.
+    """
+    from datetime import datetime, timezone
+    return str(datetime.now(timezone.utc).year)
+
+
+def _ladder_mmdd_parts(v):
+    """Split an `.OK` ladder MMDD into (MM, DD), or None if it is not one.
+
+    ``'0000'`` is returned as a REAL answer (the "no ladder plan" case, which
+    both shipped Pre-Ticket samples carry on every row) and is distinguished
+    from junk by the caller. Anything that is not four digits — including the
+    Pre-Ticket spec's own sample value ``'4542'``, whose month is 45 — is None.
+    """
     s = _trim(v)
     if len(s) != 4 or not s.isdigit():
-        return s
-    return f"20{s[2:4]}{s[0:2]}01"
+        return None
+    mm, dd = s[0:2], s[2:4]
+    if mm == "00" and dd == "00":
+        return ("00", "00")                 # the explicit no-plan form
+    if not (1 <= int(mm) <= 12) or not (1 <= int(dd) <= 31):
+        return None
+    return (mm, dd)
+
+
+def _mmdd_to_mmyy(v) -> str:
+    """`.OK` ladder MMDD -> the JSON's `ladderPlanMMYY`: MM + the CURRENT YY.
+
+    ``'0829'`` -> ``'0826'`` in 2026. The name is literal — the JSON field holds
+    MM and YY, not MM and DD — and the vendor files confirm it: they carry
+    ``'0426'`` beside a ``ladderPlan`` of ``'20260401'``, so the second half is
+    the year and not the day.
+
+    ``'0000'`` -> ``'0000'`` (the user's call): both ladder fields go all-zero
+    together, so "no ladder plan" reads the same way in each. A blank or
+    unparseable value stays BLANK rather than being zero-filled, which would
+    invent a plan the file does not have.
+    """
+    parts = _ladder_mmdd_parts(v)
+    if parts is None:
+        return ""
+    mm, dd = parts
+    if (mm, dd) == ("00", "00"):
+        return "0000"
+    return f"{mm}{_current_year()[2:4]}"
+
+
+def _mmdd_to_plan(v) -> str:
+    """`.OK` ladder MMDD -> the JSON's full `ladderPlan`: CURRENT YEAR + MMDD.
+
+    ``'0829'`` -> ``'20260829'`` in 2026, and ``'0000'`` -> ``'00000000'`` (the
+    user's call). Reproduces the vendor files exactly: their `.OK` MMDD of
+    ``'0401'`` gives ``'20260401'``, which is what they carry.
+
+    ***The day is NOT forced to the 1st.*** Every vendor row happens to be a
+    first-of-month, which is what made the old rule look right; it is the .OK's
+    own DD, and the vendor rows simply carry ``01`` there.
+    """
+    parts = _ladder_mmdd_parts(v)
+    if parts is None:
+        return ""
+    mm, dd = parts
+    if (mm, dd) == ("00", "00"):
+        return "00000000"
+    return f"{_current_year()}{mm}{dd}"
 
 
 def _yn_to_bool(v) -> str:
@@ -158,38 +226,8 @@ def _ok_datetime_to_stamp(date8, time4) -> str:
     return f"{d[0:4]}-{d[4:6]}-{d[6:8]}T{t[0:2]}:{t[2:4]}:00.000000000Z"
 
 
-def _ladder_mmyy(mmdd, yy) -> str:
-    """`.OK` ladder MMDD + YY -> the JSON's `ladderPlanMMYY` ('0801' + '26' ->
-    '0826'). Blank when either half is missing — the user's call, over a null:
-    the field is a string everywhere else it appears."""
-    m, y = _trim(mmdd), _trim(yy)
-    if len(m) != 4 or not m.isdigit() or len(y) != 2 or not y.isdigit():
-        return ""
-    if m[0:2] == "00":
-        return ""      # '00' is not a month — the same guard `ladder_plan` uses
-    return f"{m[0:2]}{y}"
-
-
-def _ladder_plan(mmdd, yy) -> str:
-    """`.OK` ladder MMDD + YY -> the JSON's full `ladderPlan` date
-    ('0801' + '26' -> '20260801'), the century taken from today.
-
-    A month or day of ``00`` is not a date, so it comes back blank rather than
-    as ``20260000`` — the reference Preticket.OK really does carry ``0000``, so
-    this is the shipped case, not a hypothetical one.
-    """
-    m, y = _trim(mmdd), _trim(yy)
-    if len(m) != 4 or not m.isdigit() or len(y) != 2 or not y.isdigit():
-        return ""
-    if m[0:2] == "00" or m[2:4] == "00":
-        return ""
-    return f"{_current_century()}{y}{m[0:2]}{m[2:4]}"
-
-
 MULTI_TRANSFORMS = {
     "ok_datetime_to_stamp": _ok_datetime_to_stamp,
-    "ladder_mmyy": _ladder_mmyy,
-    "ladder_plan": _ladder_plan,
 }
 
 
@@ -201,7 +239,8 @@ TRANSFORMS = {
     "pad6": _pad6,
     "pad_left_4": _pad_left_4,
     "iso_date": _iso_date,
-    "mmyy_to_first_of_month": _mmyy_to_first_of_month,
+    "mmdd_to_mmyy": _mmdd_to_mmyy,
+    "mmdd_to_plan": _mmdd_to_plan,
     "yn_to_bool": _yn_to_bool,
     "blank_to_null": _blank_to_null,
 }

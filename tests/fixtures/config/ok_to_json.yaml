@@ -131,8 +131,17 @@ conversions:
         retailPrice:         { from: ret_price, transform: pad6 }
         quantity:            { from: tot_qty, raw: true }
         pieces:              { from: pieces, raw: true }
-        ladderPlanMMYY:      { from: ladder_mmdd }
-        ladderPlan:          { from: ladder_mmdd, transform: mmyy_to_first_of_month }
+        # The `.OK` ladder field carries MMDD and NO YEAR (user-confirmed after
+        # the earlier reading proved wrong), so the year comes from TODAY.
+        # `ladder` — the 2-char field beside it — is the number of MONTHS the
+        # merchandise may stay in holdings (3/8/12/24), NOT a year, and is
+        # deliberately unused on BOTH layouts.
+        #
+        #   '0829' -> ladderPlanMMYY '0826'   (MM + current YY)
+        #          -> ladderPlan     '20260829'  (current year + MMDD)
+        #   '0000' -> '0000' / '00000000'     (the explicit no-plan form)
+        ladderPlanMMYY:      { from: ladder_mmdd, transform: mmdd_to_mmyy }
+        ladderPlan:          { from: ladder_mmdd, transform: mmdd_to_plan }
         category:            { from: category }
 
   DistLabels:
@@ -313,6 +322,10 @@ conversions:
 #   pad9                    '002099'  -> '000002099'
 #   pad_left_4              '208'     -> '0208'   (store numbers)
 #   iso_date                '20170717'-> '2017-07-17'
-#   mmyy_to_first_of_month  '0817'    -> '20170801'
+#   mmdd_to_mmyy            '0829'    -> '0826'      (MM + current YY)
+#                           '0000'    -> '0000'
+#   mmdd_to_plan            '0829'    -> '20260829'  (current year + MMDD)
+#                           '0000'    -> '00000000'
+#                           an invalid or blank MMDD -> ''
 #   yn_to_bool              'Y'/'N'   -> 'true'/'false'
 #   blank_to_null           ''        -> null

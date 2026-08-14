@@ -11,8 +11,10 @@ section that actually has rows, so the row-count boundaries are the risk.
 Three mechanisms are new and are tested here rather than assumed:
 
 * a **multi-source rule** (``from:`` naming a LIST of `.OK` fields), because the
-  `.OK` splits the transmit stamp across date+time and the ladder plan across
-  MMDD+YY, and the JSON joins each back together;
+  `.OK` splits the transmit stamp across date+time and the JSON joins them back
+  together. *The ladder plan used to be the second user of this and is not any
+  more: the `.OK` carries MMDD with no year at all, so the rule is
+  single-source and the year comes from the clock.*
 * a **``document:`` block**, because ``data.timestamp`` sits beside
   ``data.header`` and the header block cannot reach it;
 * **``skip_filler_rows``**, because a fixed-width detail section is padded to a
@@ -30,8 +32,18 @@ from okgen.api import service
 from okgen.config import Config
 from okgen.detect import detect_layout
 from okgen.layout.registry import LayoutRegistry
-from okgen.okjson import (ConvertError, _is_filler, _ladder_mmyy, _ladder_plan,
-                          _ok_datetime_to_stamp, _current_century)
+from okgen.okjson import ConvertError, _is_filler, _ok_datetime_to_stamp
+
+# Probed rather than imported directly, so this module still LOADS on a build
+# that predates a symbol. A missing name raises while the module is importing,
+# which makes pytest report one collection ERROR having run ZERO checks — the
+# truncated-run failure this repo has now hit repeatedly when diffing against an
+# older tag. Each test then fails on its own terms instead.
+import okgen.okjson as _oj
+_mmdd_to_mmyy = getattr(_oj, "_mmdd_to_mmyy", None)
+_mmdd_to_plan = getattr(_oj, "_mmdd_to_plan", None)
+_current_century = getattr(_oj, "_current_century", None)
+_current_year = getattr(_oj, "_current_year", None)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(os.environ.get("OKGEN_DATA_DIR", str(ROOT / "data" / "OkFileDefinitions")))
@@ -164,53 +176,121 @@ def test_the_timestamp_transform_directly():
     assert _ok_datetime_to_stamp("2026-08", "0718") == ""
 
 
-def test_the_ladder_pair_reads_both_ok_fields():
-    """`ladder_mmdd` is MMDD and `ladder` is the 2-digit YEAR (user-corrected —
-    the source CSV calls the second one "Ladder Plan", which reads as neither).
-    The JSON joins them two different ways, so both rules read both fields."""
-    assert _ladder_mmyy("0801", "26") == "0826"
-    assert _ladder_plan("0801", "26") == f"{_current_century()}260801"
+def test_the_ladder_is_MMDD_plus_the_CURRENT_year():
+    """`ladder_mmdd` is **MMDD with no year at all**, and `ladder` — the 2-char
+    field beside it — is the number of MONTHS the merchandise may stay in
+    holdings (3/8/12/24), NOT a year.
 
+    ***This corrects an earlier user correction*** recorded in PLAN D83, which
+    had `ladder` as the 2-digit year. Under that reading the conversion turned
+    "12 months in holding" into "the year 2012".
 
-def test_the_century_is_todays_not_a_literal():
-    """The .OK carries YY and the JSON wants CCYY, and nothing in the file says
-    which century — so it comes from today. Asserted against the clock rather
-    than against '20', which is what makes this fail in 2100 instead of writing
-    a wrong date."""
-    from datetime import datetime, timezone
-    assert _current_century() == str(datetime.now(timezone.utc).year // 100)
-    assert _ladder_plan("0801", "26").startswith(_current_century())
-
-
-@pytest.mark.parametrize("mmdd,yy", [("0000", "12"), ("", "26"), ("0801", "")])
-def test_an_unusable_ladder_is_blank_on_both_fields(mmdd, yy):
-    """The user's call: blank, not null. `0000` is the SHIPPED case — the
-    reference Preticket.OK really does carry it — and `00` is not a month or a
-    day, so `20260000` would be a date that does not exist."""
-    assert _ladder_mmyy(mmdd, yy) == ""
-    assert _ladder_plan(mmdd, yy) == ""
-
-
-def test_each_ladder_field_is_judged_on_its_OWN_inputs():
-    """A missing DAY blanks the full plan but NOT the MMYY field, which does not
-    carry a day at all — so `0800` + `26` gives `ladderPlanMMYY: "0826"` beside
-    `ladderPlan: ""`.
-
-    Stated as a test because it is the one place the two fields can disagree,
-    and it was a choice: blanking both would be tidier to explain, and would
-    throw away a month the .OK really does supply. One line in `_ladder_mmyy`
-    reverses it if the tidier rule is preferred.
+    The vendor files settle it: they carry `ladderPlanMMYY: '0426'` beside
+    `ladderPlan: '20260401'`, which only the MMDD + current-year rule
+    reproduces — see test_it_reproduces_the_vendor_ladder_values.
     """
-    assert _ladder_mmyy("0800", "26") == "0826"
-    assert _ladder_plan("0800", "26") == ""
+    yy = _current_year()[2:4]
+    assert _mmdd_to_mmyy("0829") == f"08{yy}"
+    assert _mmdd_to_plan("0829") == f"{_current_year()}0829"
 
 
-def test_the_shipped_reference_file_converts_with_blank_ladders(tmp_path, registry,
-                                                                config):
-    """The end-to-end half of the case above, so the guard is not only unit-level."""
+def test_the_year_is_todays_not_a_literal():
+    """The `.OK` supplies no year at all, so it comes from the clock. Asserted
+    against the clock rather than against '2026', which is what makes this fail
+    when the calendar turns instead of writing a wrong date.
+
+    Note the consequence, which is inherent to the rule: converting the SAME
+    `.OK` next year produces a different `ladderPlan`.
+    """
+    from datetime import datetime, timezone
+    assert _current_year() == str(datetime.now(timezone.utc).year)
+    assert _mmdd_to_plan("0829").startswith(_current_year())
+    assert _current_century() == str(datetime.now(timezone.utc).year // 100)
+
+
+def test_it_reproduces_the_vendor_ladder_values():
+    """The load-bearing check: the rule is right because it reproduces real
+    files, not because it was asserted.
+
+    All 13 vendor detail rows carry `('0426', '20260401')` or
+    `('0326', '20260301')`. Both fall out of an `.OK` MMDD of `0401` / `0301`
+    under this rule — and neither falls out of the two rules this replaces,
+    which produced `20010401` (day read as a year) and `20120401` (holding
+    period read as a year).
+    """
+    yy, yyyy = _current_year()[2:4], _current_year()
+    assert (_mmdd_to_mmyy("0401"), _mmdd_to_plan("0401")) == (f"04{yy}", f"{yyyy}0401")
+    assert (_mmdd_to_mmyy("0301"), _mmdd_to_plan("0301")) == (f"03{yy}", f"{yyyy}0301")
+
+
+def test_the_day_is_NOT_forced_to_the_first_of_the_month():
+    """Every vendor row is a first-of-month, which is exactly what made the old
+    first-of-month rule look correct. The day is the `.OK`'s own DD; the vendor
+    rows simply carry `01` there. A mid-month plan must survive."""
+    assert _mmdd_to_plan("0815").endswith("0815")
+    assert _mmdd_to_plan("1231").endswith("1231")
+
+
+def test_an_all_zero_ladder_becomes_all_zeros_not_blank():
+    """The user's explicit call, and the SHIPPED case — both Pre-Ticket samples
+    carry `0000` on every row. The two fields go all-zero TOGETHER, so "no
+    ladder plan" reads the same way in each."""
+    assert _mmdd_to_mmyy("0000") == "0000"
+    assert _mmdd_to_plan("0000") == "00000000"
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "4542", "1345", "0230x", "99"])
+def test_an_unusable_ladder_is_BLANK_on_both_fields(bad):
+    """Blank, not zero-filled: `0000` means "no plan" and is written as zeros,
+    while junk means "this is not a date" and must not be dressed up as one.
+
+    `4542` is not hypothetical — it is the Pre-Ticket layout spec's own
+    sample_value, and month 45 is not a month.
+    """
+    assert _mmdd_to_mmyy(bad) == ""
+    assert _mmdd_to_plan(bad) == ""
+
+
+def test_the_shipped_reference_file_converts_with_ZEROED_ladders(tmp_path, registry,
+                                                                 config):
+    """The end-to-end half, so the rule is not only proven at unit level.
+
+    Both shipped Pre-Ticket samples carry `ladder_mmdd = '0000'` on every row,
+    so the zero form is the one the reference file actually exercises — the
+    real MMDD path has no sample and is covered by
+    :func:`test_a_real_ladder_converts_end_to_end`.
+    """
     _, d = _convert(tmp_path, registry, config)
-    assert all(r["ladderPlan"] == "" and r["ladderPlanMMYY"] == ""
+    assert d["details"], "no detail rows to check"
+    assert all(r["ladderPlanMMYY"] == "0000" and r["ladderPlan"] == "00000000"
                for r in d["details"])
+
+
+def test_a_real_ladder_converts_end_to_end(tmp_path, registry, config):
+    """A non-zero MMDD, through a real conversion rather than the transform.
+
+    No shipped `.OK` carries one, so the value is written in first — otherwise
+    the only end-to-end coverage would be the all-zeros case, and a rule that
+    zeroed EVERYTHING would pass it.
+    """
+    src = tmp_path / "in"
+    src.mkdir(exist_ok=True)
+    p = src / "Preticket.OK"
+    shutil.copy2(SOURCE_OK, p)
+    view = service.parse_file_view(p, registry, config)
+    lane = next(s for s in view["sections"] if s["name"] == "Lane")
+    service.apply_edits(p, [{"record_index": lane["records"][0]["index"],
+                             "field": "ladder_mmdd", "value": "0829"}],
+                        registry, config=config, backup=False)
+    res = service.convert_apply([str(p)], registry, config)
+    out = sorted(Path(res["folder"]).glob("*.json"))[0]
+    d = json.loads(out.read_text(encoding="utf-8"))["data"]
+    row = d["details"][0]
+    yy, yyyy = _current_year()[2:4], _current_year()
+    assert row["ladderPlanMMYY"] == f"08{yy}"
+    assert row["ladderPlan"] == f"{yyyy}0829"
+    # the OTHER rows still carry the zero form, so this did not blanket-apply
+    assert d["details"][1]["ladderPlan"] == "00000000"
 
 
 # ------------------------------------- header fields lifted from a detail row ---
