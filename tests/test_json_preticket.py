@@ -103,18 +103,23 @@ def test_it_adds_no_NEW_field_without_a_width(registry):
     from the Volume Generate panel and SILENTLY SKIPPED by Generate through the
     API while the run still reports success (v0.97.0 / v0.108.0).
 
-    The bar here is PARITY, not zero: the Style Header still has 11 such fields
-    (the structural counts and the `lanes`/`sizes` header duplicates, the open
-    §6 thread), and a Pre-Ticket inherits exactly those. What must not happen is
-    this layout adding a TWELFTH — in particular its own two fields, `size` and
-    `lpn`, which is what a copied spec could easily have left undeclared.
+    The bar here is PARITY, not zero: the Style Header still has 10 such fields
+    (the remaining structural counts and the `lanes`/`sizes` header duplicates,
+    the open §6 thread), and a Pre-Ticket inherits exactly those. What must not
+    happen is this layout adding an ELEVENTH — in particular its own two fields,
+    `size` and `lpn`, which is what a copied spec could easily have left
+    undeclared.
+
+    *Was 11 until `lineCount` was declared 2; the count is pinned precisely so
+    that closing one of these is FELT here rather than passing unnoticed.*
     """
     def sizeless(name):
         return {f"{s.name}.{f.name}" for s in registry.get(name).sections
                 for f in s.fields if f.size is None}
     pt, sh = sizeless("CalgaryPreticket"), sizeless("CalgaryStyleHeader")
     assert pt - sh == set(), f"Pre-Ticket adds sizeless fields: {sorted(pt - sh)}"
-    assert len(pt) == 11         # pins the count, so closing the §6 thread is felt here
+    assert len(pt) == 10         # pins the count, so closing the §6 thread is felt here
+    assert "Header.lineCount" not in pt
 
 
 def test_the_two_new_fields_carry_the_ok_pretickets_own_widths(registry):

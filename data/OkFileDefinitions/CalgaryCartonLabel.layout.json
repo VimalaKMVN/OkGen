@@ -207,6 +207,7 @@
         },
         {
           "name": "lineCount",
+          "size": 2,
           "json_path": [
             "header",
             "lineCount"

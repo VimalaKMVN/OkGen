@@ -328,6 +328,81 @@ def test_dist_label_and_carton_label_declare_no_json_rollup(config):
 
 # ------------------------------------------------------- lineCount untouched ---
 
+def test_json_line_count_declares_a_width_of_two(registry):
+    """`lineCount` rendered as `lineCount (?)` on all four Calgary layouts.
+
+    Two is not a guess: the `.OK` `line_count` is a 2-character fixed-width
+    field on both layouts that carry one, and nothing OkGen can produce is
+    longer — the vendor samples hold `' '` or `null`, and a converted
+    Pre-Ticket holds `'05'`. Declared on all FOUR JSON layouts rather than only
+    the Pre-Ticket, because it is the same field wearing the same name, and a
+    width declared on one is the kind of thing that silently diverges.
+
+    The `.OK` side is asserted UNCHANGED in the same test: same name, different
+    engine (D29), and there a size IS the format, so widening one would shift
+    every field after it.
+    """
+    for name in ("CalgaryPreticket", "CalgaryStyleHeader", "CalgaryDistLabel",
+                 "CalgaryCartonLabel"):
+        f = next(x for s in registry.get(name).sections for x in s.fields
+                 if x.name == "lineCount")
+        assert f.size == 2, f"{name}.lineCount is {f.size}, not 2"
+    for name in ("Preticket", "EUPreticket"):
+        f = next(x for s in registry.get(name).sections for x in s.fields
+                 if x.name == "line_count")
+        assert f.size == 2, f"{name}.line_count moved to {f.size}"
+
+
+def test_declaring_line_count_moved_no_VALUE(tmp_path, registry, fixcfg):
+    """The D34/D39 condition every width declaration has to meet: the values
+    stay exactly as they were.
+
+    `lineCount` carries `' '` on the Style Headers and `null` on the Carton and
+    Dist Labels — the absent-vs-blank distinction — so the risk of declaring a
+    width is that a save starts coercing one into the other, or zero-fills them.
+    """
+    checked = 0
+    for src in sorted(FIX.glob("*.json")):
+        p = tmp_path / src.name
+        shutil.copy2(src, p)
+        before = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]
+        if "lineCount" not in before:
+            continue
+        service.apply_edits(p, [], registry, config=fixcfg, backup=False)
+        after = json.loads(p.read_text(encoding="utf-8"))["data"]["header"]
+        assert after["lineCount"] == before["lineCount"], src.name
+        checked += 1
+    assert checked >= 5, "not enough samples exercised"
+    # named explicitly, so the check cannot pass vacuously on files that
+    # happen to carry neither form
+    vals = {json.loads((FIX / n).read_text(encoding="utf-8"))["data"]["header"]["lineCount"]
+            for n in ("styleheader_fmtB.json", "cartonlabel_minified.json")}
+    assert vals == {" ", None}
+
+
+def test_line_count_is_now_writable_and_refuses_an_over_long_value(tmp_path,
+                                                                   registry,
+                                                                   fixcfg):
+    """A field with no declared width is refused by Bulk Edit, omitted from the
+    Volume Generate panel and silently skipped by Generate through the API
+    (v0.97.0 / v0.108.0). Declaring 2 is what makes it editable on every path —
+    and the refusal must NAME the width, not merely fail."""
+    p = tmp_path / "sh.json"
+    shutil.copy2(FIX / "styleheader_fmtB.json", p)
+    service.apply_edits(p, [{"section_index": 0, "record_index": 0,
+                             "field": "lineCount", "value": "12"}],
+                        registry, config=fixcfg, backup=False)
+    assert json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["lineCount"] == "12"
+
+    with pytest.raises(Exception) as exc:
+        service.apply_edits(p, [{"section_index": 0, "record_index": 0,
+                                 "field": "lineCount", "value": "123"}],
+                            registry, config=fixcfg, backup=False)
+    assert "lineCount" in str(exc.value) and "2" in str(exc.value)
+    # the refusal left the previous value alone
+    assert json.loads(p.read_text(encoding="utf-8"))["data"]["header"]["lineCount"] == "12"
+
+
 def test_line_count_is_still_copied_and_is_NOT_a_count(tmp_path, registry, config):
     """The user withdrew this one after seeing the vendor data: all 13 vendor
     Style Headers carry `lineCount` as a single space, and there is no vendor
