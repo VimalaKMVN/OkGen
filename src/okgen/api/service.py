@@ -1420,9 +1420,16 @@ def rollup_state(okf: OkFile, config: Config) -> List[dict]:
         rows = [r for r in okf.records
                 if r.section is sec and not _is_blank_row(r, hidden)]
         current = header.get(fname)
+        # `pad` tells the CLIENT how this engine writes the total, so the
+        # badge cannot re-derive it and drift. It did: the editor always
+        # zero-filled to the declared width, which was right until JSON
+        # roll-ups began writing unpadded (v0.130.0) — after that a correct
+        # JSON total ('20') was compared against '0000020' and the warning
+        # could never clear, on a file the server considered fine.
         entry = {"field": fname, "section": sec_name, "source": src,
                  "rows": len(rows), "current": current, "expected": None,
-                 "matches": True, "authoritative": not rows}
+                 "matches": True, "authoritative": not rows,
+                 "pad": not getattr(layout, "json_mode", False)}
         if rows:
             try:
                 total = _rollup_total(rows, src, sec_name)

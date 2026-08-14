@@ -217,5 +217,80 @@ const plain = api.renderForm(HEADER);
 check("no roll-up config -> no badge",
       !descendants(plain).some((e) => e.dataset && e.dataset.rollup));
 
+// --------------------------------------------------------------------------
+// The JSON engine writes the total UNPADDED — the reported bug
+// --------------------------------------------------------------------------
+// A Calgary total is written without zero-filling (the vendor files carry
+// '20', not '0000020'), while the FIELD still declares a width of 7. This
+// suite only ever exercised the fixed-width .OK side, which is exactly why the
+// bug shipped: the client zero-filled unconditionally, so a CORRECT JSON total
+// was compared against a padded string, never matched, and the red warning
+// could not be cleared — not by fixing the value, not by saving.
+//
+// `pad` comes from the server (service.rollup_state), so the rule lives in one
+// place instead of being re-derived here.
+function mountJson(qtys, totQty) {
+  const header = JSON.parse(JSON.stringify(HEADER));
+  header.fields = header.fields.map((f) =>
+    f.name === "tot_qty" ? Object.assign({}, f, { name: "totalQuantity" }) : f);
+  header.records[0].values = { chain: "03", totalQuantity: totQty };
+  const det = sizeSection(qtys);
+  det.name = "Details";
+  det.fields = det.fields.map((f) =>
+    f.name === "qty" ? Object.assign({}, f, { name: "quantity" }) : f);
+  det.records = det.records.map((r) => ({
+    index: r.index, values: { size: "XL", quantity: String(r.values.qty) } }));
+  api.state.view = { sections: [header, det], rollups: [{
+    field: "totalQuantity", section: "Details", source: "quantity",
+    rows: qtys.length, current: totQty, expected: null,
+    matches: true, authoritative: !qtys.length, pad: false }] };
+  api.state.edits = {};
+  const host = doc.querySelector("#editor");
+  host.innerHTML = "";
+  host.appendChild(api.renderSection(header));
+  host.appendChild(api.renderSection(det));
+  return host;
+}
+const jsonBadge = (host) =>
+  nodesOf(host).filter((e) => e.dataset && e.dataset.rollup === "totalQuantity")[0];
+
+// a CORRECT unpadded total must read as agreeing
+host = mountJson([10, 10], "20");
+api.refreshRollup(false);
+let jb = jsonBadge(host);
+let jlive = api.rollupLive();
+check("JSON: a badge is rendered", !!jb);
+check("JSON: the expected total is UNPADDED", jlive && jlive.expected === "20");
+check("JSON: a correct total MATCHES", jlive && jlive.matches === true);
+check("JSON: ...so the badge is not a warning",
+      jb && !(jb.className || "").includes("rollup-warn"));
+
+// a genuinely wrong one must still warn, naming the unpadded value
+host = mountJson([10, 10], "99");
+api.refreshRollup(false);
+jb = jsonBadge(host);
+jlive = api.rollupLive();
+check("JSON: a wrong total still warns",
+      jb && (jb.className || "").includes("rollup-warn"));
+check("JSON: ...and names the unpadded value it will write",
+      jb && jb.textContent.includes("20") && !jb.textContent.includes("0000020"));
+check("JSON: ...and does not match", jlive && jlive.matches === false);
+
+// fixing it clears the warning — the user's exact report
+host = mountJson([10, 10], "99");
+api.refreshRollup(false);
+let jctl = ctlOf(host, 0, 0, "totalQuantity");
+if (jctl) { jctl.value = "20"; api.refreshRollup(false); }
+jb = jsonBadge(host);
+check("JSON: correcting the value CLEARS the warning",
+      jb && !(jb.className || "").includes("rollup-warn"));
+
+// and the .OK side keeps zero-filling — the two engines must not converge
+host = mount([2, 2], "0000004");
+api.refreshRollup(false);
+const okLive = api.rollupLive();
+check(".OK: still zero-fills to the declared width",
+      okLive && okLive.expected === "0000004" && okLive.matches === true);
+
 console.log(failures ? `\n${failures} check(s) failed` : "\nall checks passed");
 process.exit(failures ? 1 : 0);

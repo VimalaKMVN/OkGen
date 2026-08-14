@@ -30,6 +30,7 @@ from okgen.config import Config
 from okgen.layout.registry import LayoutRegistry
 from okgen.okfile import parse_okfile
 
+FIX_CALGARY = Path(__file__).resolve().parent / "fixtures" / "calgary"
 DATA_DIR = Path(__file__).resolve().parents[1] / "data" / "OkFileDefinitions"
 FIXTURE_CONFIG = Path(__file__).resolve().parent / "fixtures" / "config"
 SAMPLE = DATA_DIR / "StyleHeader.OK"
@@ -546,3 +547,30 @@ def test_generate_scope_and_preview_carry_the_rollup(sh, registry, config):
     row = service.generate_preview([str(sh)], spec, registry, config, sample=1)["sample"][0]
     assert row["values"]["tot_qty"] == "0000008"
     assert row["rollup"]["reason"] == "sum"
+
+def test_rollup_state_says_how_the_engine_PADS(tmp_path, registry, config):
+    """`pad` is the client's instruction, and it exists because the editor used
+    to re-derive the rule and drifted.
+
+    The badge zero-filled to the declared width unconditionally. That was right
+    while roll-ups were fixed-width only; once JSON roll-ups arrived writing
+    unpadded totals, a CORRECT value of '20' was compared against '0000020',
+    never matched, and the red warning could not be cleared — not by fixing the
+    total, not by saving. The server states the rule now, so there is one place
+    it can be wrong.
+    """
+    from okgen.okfile import parse_okfile
+    ok = tmp_path / "StyleHeader.OK"
+    shutil.copy(DATA_DIR / "StyleHeader.OK", ok)
+    st = service.rollup_state(parse_okfile(ok, registry=registry), config)[0]
+    assert st["pad"] is True, ".OK must fill its fixed width"
+    assert st["expected"] == st["expected"].zfill(7)
+
+    js = tmp_path / "sh.json"
+    shutil.copy(FIX_CALGARY / "styleheader_fmtB.json", js)
+    lay = registry.get("CalgaryStyleHeader")
+    st = service.rollup_state(parse_okfile(js, lay), config)[0]
+    assert st["pad"] is False, "a JSON total is written unpadded"
+    assert st["expected"] == "20" and not st["expected"].startswith("0")
+    # ...and the file as it ships already AGREES, so the badge must be quiet
+    assert st["matches"] is True

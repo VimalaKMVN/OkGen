@@ -1899,7 +1899,16 @@ function rollupLive() {
   }
   out.total = total;
   out.overflow = String(total).length > out.size;
-  out.expected = String(total).padStart(out.size, "0");
+  // Formatted the way THIS ENGINE writes it, taken from the server's spec
+  // rather than re-derived here. A fixed-width .OK field must fill its width;
+  // a JSON one is written unpadded, because that is what the vendor files
+  // carry. This used to padStart() unconditionally, so once JSON roll-ups
+  // arrived a correct total of '20' was compared against '0000020' and the red
+  // warning could never clear — on a file the server already considered
+  // correct. The rule lives in one place now (service._rollup_format).
+  out.expected = h.spec.pad === false
+    ? String(total)
+    : String(total).padStart(out.size, "0");
   out.matches = current === out.expected;
   return out;
 }
