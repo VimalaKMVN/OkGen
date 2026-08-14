@@ -84,7 +84,14 @@ function mkEl(tag = "div") {
     // would otherwise hit null — a harness limitation, not an app bug.
     querySelector(sel) { return this.querySelectorAll(sel)[0] || mkEl(); },
     querySelectorAll(sel) { return descendants(this).filter((e) => matches(e, sel)); },
-    contains() { return false; },
+    // REAL containment. This returned `false` unconditionally, so any guard
+    // written as `menu.contains(e.target)` could never take its true branch —
+    // a suite would pass whichever way the app behaved. Gap #11.
+    contains(other) {
+      let n = other;
+      while (n) { if (n === this) return true; n = n.parentNode; }
+      return false;
+    },
     closest(sel) {
       let n = el;
       while (n) { if (matches(n, sel)) return n; n = n.parentNode; }
@@ -207,15 +214,45 @@ function install() {
     // and any test of it would have passed against an app that never
     // registered one. `document.dispatchEvent({type, target})` fires them.
     _handlers: {},
-    addEventListener(ev, fn) { (this._handlers[ev] || (this._handlers[ev] = [])).push(fn); },
-    removeEventListener(ev, fn) {
-      const hs = this._handlers[ev];
-      if (hs) this._handlers[ev] = hs.filter((h) => h !== fn);
+    _capture: {},
+    // The CAPTURE flag is honoured, and propagation is modelled — gap #12.
+    // Both were previously ignored: every document listener went in one bucket
+    // and dispatch fired them all, so an app bug caused by a target calling
+    // stopPropagation() was INVISIBLE here, and a fix that moved a listener to
+    // capture looked identical to one that did not. That is exactly the class
+    // of bug the right-click menu had.
+    addEventListener(ev, fn, capture) {
+      const box = capture ? this._capture : this._handlers;
+      (box[ev] || (box[ev] = [])).push(fn);
     },
+    removeEventListener(ev, fn) {
+      for (const box of [this._handlers, this._capture]) {
+        if (box[ev]) box[ev] = box[ev].filter((h) => h !== fn);
+      }
+    },
+    // document(capture) -> target's own handlers -> document(bubble), with a
+    // target handler's stopPropagation() suppressing the BUBBLE leg only. That
+    // is what makes the two phases distinguishable at all.
+    //
+    // ***Walking the target is OPT-IN, via `_propagate: true` on the dispatched
+    // event.*** Firing it unconditionally is more realistic but changes what
+    // every existing suite measures: a freeform menu row's own handler commits
+    // AND closes, so two v0.125.0 checks that assert "pressing a row does not
+    // close it" would start failing — they were written against a stub where
+    // only the document handler ever ran. Opt-in keeps those suites measuring
+    // exactly what they measured before, while a suite that needs real
+    // propagation can ask for it.
     dispatchEvent(e) {
       const type = e && e.type;
-      (this._handlers[type] || []).forEach((f) =>
-        f(Object.assign({ preventDefault() {}, stopPropagation() {} }, e)));
+      let stopped = false;
+      const ev = Object.assign({ preventDefault() {} }, e,
+                               { stopPropagation() { stopped = true; } });
+      (this._capture[type] || []).forEach((f) => f(ev));
+      const t = e && e.target;
+      if (e && e._propagate && t && t._handlers && t._handlers[type]) {
+        t._handlers[type].forEach((f) => f(ev));
+      }
+      if (!stopped) (this._handlers[type] || []).forEach((f) => f(ev));
       return true;
     },
     body: mkEl(), documentElement: mkEl(),

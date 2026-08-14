@@ -2626,9 +2626,7 @@ function showCtxMenu(e, node, row) {
   add("Rename…", () => renameFile(node), count > 1);
   add(count > 1 ? `Delete ${count} files` : "Delete",
       () => (count > 1 ? deleteSelection() : deleteFile(node)));
-  menu.style.left = e.clientX + "px";
-  menu.style.top = e.clientY + "px";
-  menu.classList.remove("hidden");
+  placeCtxMenu(e.clientX, e.clientY);
 }
 
 function copySelection() {
@@ -2636,6 +2634,52 @@ function copySelection() {
   setStatus(`Copied ${state.clipboard.length} file(s)`, "ok");
 }
 function hideCtxMenu() { $("#ctxMenu").classList.add("hidden"); }
+
+// Place the shared #ctxMenu so EVERY option is reachable, wherever it opens.
+//
+// All three menus (file right-click, folder right-click, Bulk Actions) share
+// one element, and each used to set `left`/`top` straight from the click with
+// no clamping — so a menu opening near the bottom simply ran off screen. It is
+// `position: fixed`, which is why scrolling never helped: it is clipped by the
+// VIEWPORT, not by the page. Measured: the file menu is ~446px tall (15 items),
+// so on an 800px window every right-click below y=354 was clipped — the bottom
+// 44% of the tree.
+//
+// Three cases, in order of preference:
+//   1. it fits below the cursor      -> leave it there
+//   2. it does not, but fits above   -> FLIP up
+//   3. it fits in neither direction  -> pin to the top margin and cap the
+//      height, so the list scrolls INSIDE the menu. Flipping alone cannot
+//      honour "all options visible": at 446px the menu is taller than a short
+//      window, and then no position fits.
+//
+// Height is read with getBoundingClientRect(), NOT offsetHeight: the DOM stub
+// implements the former (settable per element) and has no offsetHeight at all,
+// so a fix written against it could not be tested and would read `undefined`.
+function placeCtxMenu(x, y) {
+  const menu = $("#ctxMenu");
+  const M = 8;                                  // keep off the very edge
+  menu.style.maxHeight = "";                    // reset before measuring
+  menu.classList.remove("hidden");              // must be visible to measure
+  const rect = menu.getBoundingClientRect ? menu.getBoundingClientRect() : null;
+  const vh = (typeof window !== "undefined" && window.innerHeight) || 0;
+  const vw = (typeof window !== "undefined" && window.innerWidth) || 0;
+  const h = (rect && rect.height) || 0;
+  const w = (rect && rect.width) || 0;
+
+  let top = y;
+  if (vh && h) {
+    if (y + h + M > vh) {
+      if (y - h - M >= 0) top = y - h;           // flip above the cursor
+      else { top = M; menu.style.maxHeight = (vh - 2 * M) + "px"; }
+    }
+  }
+  let left = x;
+  if (vw && w && x + w + M > vw) left = Math.max(M, x - w);
+
+  menu.style.left = Math.max(0, left) + "px";
+  menu.style.top = Math.max(0, top) + "px";
+}
 function folderOf(p) { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return p.slice(0, i); }
 function baseName(p) { const i = Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")); return p.slice(i + 1); }
 
@@ -2663,9 +2707,7 @@ function showFolderCtxMenu(e, node) {
   menu.appendChild(el("div", "ctx-sep"));
   add("Make keys unique", () => makeUniqueFolder(node.path));
   add("Refresh", () => refreshFolder(node.path));
-  menu.style.left = e.clientX + "px";
-  menu.style.top = e.clientY + "px";
-  menu.classList.remove("hidden");
+  placeCtxMenu(e.clientX, e.clientY);
 }
 
 function beginBusy(message, overlay = true) {
@@ -3912,7 +3954,36 @@ async function renameFile(node) {
 }
 
 // ---- wire up ----
-document.addEventListener("click", hideCtxMenu);
+// Dismissing the context menu — on CAPTURE, deliberately.
+//
+// This used to listen on the BUBBLE phase, so any handler calling
+// stopPropagation() suppressed it and the menu stayed open. Four did, and the
+// worst is the FOLDER row (a nested folder must not toggle its parent), which
+// is most of the tree — while FILE rows do not stop propagation, so clicking a
+// file closed the menu and clicking a folder did not. That is why it looked
+// intermittent rather than broken.
+//
+// Capture runs before the target's own handler, so stopPropagation cannot
+// suppress it — and a future handler that adds stopPropagation cannot silently
+// bring this back.
+//
+// ***`click`, NOT `mousedown`*** — this is v0.125.0's lesson inverted. Hiding
+// on mousedown would leave the menu `display: none` before mouseup, so the
+// click might never reach the item and EVERY menu choice would be swallowed;
+// that is exactly why the freeform dropdown deliberately uses bubble. A click
+// event's propagation path is fixed when it is dispatched, so the item's own
+// handler still runs even though this hides the menu first. The guard below
+// makes that explicit rather than resting on the subtlety.
+document.addEventListener("click", (e) => {
+  const t = e && e.target;
+  if (t && t.closest && t.closest(".ctx-menu")) return;   // let the item act
+  hideCtxMenu();
+}, true);
+// Escape closes it too. The freeform menu and the modals both honour Escape;
+// the context menu never did, so a keyboard user had no way to dismiss it.
+document.addEventListener("keydown", (e) => {
+  if (e && e.key === "Escape") hideCtxMenu();
+});
 // Tab switching is a pure view toggle — it must NOT trigger the unsaved guard.
 $("#tabRendered").addEventListener("click", () => switchTab("rendered"));
 $("#tabRaw").addEventListener("click", () => switchTab("raw"));
@@ -3958,9 +4029,7 @@ function showBulkMenu() {
   // always been offered — it was missing here only by omission.
   add(n === 1 ? "▶  Run TOSCA Script" : `▶  Run TOSCA Script (${n})`, () => runTosca());
   const r = $("#bulkBtn").getBoundingClientRect();
-  menu.style.left = Math.max(8, r.right - 220) + "px";
-  menu.style.top = (r.bottom + 4) + "px";
-  menu.classList.remove("hidden");
+  placeCtxMenu(Math.max(8, r.right - 220), r.bottom + 4);
 }
 $("#folderPath").addEventListener("keydown", (e) => { if (e.key === "Enter") openFolder(e.target.value.trim()); });
 // Show the full folder path on hover (the box is usually too narrow to see it).
