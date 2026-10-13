@@ -332,6 +332,25 @@ def create_app(data_dir=None, config_dir=None) -> Flask:
         except service.EditError as exc:
             return _err(str(exc), 422)
 
+    @app.post("/api/tosca/launch")
+    def tosca_launch():
+        # Manual Orders: /run writes the workbook and stops for the review;
+        # this starts the .bat when the user clicks Run TOSCA.
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.launch_tosca_script(
+                body.get("script", ""), config, body.get("log")))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
+    @app.post("/api/tosca/open-workbook")
+    def tosca_open_workbook():
+        body = request.get_json(force=True, silent=True) or {}
+        try:
+            return jsonify(service.open_tosca_workbook(body.get("script", ""), config))
+        except service.EditError as exc:
+            return _err(str(exc), 422)
+
     @app.get("/api/tosca/reports")
     def tosca_reports():
         """Scripts that declare a results folder, for the Reports picker."""

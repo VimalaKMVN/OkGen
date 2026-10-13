@@ -227,12 +227,18 @@ if (closeBtn) {
 // ---- the corner treatment is scoped to THIS window -----------------------
 // Count the class being APPLIED (a className string), not merely mentioned —
 // the code comment above the call names it too.
+// Twice since Manual Orders: its "started" window opens the moment the .bat's
+// console does, so it needs the corner for the same reason. Both uses are
+// pinned to their functions, so a third (a window that should be centred)
+// still fails here.
 const cornerUses = (src.match(/"modal-overlay modal-corner"/g) || []).length;
-check("app.js applies modal-corner exactly once", cornerUses === 1);
+check("app.js applies modal-corner exactly twice", cornerUses === 2);
 check("every other modal overlay stays centred",
       (src.match(/el\("div",\s*"modal-overlay"\)/g) || []).length >= 1);
-check("that one use is in showToscaResult",
+check("one use is in showToscaResult",
       /function showToscaResult[\s\S]{0,400}?modal-corner/.test(src));
+check("the other is in showToscaManualStarted",
+      /function showToscaManualStarted[\s\S]{0,200}?modal-corner/.test(src));
 
 // ---- the stylesheet actually positions it -------------------------------
 check("styles.css defines the corner variant", /\.modal-overlay\.modal-corner\s*\{/.test(css));

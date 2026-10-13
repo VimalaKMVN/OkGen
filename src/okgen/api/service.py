@@ -2184,6 +2184,26 @@ def run_tosca_script(paths, script, registry, config: Config) -> dict:
         raise EditError(str(exc))
 
 
+def launch_tosca_script(script, config: Config, log=None) -> dict:
+    """Start a reviewed Manual Orders run's .bat (the second half of the run)."""
+    from okgen import tosca, tosca_manual
+    try:
+        return tosca_manual.launch(script, config, log)
+    except tosca.ToscaError as exc:
+        raise EditError(str(exc))
+
+
+def open_tosca_workbook(script, config: Config) -> dict:
+    """Open a script's input workbook in Excel, for the review."""
+    from okgen import tosca, tosca_manual
+    try:
+        return tosca_manual.open_workbook(script, config)
+    except tosca.ToscaError as exc:
+        raise EditError(str(exc))
+    except OSError as exc:
+        raise EditError(f"could not open the workbook: {exc}")
+
+
 def _send_mode(paths) -> str:
     """Which NiceLabel hand-off a selection wants: 'copy' (.OK) or 'post' (JSON).
 

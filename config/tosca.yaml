@@ -147,6 +147,23 @@ scripts:
       - D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\REG_THERMAL_OK_Files
     results: D:\ToscaAutomation\Regression_Testing_Automation\REG_THERMAL_SH_PT_CL_DL_Comparison\Thermal_TestResults
 
+  # ---------------------------------------------------- Manual Orders ----
+  # A DIFFERENT KIND of script (`kind: manual_orders`): one header record per
+  # selected Style Header / Pre-Ticket file, each with its own
+  # ManualOrder_Detail_N tab — see the `manual_orders:` block at the end of
+  # this file for the column mapping. Takes .OK AND JSON, any chain.
+  #   input_folder  ONE flat folder (not a {chain}\{process}\{format} tree):
+  #                 created if missing, EVERY file in it deleted, then the
+  #                 selected files copied in — on every run.
+  # The .bat is NOT started straight away: the workbook is written, the user
+  # can review it, and the run window's "Run TOSCA" button starts it.
+  - name: "Manual Orders WorkPending"
+    kind: manual_orders
+    applies_to: [ok, json]
+    workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_WorkPending\FUN_EU_SH_PT_ManualOrders_WP_TestData.xlsm
+    bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_WorkPending\MO_WP_Automation_RunScript.bat
+    input_folder: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_WorkPending\Manual_WorkPending_OkGen_Selected_Input_Files
+
 # A TOSCA run stopped part-way leaves the input workbook OPEN in Excel, and that
 # lock outlives the run — so the next attempt fails with "locked". With this on,
 # OkGen asks Excel to close THAT ONE workbook and tries again.
@@ -332,3 +349,116 @@ format_columns:
   "Winners":    { "Style Header": F, "Pre-Ticket": F, "Carton Label": M, "Distribution Label": L }
   "HomeSense":  { "Style Header": F, "Pre-Ticket": F, "Carton Label": M, "Distribution Label": L }
   "TJX Europe": { "Style Header": G, "Pre-Ticket": H, "Carton Label": N }
+
+# ===========================================================================
+#  MANUAL ORDERS — the column mapping for scripts with `kind: manual_orders`
+# ===========================================================================
+# Columns are named by their HEADER TEXT in row 1, never by letter: TOSCA reads
+# these sheets by column name, so a column that moves still lines up. A name
+# listed here that the sheet does not have stops the run with a clear message.
+#
+# Every detail tab is REBUILT from `template_sheet`, so all of them carry its
+# column names in its order (the shipped sample's tabs disagreed — some say
+# `French Desc`, some `FrenchDesc`, in a different order — Detail_1 is the
+# user's choice of which is right).
+#
+# Where a value comes from — first match wins, in this order:
+#   1. the detail LINE   (for the header tab: the file's FIRST detail line)
+#   2. the file's HEADER
+#   3. the workbook's own SAMPLE value (same row if it has one, else row 2)
+# A column NOT listed below always keeps its sample value.
+#
+# A column's source is one of:
+#   "=text"            this exact text, always
+#   "@chain" / "@process" / "@format" / "@key"
+#                      resolved the same way as the other TOSCA scripts (chain
+#                      and process names, the Key-sheet format string) and as
+#                      Make Unique (the key — keys.yaml; a Calgary JSON Style
+#                      Header is keytrol for SCAN, headerASNid for WMS)
+#   [names]            field names, across BOTH engines — a file simply lacks
+#                      the ones that are not its own
+#   {from: [names], as: price|yn|number|mmdd}
+#                      price  000799999 -> 7999.99   (cents -> dollars)
+#                      yn     true/false -> Y/N
+#                      number 00002 -> 2              (leading zeros dropped)
+#                      mmdd   20260301 -> 0301        (a JSON ladderPlan date)
+manual_orders:
+  header_sheet: "ManualOrder_Header"
+  detail_sheet: "ManualOrder_Detail_{n}"      # {n} = the record number, 1..N
+  template_sheet: "ManualOrder_Detail_1"
+  first_data_row: 2
+  processes: ["Style Header", "Pre-Ticket"]   # Carton/Dist Labels are skipped
+
+  # The sections holding a file's detail LINES, per layout. The first one with
+  # rows gives one line per row; a later one contributes its FIRST row beneath
+  # (a Calgary Style Header has N sizes and one details row of prices).
+  lines:
+    StyleHeader: [Size]
+    Preticket: [Lane]
+    EUStyleHeader: [Detail]
+    EUPreticket: [Lane]
+    CalgaryStyleHeader: [Sizes, Details]
+    CalgaryPreticket: [Details]
+
+  # Header fields that must NEVER be used as a fallback. A Calgary header's
+  # `type` is the document discriminator, not the ticket type (same name,
+  # different field).
+  never_from_header:
+    CalgaryStyleHeader: [type, timestamp]
+    CalgaryPreticket: [type, timestamp]
+
+  # EU Style Header zone, per detail line, from the CBC = first 3 digits of the
+  # line's store (config/cbc_zones.yaml).
+  cbc_zone:
+    layouts: [EUStyleHeader]
+    field: store
+    digits: 3
+
+  header_columns:
+    HeaderChain: "@chain"
+    HeaderProcess: "@process"
+    HeaderFormat: "@format"
+    Status: "=Work Pending"
+    Source: "=Manual"
+    HeaderPastSeason: [psi, past_yn, pastSeasonIndicator]
+    KeyValue: "@key"
+    OTT: [orig_ticket_type]
+    HeaderASNID: [header_asn_id, headerASNid]
+    Zone: [zone]                 # EU Pre-Ticket header zone / EU SH line CBC zone
+
+  detail_columns:
+    Department: [dept, department]
+    Category: [category]
+    Style: [style]
+    Type: [type]
+    Message1: [message1, message_code_1, messageCode1]
+    Message2: [message2, message_code_2, messageCode2]
+    Size: [size, size_code]
+    LadderMM: [ladder]           # holding period in months (.OK only)
+    LadderMMDD: {from: [ladder_mmdd, ladderPlan], as: mmdd}
+    ComparePrice: {from: [comp_price, zone_compare_at, compareAtPrice], as: price}
+    CompareUp: {from: [comp_up, compareAtUp], as: yn}
+    RetailPrice: {from: [ret_price, zone_retail, retailPrice, base_orig_retail], as: price}
+    Quantity: {from: [qty, quantity], as: number}
+    VendorStyle: [vendor_style, ven_style, vendorStyle]
+    Item: [item]
+    Fiber: [fiber]               # in no layout yet — ready for when one has it
+    ApproxSize: [approx_size]    # ditto
+    Fact1: [fact1]
+    Fact2: [fact2]
+    Fact3: [fact3]
+    Country: [country]           # ditto
+    Page: {from: [page, pageNumber], as: number}
+    Line: {from: [line, lineNumber], as: number}
+    HouseNumber: [housenum, houseNumber]
+    FrenchDesc: [frdesc, frenchDescription]
+    FrenchNoun: [frnoun, frenchNoun]
+    EnglishDesc: [desc, description]
+    EnglishNoun: [engnoun, englishNoun]
+    MsgCode1: [message_code_1]
+    UPPWeight: [upp_weight_uom]  # the unit (M / G)
+    TotalWeight: [upp_weight]    # user: UPP weight IS the total weight
+    Zone: [zone]
+    # Not listed, so always the sample value: the French/English Fact, Item,
+    # Fiber and Country columns (no layout carries them yet), and UPPPrice
+    # (computed by the label application from TotalWeight and RetailPrice).

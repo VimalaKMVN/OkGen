@@ -1,0 +1,25 @@
+# CBC code -> Zone, for Europe Style Header (.OK) detail lines.
+#
+# The CBC code is the FIRST 3 DIGITS of the detail line's `store` field — the
+# value right after the `|#|` detail marker:
+#
+#     |#|3110601|NS |2    |...      store 3110601 -> CBC 311 -> zone 01
+#
+# So zone is per DETAIL LINE: one file can hold several CBCs and so several
+# zones. Source: the user's CBC/Zone reference table (2026-10-13). First used
+# by the "Manual Orders WorkPending" TOSCA script.
+#
+# Keys and zones are QUOTED strings: zones are 2-char zero-padded ("01"), and an
+# unquoted 01 would be read as the number 1. A CBC not listed here resolves to
+# no zone. Edit freely — add CBCs, move zones. Restart OkGen after editing.
+cbc_zones:
+  "311": "01"
+  "312": "05"
+  "313": "03"
+  "331": "02"
+  "332": "02"
+  "343": "07"
+  "371": "06"
+  "411": "04"
+  "421": "04"
+  "431": "08"

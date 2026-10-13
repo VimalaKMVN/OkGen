@@ -155,8 +155,11 @@ class Config:
         layout_sources: Optional[Dict[str, str]] = None,
         # {layout: [spec, ...]} header fields summed from a detail section.
         rollups: Optional[Dict[str, list]] = None,
+        # {CBC code: zone} for EU Style Header detail lines (cbc_zones.yaml).
+        cbc_zones: Optional[Dict[str, str]] = None,
     ):
         self._rollups = rollups or {}
+        self._cbc_zones = cbc_zones or {}
         # .OK -> Calgary JSON conversion mapping (ok_to_json.yaml). `config_dir`
         # is kept because the mapping names a TEMPLATE file relative to it.
         self._pad_zero_fields = pad_zero_fields or {}
@@ -458,6 +461,12 @@ class Config:
     def regions(self) -> Dict[str, str]:
         """The full {zone: region} map (copy)."""
         return dict(self._regions)
+
+    def cbc_zone(self, cbc: Optional[str]) -> Optional[str]:
+        """Zone for a 3-digit CBC code (cbc_zones.yaml), or None if unlisted."""
+        if cbc in (None, ""):
+            return None
+        return self._cbc_zones.get(str(cbc).strip())
 
     # ----- editor field display (hide / read-only) -----
     def hidden_fields(self, layout: Optional[str]) -> set:
@@ -905,6 +914,15 @@ class Config:
                 for z in (zones or []):
                     regions[str(z).strip()] = str(region)
 
+        # Keys and zones kept as STRINGS: an unquoted 01 in the YAML would load
+        # as the number 1, and "1" is not the zone "01".
+        cbc_zones: Dict[str, str] = {}
+        cbc_path = cdir / "cbc_zones.yaml"
+        if cbc_path.is_file():
+            data = yaml.safe_load(cbc_path.read_text(encoding="utf-8")) or {}
+            for cbc, zone in (data.get("cbc_zones") or {}).items():
+                cbc_zones[str(cbc).strip()] = str(zone).strip()
+
         layout_codes: Dict[str, str] = {}
         lc_path = cdir / "layout_codes.yaml"
         if lc_path.is_file():
@@ -1074,4 +1092,5 @@ class Config:
                    blank_allowed_fields=blank_allowed_fields,
                    enforce_options_fields=enforce_options_fields,
                    layout_sources=layout_sources,
-                   rollups=rollups)
+                   rollups=rollups,
+                   cbc_zones=cbc_zones)

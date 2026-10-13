@@ -3176,6 +3176,7 @@ function pickReportFolder(folders) {
 // so the two cannot describe different work).
 function renderToscaPlan(box, pv) {
   box.textContent = "";
+  if (pv && pv.kind === "manual_orders") { renderManualPlan(box, pv); return; }
   if (!pv || !pv.enabled) {
     box.appendChild(el("div", "tosca-plan-note",
       "Input file staging is off — the sheet will be updated but no files copied "
@@ -3246,6 +3247,49 @@ function renderToscaPlan(box, pv) {
       box.appendChild(w);
     });
   }
+}
+
+// Manual Orders WorkPending: one header record and one detail TAB per file,
+// into one flat input folder — so the plan is a list of records, not of
+// Chain/Process/Format folders. Counts only, as above; names are in View report.
+function renderManualPlan(box, pv) {
+  const recs = pv.records || [];
+  const tgt = (pv.targets || [])[0] || {};
+  box.appendChild(el("div", "tosca-plan-head",
+    `${recs.length} header record(s) and ${recs.length} detail tab(s) will be written`
+    + ` to the workbook. ${pv.copy_total || 0} file(s) will be copied into the input folder`
+    + (pv.remove_total
+        ? `, replacing ${pv.remove_total} existing file(s) that will be DELETED.`
+        : (tgt.status === "create" ? " (it will be created)." : "."))));
+  if (recs.length) {
+    const tbl = el("table", "tosca-mini");
+    const thead = el("thead"), hr = el("tr");
+    ["#", "Chain", "Process", "Format", "Lines"].forEach((h, i) =>
+      hr.appendChild(el("th", i === 0 || i === 4 ? "num" : "", h)));
+    thead.appendChild(hr); tbl.appendChild(thead);
+    const tb = el("tbody");
+    recs.forEach((r) => {
+      const tr = el("tr");
+      tr.appendChild(el("td", "num", String(r.n)));
+      tr.appendChild(el("td", "", r.chain || ""));
+      tr.appendChild(el("td", "", r.process || ""));
+      tr.appendChild(el("td", "", r.format || ""));
+      tr.appendChild(el("td", "num", String(r.lines)));
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+    box.appendChild(tbl);
+  }
+  const bits = [];
+  if ((pv.skipped || []).length) bits.push(`${pv.skipped.length} file(s) not applicable to this script`);
+  if ((pv.errors || []).length) bits.push(`${pv.errors.length} file(s) cannot be used`);
+  if (bits.length) {
+    box.appendChild(el("div", "tosca-plan-note warn",
+      bits.join(", ") + " — see View report for the names and reasons."));
+  }
+  box.appendChild(el("div", "tosca-plan-note",
+    "TOSCA is NOT started yet: once the workbook is written you can review it, "
+    + "then start the run."));
 }
 
 function pickTosca(scripts, paths, warning) {
@@ -3557,6 +3601,153 @@ function showToscaResult(res) {
   ov.addEventListener("click", (e) => { if (e.target === ov) close(); });
 }
 
+// Manual Orders WorkPending — the REVIEW window. The workbook has been written
+// and the input folder refilled, but TOSCA has not been started: that is this
+// window's Run TOSCA. It deliberately stays open while the workbook is open in
+// Excel ("Open workbook" does not close it), so a review never means starting
+// over, and it does not close on a click outside — losing it by accident would
+// leave a prepared run with no button to start it.
+function showToscaReview(res) {
+  const ov = el("div", "modal-overlay");
+  const card = el("div", "modal-card modal-wide");
+  card.appendChild(el("h3", "modal-title", "Input test data updated"));
+  const body = el("div", "modal-body");
+  card.appendChild(body);
+  const recs = res.records || [];
+  const st = res.staging || {};
+  body.appendChild(el("div", "modal-dest",
+    `${res.written} header record(s), ${recs.length} detail tab(s) — ${res.script}`));
+
+  const stats = el("div", "tosca-stats");
+  const stat = (n, label, tone) => {
+    const box = el("div", "tosca-stat");
+    box.appendChild(el("div", "tosca-stat-n" + (tone ? " " + tone : ""), String(n)));
+    box.appendChild(el("div", "tosca-stat-l", label));
+    stats.appendChild(box);
+  };
+  stat(res.written, "Header records");
+  stat(res.lines || 0, "Detail lines");
+  stat(st.copied || 0, "Files staged", (st.copied || 0) > 0 ? "good" : "");
+  stat(st.removed || 0, "Files removed");
+  body.appendChild(stats);
+
+  if (recs.length) {
+    const tbl = el("table", "tosca-table");
+    const thead = el("thead"), hr = el("tr");
+    ["Tab", "Chain", "Process", "Key", "Lines"].forEach((h, i) =>
+      hr.appendChild(el("th", i === 4 ? "num" : "", h)));
+    thead.appendChild(hr); tbl.appendChild(thead);
+    const tb = el("tbody");
+    recs.forEach((r) => {
+      const tr = el("tr", (r.warnings || []).length ? "excluded" : "");
+      tr.appendChild(el("td", "", `Detail_${r.n}`));
+      tr.appendChild(el("td", "", r.chain || ""));
+      tr.appendChild(el("td", "", r.process || ""));
+      tr.appendChild(el("td", "", r.key || "(sample)"));
+      tr.appendChild(el("td", "num", String(r.lines)));
+      tb.appendChild(tr);
+    });
+    tbl.appendChild(tb);
+    body.appendChild(tbl);
+  }
+
+  const notes = recs.reduce((n, r) => n + (r.warnings || []).length, 0);
+  const bits = [];
+  if (notes) bits.push(`${notes} note(s) on the data (e.g. a CBC code with no zone)`);
+  if ((res.skipped || []).length) bits.push(`${res.skipped.length} file(s) not applicable to this script`);
+  if ((res.errors || []).length) bits.push(`${res.errors.length} file(s) could not be used`);
+  if (bits.length) {
+    const w = el("div", "modal-warn");
+    w.appendChild(el("span", "modal-warn-icon", "⚠"));
+    w.appendChild(el("span", "modal-warn-text",
+      bits.join(", ") + ". Open the report for the details."));
+    body.appendChild(w);
+  }
+
+  body.appendChild(el("div", "tosca-launch ok",
+    "Review the workbook in Excel first if you want to check the data, or click "
+    + "Run TOSCA to start the run now. If you edit the workbook, save it before "
+    + "clicking Run TOSCA."));
+  const msg = el("div", "tosca-launch warn hidden");
+  body.appendChild(msg);
+  const say = (text) => { msg.textContent = text; msg.className = "tosca-launch warn"; };
+
+  const acts = el("div", "modal-actions");
+  const view = el("button", "btn", "View report");
+  const open = el("button", "btn", "Open workbook");
+  const later = el("button", "btn", "Close without running");
+  const go = el("button", "btn btn-primary", "Run TOSCA");
+  acts.appendChild(view); acts.appendChild(open); acts.appendChild(later); acts.appendChild(go);
+  card.appendChild(acts);
+  ov.appendChild(card); document.body.appendChild(ov);
+
+  view.addEventListener("click", () => showToscaReport(res));
+  open.addEventListener("click", async () => {
+    open.disabled = true;
+    try {
+      await postJSON("/api/tosca/open-workbook", { script: res.script });
+      setStatus("Opened the input workbook in Excel — review it, save any edits, "
+                + "then click Run TOSCA", "ok");
+    } catch (e) {
+      say("Could not open the workbook: " + e.message);
+    } finally { open.disabled = false; }
+  });
+  later.addEventListener("click", () => {
+    ov.remove();
+    // Nothing is half-done: the workbook and folder are ready, just not run.
+    // Say how to finish it, since this window was the only Run button.
+    setStatus(`TOSCA '${res.script}' not started. The workbook and input files are `
+              + "ready — run the script's .bat yourself, or Run TOSCA again from the "
+              + "file selection (which rewrites the workbook, so unsaved review "
+              + "edits would be lost).", "dirty");
+  });
+  go.addEventListener("click", async () => {
+    if (go.disabled) return;
+    [go, open, later].forEach((b) => { b.disabled = true; });
+    go.textContent = "Starting…";
+    let out = null, err = null;
+    try { out = await postJSON("/api/tosca/launch", { script: res.script, log: res.log }); }
+    catch (e) { err = e; }
+    if (err) {
+      // e.g. unsaved edits in Excel: the window STAYS, so fixing it and
+      // clicking again is all it takes.
+      say(err.message);
+      go.textContent = "Run TOSCA";
+      [go, open, later].forEach((b) => { b.disabled = false; });
+      return;
+    }
+    ov.remove();
+    const done = Object.assign({}, res, {
+      launched: true, bat: out.bat,
+      report: (res.report || "") + (out.appended || ""),
+    });
+    setStatus(`TOSCA '${res.script}' started — ${res.written} record(s)`, "ok");
+    showToscaManualStarted(done);
+  });
+  go.focus();
+}
+
+// After Run TOSCA: the .bat's own console now covers the browser, so this one
+// sits in the corner, as the other scripts' run window does.
+function showToscaManualStarted(res) {
+  const ov = el("div", "modal-overlay modal-corner");
+  const card = el("div", "modal-card modal-wide");
+  card.appendChild(el("h3", "modal-title", `TOSCA '${res.script}' — started`));
+  const body = el("div", "modal-body");
+  card.appendChild(body);
+  body.appendChild(el("div", "tosca-launch ok",
+    `▶ TOSCA started with ${res.written} header record(s) and `
+    + `${(res.records || []).length} detail tab(s).`));
+  const acts = el("div", "modal-actions");
+  const view = el("button", "btn", "View report");
+  view.addEventListener("click", () => showToscaReport(res));
+  const ok = el("button", "btn btn-primary", "Close");
+  acts.appendChild(view); acts.appendChild(ok); card.appendChild(acts);
+  ov.appendChild(card); document.body.appendChild(ov);
+  ok.addEventListener("click", () => ov.remove());
+  ov.addEventListener("click", (e) => { if (e.target === ov) ov.remove(); });
+}
+
 async function runTosca() {
   const paths = [...state.selection];
   if (!paths.length) return;
@@ -3573,6 +3764,17 @@ async function runTosca() {
   if (!beginBusy("Running TOSCA…")) { setStatus("Please wait — an operation is already running…", "dirty"); return; }
   try {
     const res = await postJSON("/api/tosca/run", { paths, script });
+    if (res.kind === "manual_orders") {
+      // Written, NOT started — the review window holds the Run button.
+      const er = (res.errors || []).length, sk = (res.skipped || []).length;
+      setStatus(`TOSCA '${script}': wrote ${res.written} record(s)`
+                + (er ? `, ${er} error(s)` : "") + (sk ? `, skipped ${sk} file(s)` : "")
+                + (res.written ? " — review, then Run TOSCA" : " — nothing to run"),
+                res.written ? "ok" : "err");
+      if (res.written) showToscaReview(res);
+      else showToscaReport(res);
+      return;
+    }
     const er = (res.errors || []).length;
     const sk = (res.skipped || []).length;
     const launch = res.launched ? " — TOSCA started" : (res.launch_error ? " — not started" : "");

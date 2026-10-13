@@ -1047,6 +1047,9 @@ def preview(paths, script_name, registry, config) -> dict:
     answer a question about one would be both slow and mostly wrong (most of
     those roots are not present on a given machine).
     """
+    from okgen import tosca_manual
+    if tosca_manual.is_manual(config.tosca_script(script_name)):
+        return tosca_manual.preview(paths, script_name, registry, config)
     prep = _prepare(paths, script_name, registry, config)
     plan = plan_staging(prep["rows"], prep["script"], config, prep["engines"])
     pv = {
@@ -1354,7 +1357,11 @@ def log_plan(pv: dict, config, file_count: int = 0) -> dict:
     """Build the plan report and write it beside OkGen. Returns
     ``{"report", "log"}`` — ``log`` is None when it could not be written, which
     never fails anything: the text still reaches the window."""
-    report = build_plan_report(pv, file_count)
+    if pv.get("kind") == "manual_orders":
+        from okgen import tosca_manual
+        report = tosca_manual.build_plan_report(pv, file_count)
+    else:
+        report = build_plan_report(pv, file_count)
     stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     return {"report": report, "log": _write_log(config, report, stamp, kind="plan")}
 
@@ -1365,7 +1372,14 @@ def run(paths, script_name, registry, config, launch=True, stage=True) -> dict:
     written — in that order (see the staging section above).
 
     ``launch=False`` skips the .bat and ``stage=False`` skips the file copy;
-    both are for tests that don't want to spawn a process or touch a tree."""
+    both are for tests that don't want to spawn a process or touch a tree.
+
+    A ``kind: manual_orders`` script takes its own path, which writes the
+    workbook and STOPS — its .bat is started by ``tosca_manual.launch`` once
+    the user has reviewed the workbook."""
+    from okgen import tosca_manual
+    if tosca_manual.is_manual(config.tosca_script(script_name)):
+        return tosca_manual.run(paths, script_name, registry, config, stage=stage)
     started_at = datetime.datetime.now()
     began = time.time()
     prep = _prepare(paths, script_name, registry, config)
