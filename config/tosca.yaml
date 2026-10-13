@@ -407,6 +407,16 @@ manual_orders:
     CalgaryStyleHeader: [type, timestamp]
     CalgaryPreticket: [type, timestamp]
 
+  # KeyValue, where it is NOT just the Make Unique key (keys.yaml): the fields
+  # to JOIN, per layout and source. A SCAN Style Header's key is keytrol +
+  # header suffix (user, 2026-10-13) — 140038 + A -> 140038A. NA .OK layouts
+  # are SCAN by layout (json_sources.yaml); a JSON file says so itself. Not
+  # listed = the keys.yaml field, unchanged (WMS Style Header -> headerASNid,
+  # EU Style Header -> keytrol, Pre-Tickets -> PO#).
+  key_value:
+    StyleHeader: {SCAN: [keytrol, suffix]}
+    CalgaryStyleHeader: {SCAN: [keytrol, headerSuffix]}
+
   # EU Style Header zone, per detail line, from the CBC = first 3 digits of the
   # line's store (config/cbc_zones.yaml).
   cbc_zone:

@@ -298,12 +298,24 @@ def build_records(paths, registry, config, script, key_ws) -> dict:
         # The KEY is the same field Make Unique uses — keys.yaml — and for a
         # Calgary JSON file it depends on SCAN vs WMS, read from the FILE (D62:
         # asking without a source silently answers with the default).
+        # An .OK layout's source is a property of the layout (NA = SCAN,
+        # EU = WMS); a Calgary JSON file says so in its own header.
         source = None
         if config.has_source(layout_name):
             source = source_from_header(raw_json_header, config.json_sources,
                                         config.json_source_default).source
+        else:
+            source = config.layout_source(layout_name)
         key_field = config.unique_field(layout_name, source)
         key = _clean(header.get(key_field)) if key_field else None
+        # The sheet's KeyValue can differ from the Make Unique field: a SCAN
+        # Style Header is keytrol + suffix (the user's rule). `key_value:`
+        # lists the fields to join, per layout and source; blanks are skipped.
+        joined = ((st.get("key_value") or {}).get(layout_name) or {}).get(source)
+        if joined:
+            parts = [_clean(header.get(f)) for f in joined]
+            key = "".join(p for p in parts if p) or None
+            key_field = "+".join(joined)
 
         warnings: List[str] = []
         lines = _lines(layout_name, header, secs, st)

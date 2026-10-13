@@ -156,7 +156,7 @@ def test_header_tab_values(env, registry):
     assert rows[0][fmt] == "A - Regular Tag"
     assert rows[2][fmt] == "Q - Small Merch UPP Ticket"
     # The key is the Make Unique field, per layout AND per source.
-    assert rows[0][key] == "550000"                         # .OK SH -> keytrol
+    assert rows[0][key] == "550000P1A"                      # NA .OK SH is SCAN -> keytrol+suffix
     assert rows[1][key] == "33001P3A"                       # .OK PT -> po
     assert rows[2][key] == "126539Q"                        # EU SH -> keytrol
     assert rows[3][key] == "10021888"                       # EU PT -> po
@@ -170,11 +170,32 @@ def test_header_tab_values(env, registry):
     assert rows[0][past] == "Y"                             # NA SH psi
 
 
-def test_json_scan_style_header_is_keyed_on_keytrol(env, registry, tmp_path):
+def test_scan_style_header_key_is_keytrol_plus_suffix(env, registry, tmp_path):
+    """The user's rule: a SCAN Style Header's KeyValue is keytrol + header
+    suffix — for JSON (SCAN read from the file) and NA .OK (SCAN by layout)."""
     scan = _json_copy(tmp_path, J_SH, "scan_sh.json", headerASNid="")
-    res = _run(env, registry, [scan])
-    assert res["records"][0]["key_field"] == "keytrol"
+    res = _run(env, registry, [scan, NA_SH])
+    assert [r["key_field"] for r in res["records"]] == ["keytrol+headerSuffix",
+                                                         "keytrol+suffix"]
+    ws = _book(env["wb"])["ManualOrder_Header"]
+    assert ws["G2"].value == "140038A"
+    assert ws["G3"].value == "550000P1A"
+
+
+def test_a_blank_suffix_leaves_the_keytrol_alone(env, registry, tmp_path):
+    scan = _json_copy(tmp_path, J_SH, "scan_nosfx.json", headerASNid="", headerSuffix="")
+    _run(env, registry, [scan])
     assert _book(env["wb"])["ManualOrder_Header"]["G2"].value == "140038"
+
+
+def test_suffix_rule_reaches_no_other_key(env, registry):
+    """WMS Style Headers (JSON and EU .OK) and every Pre-Ticket keep their key,
+    and Make Unique's own key field is untouched by the sheet's rule."""
+    res = _run(env, registry, [J_SH, EU_SH, NA_PT, J_PT])
+    assert [r["key"] for r in res["records"]] == [
+        "V403804208940582A", "126539Q", "33001P3A", "40644701"]
+    assert env["config"].unique_field("StyleHeader") == "keytrol"
+    assert env["config"].unique_field("CalgaryStyleHeader", "SCAN") == "keytrol"
 
 
 def test_detail_values_and_transforms(env, registry):
@@ -213,12 +234,24 @@ def test_eu_style_header_zone_is_per_line_from_cbc(env, registry):
     names = [c.value for c in ws[1]]
     zi = names.index("Zone")
     zones = [r[zi] for r in _rows(ws, 2)]
-    # 311 -> 01, 312 -> 05, 313 -> 03 (config/cbc_zones.yaml)
-    assert zones[:5] == ["01", "01", "05", "05", "03"]
-    # The sample file also carries CBC 441, which the table does not list:
-    # reported, and its lines keep the sample Zone rather than a guess.
-    assert any("CBC 441" in w for w in res["records"][0]["warnings"])
-    assert "CBC 441" in res["report"]
+    # 311 -> 01, 312 -> 05, 313 -> 03, 441 -> 10 (config/cbc_zones.yaml)
+    assert zones == ["01", "01", "05", "05", "03", "03", "03", "10", "10", "10"]
+    assert res["records"][0]["warnings"] == []
+    assert "CBC" not in res["report"]
+
+
+def test_an_unlisted_cbc_is_reported_not_guessed(env, registry, tmp_path):
+    """A CBC the table does not list sets no zone — its lines keep the sample
+    Zone — and is named in the report so the table can be extended."""
+    odd = tmp_path / "EU_SH_unlisted.OK"
+    odd.write_bytes(EU_SH.read_bytes().replace(b"|#|4410425", b"|#|9990425"))
+    res = _run(env, registry, [odd])
+    ws = _book(env["wb"])["ManualOrder_Detail_1"]
+    zi = [c.value for c in ws[1]].index("Zone")
+    zones = [r[zi] for r in _rows(ws, 2)]
+    assert zones[7:] == ["01", "01", "10"]       # rows 9-10 = template samples; 441 still 10
+    assert any("CBC 999" in w for w in res["records"][0]["warnings"])
+    assert "CBC 999" in res["report"]
 
 
 def test_a_column_with_no_value_keeps_the_exact_sample_cell(env, registry):
