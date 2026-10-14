@@ -637,3 +637,59 @@ def test_a_missing_sample_workbook_stops_the_run_and_says_so(env, registry, tmp_
 def test_the_shipped_sample_workbook_is_the_users_untouched_sample():
     shipped = ROOT / "config" / "templates" / "ManualOrders_WP_Sample.xlsm"
     assert shipped.read_bytes() == WB_FIX.read_bytes()
+
+
+def _zero_row(row):
+    return {k: ("0" * len(v) if isinstance(v, str) and v else "") for k, v in row.items()}
+
+
+def test_pre_ticket_trailing_zero_padding_rows_are_left_out(env, registry):
+    """The NA sample Pre-Ticket has 4 real Lane rows and 19 rows of 000…
+    padding (detail_fill.yaml keeps Lane at 10+). Only the 4 reach the sheet —
+    the rule conversion and the editor already apply."""
+    res = _run(env, registry, [NA_PT])
+    assert res["records"][0]["lines"] == 4
+    ws = _book(env["wb"])["ManualOrder_Detail_1"]
+    assert ws.max_row == 5
+    si = [c.value for c in ws[1]].index("Style")
+    assert all(r[si] not in (None, "000000") for r in _rows(ws, 2))
+
+
+def test_a_zero_row_between_real_lines_is_kept(env, registry, tmp_path):
+    """Only TRAILING padding goes: a zero row in the middle is somebody's data."""
+    d = json.loads(J_PT.read_text("utf-8"))
+    real1, real2 = d["data"]["details"]
+    z = _zero_row(real1)
+    d["data"]["details"] = [real1, z, real2, z, z]
+    p = tmp_path / "pt_zeros.json"
+    p.write_text(json.dumps(d), "utf-8")
+    res = _run(env, registry, [p])
+    assert res["records"][0]["lines"] == 3
+    ws = _book(env["wb"])["ManualOrder_Detail_1"]
+    si = [c.value for c in ws[1]].index("Style")
+    assert [r[si] for r in _rows(ws, 2)] == ["182517", "000000", "123456"]
+
+
+def test_an_all_padding_pre_ticket_is_reported_not_written_as_zeros(env, registry, tmp_path):
+    d = json.loads(J_PT.read_text("utf-8"))
+    d["data"]["details"] = [_zero_row(r) for r in d["data"]["details"]]
+    p = tmp_path / "pt_allzero.json"
+    p.write_text(json.dumps(d), "utf-8")
+    res = _run(env, registry, [p])
+    assert res["records"][0]["lines"] == 1                   # one row, from the header
+    assert any("no detail lines" in w for w in res["records"][0]["warnings"])
+    ws = _book(env["wb"])["ManualOrder_Detail_1"]
+    si = [c.value for c in ws[1]].index("Style")
+    assert _rows(ws, 2)[0][si] != "000000"
+
+
+def test_style_headers_keep_every_line_as_before(env, registry, tmp_path):
+    """The padding rule is for Pre-Tickets (as everywhere else in OkGen);
+    Style Header lines are written exactly as before."""
+    d = json.loads(J_SH.read_text("utf-8"))
+    d["data"]["header"]["sizes"] = [{"size": "XL", "quantity": "5"},
+                                    {"size": "00", "quantity": "0000"}]
+    p = tmp_path / "sh_zero_size.json"
+    p.write_text(json.dumps(d), "utf-8")
+    res = _run(env, registry, [p])
+    assert res["records"][0]["lines"] == 2

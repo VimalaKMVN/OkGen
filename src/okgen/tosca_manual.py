@@ -355,6 +355,19 @@ def build_records(paths, registry, config, script, key_ws) -> dict:
             key_field = "+".join(joined)
 
         warnings: List[str] = []
+        # Trailing all-zero rows are structural PADDING, not order lines
+        # (detail_fill.yaml pads an NA Pre-Ticket's Lane to 10 rows of 000…).
+        # The same rule — okjson's own `_is_filler`, trailing runs only — that
+        # .OK->JSON conversion and the editor already apply; a zero row in the
+        # middle of real lines is somebody's data and stays.
+        if process in (st.get("skip_filler_lines") or []):
+            from okgen.okjson import _is_filler
+            for sec_name in ((st.get("lines") or {}).get(layout_name) or []):
+                sec_key = str(sec_name).lower()
+                kept = secs.get(sec_key) or []
+                while kept and _is_filler(kept[-1]):
+                    kept = kept[:-1]
+                secs[sec_key] = kept
         lines = _lines(layout_name, header, secs, st)
         listed = [str(n).lower() for n in ((st.get("lines") or {}).get(layout_name) or [])]
         if not any(secs.get(n) for n in listed):

@@ -407,6 +407,12 @@ manual_orders:
     CalgaryStyleHeader: [Sizes, Details]
     CalgaryPreticket: [Details]
 
+  # Processes whose TRAILING all-zero / blank detail rows are padding, not
+  # order lines, and are left out — the rule .OK->JSON conversion and the
+  # editor already apply (an NA Pre-Ticket is padded to 10 Lane rows of
+  # 000…). A zero row BETWEEN real lines is kept (user, 2026-10-13).
+  skip_filler_lines: ["Pre-Ticket"]
+
   # Header fields that must NEVER be used as a fallback. A Calgary header's
   # `type` is the document discriminator, not the ticket type (same name,
   # different field).
