@@ -537,3 +537,103 @@ def test_the_other_scripts_are_unchanged_by_the_new_kind(env, registry, tmp_path
     res = tosca.run([str(J_SH)], "JSON Functional Laser", registry, env["config"],
                     launch=False, stage=False)
     assert "kind" not in res and res["written"] == 1
+
+
+def test_pre_ticket_page_and_line_keep_their_leading_zeros(env, registry, tmp_path):
+    """Pre-Tickets only: Page/Line as the file and the rendered view show them
+    (001 001, 001 002 ...) — .OK, EU .OK and JSON alike, and padded even when a
+    JSON file sends them short. Style Headers are untouched (still unpadded)."""
+    short = tmp_path / "pt_short.json"
+    d = json.loads(J_PT.read_text("utf-8"))
+    d["data"]["details"][0]["pageNumber"] = "6"
+    d["data"]["details"][0]["lineNumber"] = "12"
+    short.write_text(json.dumps(d), "utf-8")
+    _run(env, registry, [NA_PT, EU_PT, J_PT, short, J_SH])
+    book = _book(env["wb"])
+    names = [c.value for c in book["ManualOrder_Detail_1"][1]]
+    pg, ln = names.index("Page"), names.index("Line")
+    pl = lambda tab: [(r[pg], r[ln]) for r in _rows(book[tab], 2)]
+    assert pl("ManualOrder_Detail_1")[:3] == [("001", "001"), ("002", "002"), ("003", "003")]
+    assert pl("ManualOrder_Detail_2")[:3] == [("001", "001"), ("001", "002"), ("001", "003")]
+    assert pl("ManualOrder_Detail_3") == [("006", "006"), ("008", "008")]
+    assert pl("ManualOrder_Detail_4")[0] == ("006", "012")
+    assert pl("ManualOrder_Detail_5") == [("1", "1")]          # Style Header: unchanged
+
+
+def _eu_pt(tmp_path, fmt):
+    p = tmp_path / f"EU_PT_{fmt}.OK"
+    p.write_bytes(EU_PT.read_bytes().replace(b"P|05|A|", f"P|05|{fmt}|".encode(), 1))
+    return p
+
+
+def test_upp_price_is_blank_only_for_europe_u_and_q(env, registry, tmp_path):
+    """UPP price is computed by the application — EMPTY on every line of a
+    Europe Style Header or Pre-Ticket in format U or Q. Every other chain and
+    format keeps its sample, as before."""
+    eu_sh_u = tmp_path / "EU_SH_U.OK"
+    eu_sh_u.write_bytes(EU_SH.read_bytes().replace(b"|D|Q|05|", b"|D|U|05|", 1))
+    files = [EU_SH, eu_sh_u, _eu_pt(tmp_path, "U"), _eu_pt(tmp_path, "Q"), EU_PT, NA_PT, J_PT]
+    res = _run(env, registry, files)
+    assert [r["format"][0] for r in res["records"]] == ["Q", "U", "U", "Q", "A", "A", "B"]
+    book = _book(env["wb"])
+    ui = [c.value for c in book["ManualOrder_Detail_1"][1]].index("UPPPrice")
+    col = lambda n: [r[ui] for r in _rows(book[f"ManualOrder_Detail_{n}"], 2)]
+    for n in (1, 2, 3, 4):                                  # EU SH Q, EU SH U, EU PT U, EU PT Q
+        assert set(col(n)) == {None}, n
+    for n in (5, 6, 7):                                     # EU PT A, NA PT, JSON PT: sample
+        assert col(n)[:2] == [999.99, 99.99], n
+    # Blank = an empty CELL keeping the column's formatting.
+    z = _zip(env["wb"])["xl/worksheets/sheet3.xml"].decode()
+    assert re.search(r'<c r="AQ2" s="\d+"/>', z)
+
+
+def test_total_weight_random_only_for_europe_pre_ticket_u_and_q(env, registry, tmp_path):
+    allowed = {"0.1", "9999.99", "1000"}
+    files = [_eu_pt(tmp_path, "U"), _eu_pt(tmp_path, "Q"), EU_PT, EU_SH, NA_PT]
+    seen = set()
+    for _ in range(4):                       # random: the values vary between runs
+        _run(env, registry, files)
+        book = _book(env["wb"])
+        wi = [c.value for c in book["ManualOrder_Detail_1"][1]].index("TotalWeight")
+        col = lambda n: [r[wi] for r in _rows(book[f"ManualOrder_Detail_{n}"], 2)]
+        for n in (1, 2):                                    # EU PT U, EU PT Q
+            vals = col(n)
+            assert len(vals) == 5 and set(vals) <= allowed, vals
+            seen |= set(vals)
+        # Everything else exactly as before — and identical on EVERY pass, so
+        # a random weight from one run can never become another file's sample.
+        assert col(3) == [0.1, 0.25, 0.1, 0.1, 0.1]         # EU PT format A: sample
+        assert set(col(4)) == {"1000"}                      # EU SH Q: upp_weight from file
+        assert col(5)[:3] == [0.1, 0.25, 0.1]               # NA PT: sample
+    assert len(seen) > 1, "every line got the same weight across 4 runs — not random"
+
+
+def _sheet_values(path):
+    book = _book(path)
+    return {n: _rows(book[n], 1) for n in book.sheetnames
+            if n.startswith("ManualOrder_")}
+
+
+def test_the_same_files_always_give_the_same_sheet(env, registry):
+    """The v0.136 defect: samples were read from the LIVE workbook, which every
+    run rewrites, so a value one file lacked came from the PREVIOUS run. Now
+    they come from the frozen sample workbook: run A, run something else, run
+    A again — byte-for-byte the same values."""
+    _run(env, registry, [J_PT, NA_SH])
+    first = _sheet_values(env["wb"])
+    _run(env, registry, [EU_SH, EU_PT, J_SH])             # fills OTT, ASN, zones, Message2...
+    _run(env, registry, [J_PT, NA_SH])
+    assert _sheet_values(env["wb"]) == first
+
+
+def test_a_missing_sample_workbook_stops_the_run_and_says_so(env, registry, tmp_path):
+    env["config"].tosca()["manual_orders"]["sample_workbook"] = str(tmp_path / "gone.xlsm")
+    before = _zip(env["wb"])
+    with pytest.raises(tosca.ToscaError, match="SAMPLE workbook is missing"):
+        _run(env, registry, [NA_SH])
+    assert _zip(env["wb"]) == before
+
+
+def test_the_shipped_sample_workbook_is_the_users_untouched_sample():
+    shipped = ROOT / "config" / "templates" / "ManualOrders_WP_Sample.xlsm"
+    assert shipped.read_bytes() == WB_FIX.read_bytes()

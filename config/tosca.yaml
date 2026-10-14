@@ -377,15 +377,22 @@ format_columns:
 #                      Header is keytrol for SCAN, headerASNid for WMS)
 #   [names]            field names, across BOTH engines — a file simply lacks
 #                      the ones that are not its own
-#   {from: [names], as: price|yn|number|mmdd}
+#   {from: [names], as: price|yn|number|mmdd|zfill:N}
 #                      price  000799999 -> 7999.99   (cents -> dollars)
 #                      yn     true/false -> Y/N
 #                      number 00002 -> 2              (leading zeros dropped)
 #                      mmdd   20260301 -> 0301        (a JSON ladderPlan date)
+#                      zfill:3  1 / 001 -> 001       (leading zeros kept/added)
 manual_orders:
   header_sheet: "ManualOrder_Header"
   detail_sheet: "ManualOrder_Detail_{n}"      # {n} = the record number, 1..N
   template_sheet: "ManualOrder_Detail_1"
+  # The FROZEN copy of the user's sample workbook — where the "keep the sample
+  # value" fallback reads from. NOT the live input workbook: every run rewrites
+  # that one, so reading samples from it carried the PREVIOUS run's values into
+  # the next (the v0.136 defect). To change the base sample data, edit THIS
+  # copy in Excel. Relative = the config folder; an absolute D:\ path works too.
+  sample_workbook: templates/ManualOrders_WP_Sample.xlsm
   first_data_row: 2
   processes: ["Style Header", "Pre-Ticket"]   # Carton/Dist Labels are skipped
 
@@ -472,3 +479,33 @@ manual_orders:
     # Not listed, so always the sample value: the French/English Fact, Item,
     # Fiber and Country columns (no layout carries them yet), and UPPPrice
     # (computed by the label application from TotalWeight and RetailPrice).
+
+  # Per-PROCESS overrides of detail_columns above (same spec forms). Only the
+  # columns listed change, and only for that process.
+  #   zfill:N  zero-padded to N digits: 1 / 001 -> 001
+  detail_columns_by_process:
+    "Pre-Ticket":
+      # Page/Line keep their leading zeros on Pre-Tickets (001 001, 001 002 …),
+      # as in the file and the rendered view (user, 2026-10-13). Style
+      # Headers keep `number` above.
+      Page: {from: [page, pageNumber], as: "zfill:3"}
+      Line: {from: [line, lineNumber], as: "zfill:3"}
+
+  # Values set on EVERY detail line of a matching record, overriding both the
+  # file and the sample. `when` matches chain name / process / ticket format
+  # CODE (any of a list; omit a key to match all). `set` per column:
+  #   blank            an EMPTY cell (formatting kept)
+  #   {random: [...]}  one of these per LINE, picked at random each run
+  #   "text"           this exact value
+  line_rules:
+    # TotalWeight and UPP price apply ONLY to Europe formats U and Q (user,
+    # 2026-10-13); every other chain/format keeps file-or-sample values.
+    # UPP price is computed by the label application, so those lines leave it
+    # EMPTY rather than carrying the sample's 999.99.
+    - when: {chain: "TJX Europe", process: ["Style Header", "Pre-Ticket"], format: [U, Q]}
+      set: {UPPPrice: blank}
+    # Europe Pre-Ticket U/Q files carry no weight, but a manual entry needs
+    # one: random test weights per line. Europe Style Headers U/Q keep
+    # upp_weight from the file.
+    - when: {chain: "TJX Europe", process: "Pre-Ticket", format: [U, Q]}
+      set: {TotalWeight: {random: ["0.1", "9999.99", "1000"]}}

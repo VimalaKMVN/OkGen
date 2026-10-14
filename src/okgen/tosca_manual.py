@@ -203,6 +203,11 @@ def _transform(value: Optional[str], how: Optional[str]) -> Optional[str]:
         return value
     if how == "number":
         return str(int(value)) if value.isdigit() else value
+    if how.startswith("zfill:"):
+        # Zero-padded to a width, as the file and the rendered view show it
+        # ('1' or '001' -> '001'); anything not purely digits is left alone.
+        width = int(how.split(":", 1)[1])
+        return value.zfill(width) if value.isdigit() else value
     if how == "mmdd":
         # A JSON ladderPlan is YYYYMMDD; the column is MMDD.
         return value[4:8] if (len(value) == 8 and value.isdigit()) else value
@@ -235,6 +240,38 @@ def _column_value(spec, layers: List[dict], computed: dict) -> Optional[str]:
             if v is not None:
                 return _transform(v, how)
     return None
+
+
+BLANK = ""          # a detail value meaning "write an EMPTY cell", not the sample
+
+
+def _matches(want, have) -> bool:
+    if want is None:
+        return True
+    want = want if isinstance(want, list) else [want]
+    return str(have or "").strip().upper() in {str(w).strip().upper() for w in want}
+
+
+def _apply_line_rules(det: List[dict], st: dict, chain, process, fmt_code) -> None:
+    """``line_rules:`` — values set on EVERY detail line of the records a rule
+    matches (by chain / process / format code), overriding the file and the
+    sample. ``blank`` empties the cell; ``{random: [...]}`` picks one value per
+    LINE. For the columns the application computes (UPPPrice) or that the
+    files never carry but a manual entry needs (EU Pre-Ticket U/Q weights)."""
+    import random
+    for rule in st.get("line_rules") or []:
+        when = rule.get("when") or {}
+        if not (_matches(when.get("chain"), chain) and _matches(when.get("process"), process)
+                and _matches(when.get("format"), fmt_code)):
+            continue
+        for col, how in (rule.get("set") or {}).items():
+            for line in det:
+                if how == "blank":
+                    line[col] = BLANK
+                elif isinstance(how, dict) and how.get("random"):
+                    line[col] = str(random.choice(how["random"]))
+                elif how is not None:
+                    line[col] = str(how)
 
 
 def build_records(paths, registry, config, script, key_ws) -> dict:
@@ -332,9 +369,14 @@ def build_records(paths, registry, config, script, key_ws) -> dict:
         # the FIRST detail line there.
         hdr = {col: _column_value(spec, [lines[0], head_layer], computed)
                for col, spec in (st.get("header_columns") or {}).items()}
+        # A process may override a detail column (`detail_columns_by_process:`)
+        # — Pre-Tickets keep Page/Line zero-padded, Style Headers do not.
+        dcols = dict(st.get("detail_columns") or {})
+        dcols.update((st.get("detail_columns_by_process") or {}).get(process) or {})
         det = [{col: _column_value(spec, [ln, head_layer], computed)
-                for col, spec in (st.get("detail_columns") or {}).items()}
+                for col, spec in dcols.items()}
                for ln in lines]
+        _apply_line_rules(det, st, chain, process, fmt_code)
         records.append({
             "file": name, "path": str(p), "layout": layout_name,
             "chain": chain, "process": process, "format": fmt,
@@ -402,19 +444,16 @@ def _has_value(cell: Optional[str]) -> bool:
     return bool(cell) and bool(re.search(r'<(v|is|f)\b', cell))
 
 
-def _retarget(cell: str, ref: str) -> str:
-    """A copy of ``cell`` at ``ref``. A formula is dropped (its cached value is
-    kept): a relative formula copied to another row would point somewhere else."""
-    cell = re.sub(r'<f\b[^>]*?(?:/>|>.*?</f>)', '', cell, flags=re.S)
-    head = re.match(r'<c\b[^>]*?(/?)>', cell)
-    tag = _set_attr(head.group(0)[:-2 if head.group(1) else -1], "r", ref)
-    return tag + ("/>" if head.group(1) else ">") + cell[head.end():]
-
-
 def _value_cell(ref: str, style_from: Optional[str], value: str) -> str:
     from okgen.tosca import _cell_xml
     s = _attr(re.match(r'<c\b[^>]*', style_from).group(0), "s") if style_from else None
     return _cell_xml(ref, f' s="{s}"' if s else "", value)
+
+
+def _blank_cell(ref: str, style_from: Optional[str]) -> str:
+    from okgen.tosca import _cell_xml
+    s = _attr(re.match(r'<c\b[^>]*', style_from).group(0), "s") if style_from else None
+    return _cell_xml(ref, f' s="{s}"' if s else "", None)
 
 
 def _render_rows(rows: Dict[int, Tuple[str, Dict[str, str]]]) -> str:
@@ -482,27 +521,56 @@ def _sample(rows, rnum: int, col: str, first: int) -> Optional[str]:
     return rows.get(rnum, ("", {}))[1].get(col) or rows.get(first, ("", {}))[1].get(col)
 
 
-def _fill_row(sample_rows, rnum: int, first: int, by_name: Dict[str, str],
-              values: dict, keep_cells: Optional[Dict[str, str]] = None):
-    """One output row: a value where the file had one, the sample otherwise."""
-    tag = (sample_rows.get(rnum) or sample_rows.get(first) or ("<row>", {}))[0]
-    if rnum not in sample_rows or not any(_has_value(c) for c in sample_rows[rnum][1].values()):
-        tag = sample_rows.get(first, (tag, {}))[0]
+def _sample_value(samples: Dict[int, dict], rnum: int, first: int, name: str):
+    """The frozen sample VALUE for (row, column): the same row's when it has
+    one, else the first data row's — the agreed fallback."""
+    v = (samples.get(rnum) or {}).get(name)
+    return v if v is not None else (samples.get(first) or {}).get(name)
+
+
+def _typed_cell(ref: str, style_from: Optional[str], value) -> str:
+    """A sample value written back as what it was: a number stays a number."""
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        s = _attr(re.match(r'<c\b[^>]*', style_from).group(0), "s") if style_from else None
+        return f'<c r="{ref}"' + (f' s="{s}"' if s else "") + f'><v>{value!r}</v></c>'
+    return _value_cell(ref, style_from, str(value))
+
+
+def _fill_row(live_rows, rnum: int, first: int, by_name: Dict[str, str],
+              values: dict, samples: Dict[int, dict],
+              keep_cells: Optional[Dict[str, str]] = None):
+    """One output row: a value where the file had one, the SAMPLE otherwise.
+
+    Formatting (row attributes, cell styles) comes from the LIVE sheet; the
+    fallback VALUES come from the FROZEN sample workbook. Reading values from
+    the live sheet was the v0.136 defect: every run overwrites it, so a value
+    one file lacked was filled from whatever the PREVIOUS run had written."""
+    tag = (live_rows.get(rnum) or live_rows.get(first) or ("<row>", {}))[0]
+    if rnum not in live_rows or not any(_has_value(c) for c in live_rows[rnum][1].values()):
+        tag = live_rows.get(first, (tag, {}))[0]
     cells = dict(keep_cells or {})
     for name, col in by_name.items():
         ref = f"{col}{rnum}"
-        sample = _sample(sample_rows, rnum, col, first)
+        style = _sample(live_rows, rnum, col, first)
         val = values.get(name)
-        if val is not None:
-            cells[col] = _value_cell(ref, sample, val)
-        elif sample is not None:
-            cells[col] = _retarget(sample, ref)
+        if val == BLANK:
+            # Deliberately EMPTY (a line rule): formatting kept, no value.
+            cells[col] = _blank_cell(ref, style)
+        elif val is not None:
+            cells[col] = _value_cell(ref, style, val)
         else:
-            cells.pop(col, None)
+            sv = _sample_value(samples, rnum, first, name)
+            if sv is not None:
+                cells[col] = _typed_cell(ref, style, sv)
+            elif style is not None:
+                cells[col] = _blank_cell(ref, style)
+            else:
+                cells.pop(col, None)
     return tag, cells
 
 
-def _header_xml(xml: str, records: List[dict], st: dict, shared: List[str]) -> str:
+def _header_xml(xml: str, records: List[dict], st: dict, shared: List[str],
+                samples: Dict[int, dict]) -> str:
     first = int(st.get("first_data_row", 2))
     before, rows, after = _parse_rows(xml)
     by_name = {n: c for n, c in _columns_by_name(rows, first - 1, shared).items()
@@ -513,12 +581,11 @@ def _header_xml(xml: str, records: List[dict], st: dict, shared: List[str]) -> s
         raise ToscaError(f"{st['header_sheet']} has no column(s) named: "
                          + ", ".join(missing))
     cols = set(by_name.values())
-    sample = {r: (tag, dict(cells)) for r, (tag, cells) in rows.items()}
     out = {r: v for r, v in rows.items() if r < first}
     for i, rec in enumerate(records):
         rnum = first + i
         keep = {c: x for c, x in rows.get(rnum, ("", {}))[1].items() if c not in cols}
-        out[rnum] = _fill_row(sample, rnum, first, by_name, rec["header"], keep)
+        out[rnum] = _fill_row(rows, rnum, first, by_name, rec["header"], samples, keep)
     # Below the last record: the record columns are DELETED, and so is any row
     # left with no value at all — "delete the rows that are not ours". A row
     # that still holds something (the format lists in L:Q sit in rows 2-7) is
@@ -533,7 +600,8 @@ def _header_xml(xml: str, records: List[dict], st: dict, shared: List[str]) -> s
     return _with_rows(before, out, after)
 
 
-def _detail_xml(template: str, lines: List[dict], st: dict, shared: List[str]) -> str:
+def _detail_xml(template: str, lines: List[dict], st: dict, shared: List[str],
+                samples: Dict[int, dict]) -> str:
     first = int(st.get("first_data_row", 2))
     before, rows, after = _parse_rows(template)
     names = _columns_by_name(rows, first - 1, shared)
@@ -546,7 +614,7 @@ def _detail_xml(template: str, lines: List[dict], st: dict, shared: List[str]) -
     out = {r: v for r, v in rows.items() if r < first}
     for j, line in enumerate(lines):
         rnum = first + j
-        out[rnum] = _fill_row(rows, rnum, first, names, line)
+        out[rnum] = _fill_row(rows, rnum, first, names, line, samples)
     return _with_rows(before, out, after)
 
 
@@ -606,7 +674,8 @@ def _rels_path(part: str) -> str:
     return f"{d}/_rels/{n}.rels"
 
 
-def write_workbook(workbook: Path, st: dict, records: List[dict]) -> dict:
+def write_workbook(workbook: Path, st: dict, records: List[dict],
+                   samples: Optional[dict] = None) -> dict:
     """Write the header rows and exactly ``len(records)`` detail tabs.
 
     Returns ``{"added": [...], "removed": [...], "rebuilt": [...]}`` tab names.
@@ -635,8 +704,9 @@ def write_workbook(workbook: Path, st: dict, records: List[dict]) -> dict:
         raise ToscaError(f"template sheet {st['template_sheet']!r} not found in the workbook")
 
     head_part = _part(rels[head["rid"]])
+    samples = samples or {"header": {}, "detail": {}}
     data[head_part] = _header_xml(data[head_part].decode("utf-8"), records, st,
-                                  shared).encode("utf-8")
+                                  shared, samples["header"]).encode("utf-8")
 
     template_xml = data[_part(rels[tmpl["rid"]])].decode("utf-8")
     pat = re.compile("^" + re.escape(st["detail_sheet"]).replace(r"\{n\}", r"(\d+)") + "$")
@@ -654,7 +724,7 @@ def write_workbook(workbook: Path, st: dict, records: List[dict]) -> dict:
     new_sheet_tags = []
 
     for n, rec in enumerate(records, start=1):
-        body = _detail_xml(template_xml, rec["lines"], st, shared)
+        body = _detail_xml(template_xml, rec["lines"], st, shared, samples["detail"])
         if n in existing:
             part = _part(rels[existing[n]["rid"]])
             own = data[part].decode("utf-8")
@@ -780,6 +850,44 @@ def _save(workbook: Path, names: List[str], data: dict) -> None:
             time.sleep(0.25)
 
 
+def sample_workbook_path(config, st: dict) -> Path:
+    """The FROZEN copy of the user's sample workbook. A relative path is read
+    from the config folder (``templates/...``), an absolute one as given."""
+    raw = str(st.get("sample_workbook") or "templates/ManualOrders_WP_Sample.xlsm").strip()
+    p = Path(raw)
+    if not p.is_absolute() and not p.exists():
+        p = Path(config.config_dir or ".") / raw
+    return p
+
+
+def load_samples(path: Path, st: dict) -> dict:
+    """``{"header": {row: {column name: value}}, "detail": {...}}`` from the
+    frozen sample workbook — the header sheet and the TEMPLATE detail tab,
+    keyed by the column names in their own header row."""
+    import openpyxl
+    from okgen.tosca import ToscaError
+    if not Path(path).is_file():
+        raise ToscaError(
+            f"the Manual Orders SAMPLE workbook is missing: {path}\n\nIt holds the "
+            f"base sample values used when a selected file has no value. Restore "
+            f"it, or point manual_orders.sample_workbook in config/tosca.yaml at "
+            f"an untouched copy of the input workbook, then restart OkGen.")
+    first = int(st.get("first_data_row", 2))
+    wb = openpyxl.load_workbook(fs.long_path(Path(path)), data_only=True, read_only=True)
+    try:
+        out = {}
+        for key, sheet in (("header", st["header_sheet"]), ("detail", st["template_sheet"])):
+            if sheet not in wb.sheetnames:
+                raise ToscaError(f"sheet {sheet!r} not found in the sample workbook {path}")
+            rows = list(wb[sheet].iter_rows(min_row=first - 1, values_only=True))
+            names = [str(n).strip() if n is not None else None for n in (rows[0] if rows else [])]
+            out[key] = {first + i: {n: v for n, v in zip(names, r) if n and v is not None}
+                        for i, r in enumerate(rows[1:])}
+        return out
+    finally:
+        wb.close()
+
+
 # --------------------------------------------------------------------------- #
 # The input folder: one flat folder, emptied and refilled every run
 # --------------------------------------------------------------------------- #
@@ -864,7 +972,9 @@ def _prepare(paths, script_name, registry, config) -> dict:
     finally:
         wb.close()
     _dedupe_names(built)
-    return {"script": script, "settings": st, "workbook": workbook, "t": t, **built}
+    samples = load_samples(sample_workbook_path(config, st), st)
+    return {"script": script, "settings": st, "workbook": workbook, "t": t,
+            "samples": samples, **built}
 
 
 def _tab_names(st: dict, n: int) -> List[str]:
@@ -924,14 +1034,14 @@ def run(paths, script_name, registry, config, stage=True) -> dict:
         # leaves the workbook exactly as it was.
         staged = apply_staging(plan) if stage else {}
         try:
-            tabs = write_workbook(workbook, st, records)
+            tabs = write_workbook(workbook, st, records, prep["samples"])
         except PermissionError:
             outcome = (close_open_workbook(workbook)
                        if bool(t.get("close_open_workbook", True)) else "disabled")
             if outcome != CLOSE_OK:
                 raise ToscaError(_locked_message(workbook, outcome))
             try:
-                tabs = write_workbook(workbook, st, records)
+                tabs = write_workbook(workbook, st, records, prep["samples"])
             except PermissionError:
                 raise ToscaError(_locked_message(workbook, CLOSE_OK))
             except OSError as exc:
