@@ -120,7 +120,10 @@ def test_script_is_configured_as_its_own_kind():
     assert s["bat"].endswith("\\MO_WP_Automation_RunScript.bat")
     assert s["input_folder"].endswith("\\Manual_WorkPending_OkGen_Selected_Input_Files")
     # Every other script is untouched by the new kind.
-    assert [x["name"] for x in config.tosca_scripts() if tosca_manual.is_manual(x)] == [SCRIPT]
+    # Print Preview (v0.137.0) is the second script of this kind; the ten
+    # plain ones are still plain.
+    assert [x["name"] for x in config.tosca_scripts() if tosca_manual.is_manual(x)] == [
+        SCRIPT, "Manual Orders Print Preview"]
 
 
 def test_offered_for_ok_and_json_selections(env, registry):

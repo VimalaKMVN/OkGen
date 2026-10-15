@@ -394,6 +394,7 @@ def build_records(paths, registry, config, script, key_ws) -> dict:
             "file": name, "path": str(p), "layout": layout_name,
             "chain": chain, "process": process, "format": fmt,
             "key_field": key_field, "key": key, "source": source,
+            "europe": chain in set(t.get("europe_chain_names") or []),
             "header": hdr, "lines": det, "warnings": warnings,
         })
     return {"records": records, "errors": errors, "skipped": skipped}
@@ -586,9 +587,14 @@ def _header_xml(xml: str, records: List[dict], st: dict, shared: List[str],
                 samples: Dict[int, dict]) -> str:
     first = int(st.get("first_data_row", 2))
     before, rows, after = _parse_rows(xml)
-    by_name = {n: c for n, c in _columns_by_name(rows, first - 1, shared).items()
-               if n in (st.get("header_columns") or {})}
-    missing = sorted(set(st.get("header_columns") or {}) - set(by_name))
+    # `column_names:` — a configured column under another NAME in this
+    # workbook (Print Preview calls KeyValue "Key/ASN#"; same value, same rule).
+    renames = st.get("column_names") or {}
+    sheet_cols = _columns_by_name(rows, first - 1, shared)
+    by_name = {n: sheet_cols[renames.get(n, n)] for n in (st.get("header_columns") or {})
+               if renames.get(n, n) in sheet_cols}
+    missing = sorted(renames.get(n, n) for n in (st.get("header_columns") or {})
+                     if n not in by_name)
     if missing:
         from okgen.tosca import ToscaError
         raise ToscaError(f"{st['header_sheet']} has no column(s) named: "
@@ -628,6 +634,93 @@ def _detail_xml(template: str, lines: List[dict], st: dict, shared: List[str],
     for j, line in enumerate(lines):
         rnum = first + j
         out[rnum] = _fill_row(rows, rnum, first, names, line, samples)
+    return _with_rows(before, out, after)
+
+
+def order_rows(records: List[dict]) -> List[dict]:
+    """One row per unique (Chain, Process, Format), in selection order — the
+    same dedupe every other TOSCA script's data sheet uses."""
+    seen, out = set(), []
+    for r in records:
+        k = (r["chain"], r["process"], r["format"])
+        if k not in seen:
+            seen.add(k)
+            out.append({"chain": k[0], "process": k[1], "format": k[2],
+                        "europe": bool(r.get("europe"))})
+    return out
+
+
+def _date_styles(styles_xml: str) -> Dict[str, List[int]]:
+    """{format code: [cellXfs index, ...]} for every cell style with a custom
+    number format — so a date is styled by its FORMAT CODE, which survives an
+    Excel re-save, rather than by a style index, which does not."""
+    codes = {m.group(1): m.group(2) for m in
+             re.finditer(r'<numFmt numFmtId="(\d+)" formatCode="([^"]*)"', styles_xml)}
+    xfs_m = re.search(r'<cellXfs[^>]*>(.*?)</cellXfs>', styles_xml, re.S)
+    out: Dict[str, List[int]] = {}
+    for i, xf in enumerate(re.findall(r'<xf\b[^>]*?(?:/>|>.*?</xf>)', xfs_m.group(1) if xfs_m else "", re.S)):
+        code = codes.get(_attr(re.match(r'<xf\b[^>]*', xf).group(0), "numFmtId") or "")
+        if code:
+            out.setdefault(code.lower(), []).append(i)
+    return out
+
+
+def _order_xml(xml: str, records: List[dict], st: dict, shared: List[str],
+               styles_xml: str, today) -> str:
+    """The OrderProcessing tab: one row per unique Chain/Process/Format, from
+    row 2, rows below deleted — exactly the other scripts' data sheet. The date
+    is a REAL Excel date, shown mm/dd/yyyy, or dd/mm/yyyy on a Europe row (the
+    rule the other scripts apply to their text dates)."""
+    import datetime
+    from okgen.tosca import ToscaError
+    op = st.get("order_processing") or {}
+    first = int(st.get("first_data_row", 2))
+    before, rows, after = _parse_rows(xml)
+    cols_cfg = op.get("columns") or {}
+    sheet_cols = _columns_by_name(rows, first - 1, shared)
+    missing = sorted(set(cols_cfg) - set(sheet_cols))
+    if missing:
+        raise ToscaError(f"{op.get('sheet')} has no column(s) named: " + ", ".join(missing))
+    by_name = {n: sheet_cols[n] for n in cols_cfg}
+    date_cols = [n for n, spec in cols_cfg.items() if spec == "@date"]
+    styles = _date_styles(styles_xml)
+    codes = op.get("date_format_codes") or {}
+    serial = (today - datetime.date(1899, 12, 30)).days
+    combos = order_rows(records)
+    out = {r: v for r, v in rows.items() if r < first}
+    for i, c in enumerate(combos):
+        rnum = first + i
+        vals = {}
+        for n, spec in cols_cfg.items():
+            if isinstance(spec, str) and spec.startswith("="):
+                vals[n] = spec[1:]
+            elif spec in ("@chain", "@process", "@format"):
+                vals[n] = c[spec[1:]]
+        tag, cells = _fill_row(rows, rnum, first, by_name, vals, {})
+        for n in date_cols:
+            col = by_name[n]
+            code = str(codes.get("europe" if c["europe"] else "default", "")).lower()
+            live = _sample(rows, rnum, col, first)
+            s_now = _attr(re.match(r'<c\b[^>]*', live).group(0), "s") if live else None
+            cands = styles.get(code) or []
+            # Prefer the cell's own style when it already shows this format.
+            s = s_now if (s_now is not None and int(s_now) in cands) else (
+                str(cands[0]) if cands else None)
+            ref = f"{col}{rnum}"
+            if s is None:                       # no such style: say it as text
+                fmt = code.replace("dd", "%d").replace("mm", "%m").replace("yyyy", "%Y")
+                cells[col] = _value_cell(ref, live, today.strftime(fmt or "%m/%d/%Y"))
+            else:
+                cells[col] = f'<c r="{ref}" s="{s}"><v>{serial}</v></c>'
+        out[rnum] = (tag, cells)
+    cols = set(by_name.values())
+    for rnum in range(first + len(combos), max(rows, default=0) + 1):
+        if rnum not in rows:
+            continue
+        tag, cells = rows[rnum]
+        rest = {c: x for c, x in cells.items() if c not in cols}
+        if any(_has_value(x) for x in rest.values()):
+            out[rnum] = (tag, rest)
     return _with_rows(before, out, after)
 
 
@@ -720,6 +813,17 @@ def write_workbook(workbook: Path, st: dict, records: List[dict],
     samples = samples or {"header": {}, "detail": {}}
     data[head_part] = _header_xml(data[head_part].decode("utf-8"), records, st,
                                   shared, samples["header"]).encode("utf-8")
+
+    op = st.get("order_processing") or {}
+    if op.get("sheet"):
+        import datetime
+        ops = by_name.get(op["sheet"])
+        if ops is None:
+            raise ToscaError(f"sheet {op['sheet']!r} not found in the workbook")
+        op_part = _part(rels[ops["rid"]])
+        data[op_part] = _order_xml(data[op_part].decode("utf-8"), records, st, shared,
+                                   data.get("xl/styles.xml", b"").decode("utf-8"),
+                                   datetime.date.today()).encode("utf-8")
 
     template_xml = data[_part(rels[tmpl["rid"]])].decode("utf-8")
     pat = re.compile("^" + re.escape(st["detail_sheet"]).replace(r"\{n\}", r"(\d+)") + "$")
@@ -894,6 +998,9 @@ def load_samples(path: Path, st: dict) -> dict:
                 raise ToscaError(f"sheet {sheet!r} not found in the sample workbook {path}")
             rows = list(wb[sheet].iter_rows(min_row=first - 1, values_only=True))
             names = [str(n).strip() if n is not None else None for n in (rows[0] if rows else [])]
+            if key == "header":
+                back = {v: k for k, v in (st.get("column_names") or {}).items()}
+                names = [back.get(n, n) for n in names]
             out[key] = {first + i: {n: v for n, v in zip(names, r) if n and v is not None}
                         for i, r in enumerate(rows[1:])}
         return out
@@ -1013,6 +1120,8 @@ def preview(paths, script_name, registry, config) -> dict:
         "header_sheet": st["header_sheet"],
         "records": _record_rows(prep["records"], st),
         "tabs": _tab_names(st, len(prep["records"])),
+        "order_sheet": (st.get("order_processing") or {}).get("sheet"),
+        "order_rows": order_rows(prep["records"]) if (st.get("order_processing") or {}).get("sheet") else [],
         "enabled": plan["enabled"], "configured": plan["configured"],
         "folder": plan["roots"][0] if plan["roots"] else None,
         "folder_exists": bool(plan["targets"]) and plan["targets"][0]["status"] == "ok",
@@ -1073,6 +1182,8 @@ def run(paths, script_name, registry, config, stage=True) -> dict:
         "lines": sum(len(r["lines"]) for r in records),
         "records": _record_rows(records, st),
         "tabs": tabs,
+        "order_sheet": (st.get("order_processing") or {}).get("sheet"),
+        "order_rows": order_rows(records) if (st.get("order_processing") or {}).get("sheet") else [],
         "errors": prep["errors"], "skipped": prep["skipped"],
         "staging": {
             "enabled": True, "configured": plan["configured"],
@@ -1174,6 +1285,18 @@ def _record_lines(records: List[dict]) -> List[str]:
     return lines
 
 
+def _order_lines(obj: dict) -> List[str]:
+    if not obj.get("order_sheet"):
+        return []
+    rows = obj.get("order_rows") or []
+    lines = ["", f"{obj['order_sheet'].upper()} ({len(rows)} row(s) — one per "
+                 f"Chain/Process/Format; Work Pending, Manual, today's date)"]
+    for r in rows:
+        lines.append(f"  {str(r['chain']):<12} {str(r['process']):<13} {r['format']}"
+                     + ("   (dd/mm/yyyy)" if r.get("europe") else "   (mm/dd/yyyy)"))
+    return lines
+
+
 def _tail(obj: dict) -> List[str]:
     lines = []
     skipped = obj.get("skipped") or []
@@ -1204,6 +1327,7 @@ def build_plan_report(pv: dict, file_count: int = 0) -> str:
         "", "RECORDS",
     ]
     lines += _record_lines(recs) if recs else ["  (none — nothing matched this script)"]
+    lines += _order_lines(pv)
     if pv.get("folder"):
         lines += ["", "INPUT FOLDER", f"  {pv['folder']}"]
         if tgt.get("status") == "create":
@@ -1232,6 +1356,7 @@ def build_report(res: dict) -> str:
         "", "RECORDS",
     ]
     lines += _record_lines(res.get("records") or []) or ["  (none — nothing matched this script)"]
+    lines += _order_lines(res)
     if tabs.get("added") or tabs.get("removed"):
         lines += ["", "DETAIL TABS"]
         if tabs.get("added"):

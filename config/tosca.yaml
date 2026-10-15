@@ -121,7 +121,7 @@ scripts:
     input_folders:
       - D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_OnlineThermal_PP\FUN_THERMAL_OK_Files
 
-  - name: "OK Delete RP Laser"
+  - name: "OK Functional Delete RP Laser"
     applies_to: [ok]
     workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_SH_PT_CL_DL_DeleteOrders_RePrint_PP\FUN_SH_PT_CL_DL_DeleteOrders_RP_PP_TestData.xlsm
     data_sheet: "SH_PT_CL_DL_DeleteReprints"
@@ -163,6 +163,40 @@ scripts:
     workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_WorkPending\FUN_EU_SH_PT_ManualOrders_WP_TestData.xlsm
     bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_WorkPending\MO_WP_Automation_RunScript.bat
     input_folder: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_WorkPending\Manual_WorkPending_OkGen_Selected_Input_Files
+
+  # Print Preview: the SAME Manual Orders process as WorkPending — same
+  # mapping, keys, CBC zones, Europe U/Q rules, padding, frozen sample, review
+  # window — with three differences, all declared below (user, 2026-10-15):
+  #   * its tabs are named ManualOrder_Header_PP / ManualOrder_Detail_PP_N;
+  #   * the header's key column is "Key/ASN#" (= KeyValue, same rule);
+  #   * an extra OrderProcessing tab: one row per unique Chain/Process/Format,
+  #     Work Pending, Manual, today's date (a real Excel date, mm/dd/yyyy, or
+  #     dd/mm/yyyy on a Europe row — as in the sample).
+  - name: "Manual Orders Print Preview"
+    kind: manual_orders
+    applies_to: [ok, json]
+    workbook: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_PP\FUN_EU_SH_PT_ManualOrders_PP_TestData.xlsm
+    bat: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_PP\MO_PP_Automation_RunScript.bat
+    input_folder: D:\ToscaAutomation\Functional_Testing_Automation\FUN_EU_SH_PT_ManualOrders_PP\Manual_PP_OkGen_Selected_Input_Files
+    manual_orders:
+      header_sheet: "ManualOrder_Header_PP"
+      detail_sheet: "ManualOrder_Detail_PP_{n}"
+      template_sheet: "ManualOrder_Detail_PP_1"
+      sample_workbook: templates/ManualOrders_PP_Sample.xlsm
+      column_names:
+        KeyValue: "Key/ASN#"
+      order_processing:
+        sheet: "OrderProcessing"
+        columns:
+          Chain: "@chain"
+          Process: "@process"
+          Format: "@format"
+          Status: "=Work Pending"
+          Source: "=Manual"
+          ProcessedDate: "@date"
+        date_format_codes:
+          default: "mm/dd/yyyy"
+          europe: "dd/mm/yyyy"
 
 # A TOSCA run stopped part-way leaves the input workbook OPEN in Excel, and that
 # lock outlives the run — so the next attempt fails with "locked". With this on,

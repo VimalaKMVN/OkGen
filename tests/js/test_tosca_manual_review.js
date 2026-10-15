@@ -95,6 +95,17 @@ const button = (label) => descendants(doc.body).find((e) => e.tagName === "BUTTO
   check("the plan does not fall through to the per-folder plan",
         !/input folder\(s\)/.test(ptext));
 
+  // ---- Print Preview: the extra OrderProcessing tab is stated -------------
+  const box2 = doc.createElement("div");
+  api.renderToscaPlan(box2, {
+    kind: "manual_orders", records: RES.records, copy_total: 2, remove_total: 0,
+    targets: [{ status: "ok" }], skipped: [], errors: [],
+    order_sheet: "OrderProcessing", order_rows: [{}, {}],
+  });
+  check("the PP plan states the OrderProcessing rows",
+        /plus 2 OrderProcessing row\(s\)/.test(textOf(descendants(box2))));
+  check("WorkPending's plan does not mention OrderProcessing", !/OrderProcessing/.test(ptext));
+
   // ---- the review window -------------------------------------------------
   api.showToscaReview(RES);
   let ovs = overlays();
@@ -110,6 +121,7 @@ const button = (label) => descendants(doc.body).find((e) => e.tagName === "BUTTO
     check(`it has "${b}"`, !!button(b));
   }
   check("there is no plain Cancel to confuse with not-running", !button("Cancel"));
+  check("WorkPending's review does not mention OrderProcessing", !/OrderProcessing/.test(text));
   check("the key column shows the record key", /126539Q/.test(text));
 
   ovs[0].dispatchEvent({ type: "click" });
@@ -151,6 +163,11 @@ const button = (label) => descendants(doc.body).find((e) => e.tagName === "BUTTO
   descendants(doc.body).filter((e) => (e.textContent || "") === "Close").forEach((b) => b.click());
 
   // ---- Close without running ---------------------------------------------
+  descendants(doc.body).forEach((e) => { if ((e.className || "").includes("modal-overlay")) e.remove(); });
+  api.showToscaReview(Object.assign({}, RES, { script: "Manual Orders Print Preview",
+    order_sheet: "OrderProcessing", order_rows: [{}, {}, {}] }));
+  check("the PP review states the OrderProcessing rows",
+        /3 OrderProcessing row\(s\)/.test(textOf(descendants(doc.body))));
   descendants(doc.body).forEach((e) => { if ((e.className || "").includes("modal-overlay")) e.remove(); });
   api.showToscaReview(RES);
   button("Close without running").click();

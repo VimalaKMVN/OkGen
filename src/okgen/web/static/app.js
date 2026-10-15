@@ -3256,8 +3256,9 @@ function renderManualPlan(box, pv) {
   const recs = pv.records || [];
   const tgt = (pv.targets || [])[0] || {};
   box.appendChild(el("div", "tosca-plan-head",
-    `${recs.length} header record(s) and ${recs.length} detail tab(s) will be written`
-    + ` to the workbook. ${pv.copy_total || 0} file(s) will be copied into the input folder`
+    `${recs.length} header record(s) and ${recs.length} detail tab(s)`
+    + (pv.order_sheet ? `, plus ${(pv.order_rows || []).length} ${pv.order_sheet} row(s),` : "")
+    + ` will be written to the workbook. ${pv.copy_total || 0} file(s) will be copied into the input folder`
     + (pv.remove_total
         ? `, replacing ${pv.remove_total} existing file(s) that will be DELETED.`
         : (tgt.status === "create" ? " (it will be created)." : "."))));
@@ -3616,7 +3617,9 @@ function showToscaReview(res) {
   const recs = res.records || [];
   const st = res.staging || {};
   body.appendChild(el("div", "modal-dest",
-    `${res.written} header record(s), ${recs.length} detail tab(s) — ${res.script}`));
+    `${res.written} header record(s), ${recs.length} detail tab(s)`
+    + (res.order_sheet ? `, ${(res.order_rows || []).length} ${res.order_sheet} row(s)` : "")
+    + ` — ${res.script}`));
 
   const stats = el("div", "tosca-stats");
   const stat = (n, label, tone) => {
