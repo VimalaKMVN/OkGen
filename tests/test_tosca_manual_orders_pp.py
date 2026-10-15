@@ -228,6 +228,7 @@ def test_the_shipped_pp_sample_is_the_users_untouched_file():
 def test_workpending_has_no_order_processing_and_keeps_its_names():
     config = Config.load(ROOT / "config")
     st = tosca_manual.settings(config, config.tosca_script("Manual Orders WorkPending"))
-    assert not st.get("order_processing") and not st.get("column_names")
+    assert not st.get("order_processing")
+    assert st["column_names"] == {"KeyValue": ["Key/ASN#"]}     # shared, both scripts
     assert (st["header_sheet"], st["template_sheet"]) == ("ManualOrder_Header",
                                                           "ManualOrder_Detail_1")

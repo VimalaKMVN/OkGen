@@ -696,3 +696,36 @@ def test_style_headers_keep_every_line_as_before(env, registry, tmp_path):
     p.write_text(json.dumps(d), "utf-8")
     res = _run(env, registry, [p])
     assert res["records"][0]["lines"] == 2
+
+
+
+def _retitle_key_column(path, title):
+    """The WorkPending fixture with its header G1 retitled (inline text)."""
+    z = _zip(path)
+    x = z["xl/worksheets/sheet2.xml"].decode()
+    x = re.sub(r'<c r="G1"([^>]*?) t="s"><v>\d+</v></c>',
+               lambda m: f'<c r="G1"{m.group(1)} t="inlineStr"><is><t>{title}</t></is></c>', x, 1)
+    z["xl/worksheets/sheet2.xml"] = x.encode()
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as out:
+        for n, b in z.items():
+            out.writestr(n, b)
+
+
+def test_a_key_asn_column_is_filled_as_keyvalue_too(env, registry):
+    """KeyValue and "Key/ASN#" are the same column under two names (user,
+    2026-10-15) — a WorkPending workbook titled either way gets the key."""
+    _retitle_key_column(env["wb"], "Key/ASN#")
+    assert _book(env["wb"])["ManualOrder_Header"]["G1"].value == "Key/ASN#"
+    _run(env, registry, [NA_SH, J_SH, J_PT])
+    ws = _book(env["wb"])["ManualOrder_Header"]
+    assert ws["G1"].value == "Key/ASN#"
+    assert [ws[f"G{r}"].value for r in (2, 3, 4)] == [
+        "550000P1A", "V403804208940582A", "40644701"]
+
+
+def test_a_workbook_with_neither_key_name_says_so(env, registry):
+    _retitle_key_column(env["wb"], "Something Else")
+    before = _zip(env["wb"])
+    with pytest.raises(tosca.ToscaError, match=r"KeyValue or Key/ASN#"):
+        _run(env, registry, [NA_SH])
+    assert _zip(env["wb"]) == before                         # refused = untouched

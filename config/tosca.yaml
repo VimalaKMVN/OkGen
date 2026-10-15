@@ -183,8 +183,6 @@ scripts:
       detail_sheet: "ManualOrder_Detail_PP_{n}"
       template_sheet: "ManualOrder_Detail_PP_1"
       sample_workbook: templates/ManualOrders_PP_Sample.xlsm
-      column_names:
-        KeyValue: "Key/ASN#"
       order_processing:
         sheet: "OrderProcessing"
         columns:
@@ -470,6 +468,12 @@ manual_orders:
     layouts: [EUStyleHeader]
     field: store
     digits: 3
+
+  # Other NAMES a header column may carry in a workbook — same value, same
+  # rule. The test-data sheets write KeyValue and "Key/ASN#" interchangeably
+  # (user, 2026-10-15), so either is accepted by BOTH Manual Orders scripts.
+  column_names:
+    KeyValue: ["Key/ASN#"]
 
   header_columns:
     HeaderChain: "@chain"

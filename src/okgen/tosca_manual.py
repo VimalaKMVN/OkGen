@@ -583,17 +583,27 @@ def _fill_row(live_rows, rnum: int, first: int, by_name: Dict[str, str],
     return tag, cells
 
 
+def _aliases(st: dict, name: str) -> List[str]:
+    """Every header text accepted for configured column ``name`` (itself
+    first). ``column_names:`` may give one alternative or a list."""
+    alt = (st.get("column_names") or {}).get(name)
+    alts = [alt] if isinstance(alt, str) else list(alt or [])
+    return [name] + [a for a in alts if a != name]
+
+
 def _header_xml(xml: str, records: List[dict], st: dict, shared: List[str],
                 samples: Dict[int, dict]) -> str:
     first = int(st.get("first_data_row", 2))
     before, rows, after = _parse_rows(xml)
-    # `column_names:` — a configured column under another NAME in this
-    # workbook (Print Preview calls KeyValue "Key/ASN#"; same value, same rule).
-    renames = st.get("column_names") or {}
+    # `column_names:` — the NAMES a configured column may carry in a
+    # workbook (KeyValue is also written "Key/ASN#"; same value, same rule).
     sheet_cols = _columns_by_name(rows, first - 1, shared)
-    by_name = {n: sheet_cols[renames.get(n, n)] for n in (st.get("header_columns") or {})
-               if renames.get(n, n) in sheet_cols}
-    missing = sorted(renames.get(n, n) for n in (st.get("header_columns") or {})
+    by_name = {}
+    for n in (st.get("header_columns") or {}):
+        hit = next((a for a in _aliases(st, n) if a in sheet_cols), None)
+        if hit:
+            by_name[n] = sheet_cols[hit]
+    missing = sorted(" or ".join(_aliases(st, n)) for n in (st.get("header_columns") or {})
                      if n not in by_name)
     if missing:
         from okgen.tosca import ToscaError
@@ -999,7 +1009,8 @@ def load_samples(path: Path, st: dict) -> dict:
             rows = list(wb[sheet].iter_rows(min_row=first - 1, values_only=True))
             names = [str(n).strip() if n is not None else None for n in (rows[0] if rows else [])]
             if key == "header":
-                back = {v: k for k, v in (st.get("column_names") or {}).items()}
+                back = {a: n for n in (st.get("column_names") or {})
+                        for a in _aliases(st, n)}
                 names = [back.get(n, n) for n in names]
             out[key] = {first + i: {n: v for n, v in zip(names, r) if n and v is not None}
                         for i, r in enumerate(rows[1:])}
